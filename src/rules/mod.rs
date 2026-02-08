@@ -186,18 +186,11 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.combat.attackers = attackers.clone();
 
             // Collect which attackers need tapping (those without vigilance)
-            let to_tap: Vec<ObjectId> = {
-                let db = state.card_db();
-                attackers
-                    .iter()
-                    .filter(|&&id| {
-                        let inst = &state.objects[&id];
-                        let def = db.get(inst.card_def_id).unwrap();
-                        !inst.has_keyword(def, KeywordAbility::Vigilance)
-                    })
-                    .copied()
-                    .collect()
-            };
+            let to_tap: Vec<ObjectId> = attackers
+                .iter()
+                .filter(|&&id| !state.has_keyword(id, KeywordAbility::Vigilance))
+                .copied()
+                .collect();
             for id in to_tap {
                 if let Some(inst) = state.objects.get_mut(&id) {
                     inst.tapped = true;
@@ -383,6 +376,13 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
+        // Apply ETB replacement effects (CR 614): enters tapped, enters with counters, etc.
+        state.apply_etb_replacements(obj_id);
+
+        // Refresh continuous effects when a permanent enters the battlefield.
+        // This picks up any static abilities on the new permanent.
+        state.refresh_continuous_effects();
+
         // Queue ETB triggered abilities (they go on the stack, not resolve immediately).
         // If flush pauses (controller has >1 ETB trigger), pending_triggers stays
         // populated and the game loop will offer OrderTriggers.
@@ -432,30 +432,36 @@ fn resolve_effect(
             };
 
             for target in &effective_targets {
+                // Apply replacement effects to damage (CR 614)
+                let actual_damage = state.deal_damage_with_replacement(*amount, target);
+                if actual_damage == 0 {
+                    continue;
+                }
+
                 match target {
                     Target::Player(p) => {
                         let old_life = state.players[*p].life;
-                        state.players[*p].life -= *amount as i32;
+                        state.players[*p].life -= actual_damage as i32;
                         state.emit_event(GameEvent::LifeChanged {
                             player: *p,
                             old: old_life,
                             new: state.players[*p].life,
                         });
                         state.emit_event(GameEvent::DamageDealt {
-                            source: 0, // source tracking deferred to Phase 2A
+                            source: 0,
                             target: target.clone(),
-                            amount: *amount,
+                            amount: actual_damage,
                             is_combat: false,
                         });
                     }
                     Target::Object(id) => {
                         if let Some(inst) = state.objects.get_mut(id) {
-                            inst.damage_marked += amount;
+                            inst.damage_marked += actual_damage;
                         }
                         state.emit_event(GameEvent::DamageDealt {
                             source: 0,
                             target: target.clone(),
-                            amount: *amount,
+                            amount: actual_damage,
                             is_combat: false,
                         });
                     }
@@ -497,13 +503,8 @@ fn resolve_effect(
                 .iter()
                 .filter_map(|target| {
                     if let Target::Object(id) = target {
-                        let indestructible = {
-                            let db = state.card_db();
-                            let inst = &state.objects[id];
-                            db.get(inst.card_def_id)
-                                .map(|d| inst.has_keyword(d, KeywordAbility::Indestructible))
-                                .unwrap_or(false)
-                        };
+                        let indestructible =
+                            state.has_keyword(*id, KeywordAbility::Indestructible);
                         if !indestructible { Some(*id) } else { None }
                     } else {
                         None
@@ -513,6 +514,9 @@ fn resolve_effect(
 
             for &id in &destroyable {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+            }
+            if !destroyable.is_empty() {
+                state.refresh_continuous_effects();
             }
             // Fire dies triggers for destroyed creatures.
             // Batch-check all death triggers before flushing so the controller
@@ -543,23 +547,39 @@ fn resolve_effect(
             toughness,
             until_eot,
         } => {
+            use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
             for target in targets {
                 if let Target::Object(id) = target {
-                    if let Some(inst) = state.objects.get_mut(id) {
-                        if *until_eot {
-                            inst.temp_power_mod += power;
-                            inst.temp_toughness_mod += toughness;
-                        } else {
-                            // Permanent buff via +1/+1 counters (simplified: treats any permanent buff as counters)
-                            // In MTG, +1/+1 counters give both +1/+1, so we use min(power, toughness) counters
-                            // plus temp mods for any asymmetric remainder
+                    if *until_eot {
+                        // Create a continuous effect that lasts until end of turn
+                        let ts = state.new_timestamp();
+                        state.continuous_effects.push(ContinuousEffect {
+                            source_id: *id,
+                            controller,
+                            timestamp: ts,
+                            duration: Duration::UntilEndOfTurn,
+                            affected: AffectedObjects::Specific(*id),
+                            modification: LayerModification::ModifyPT(*power, *toughness),
+                        });
+                    } else {
+                        // Permanent buff via +1/+1 counters
+                        if let Some(inst) = state.objects.get_mut(id) {
                             let counters = (*power).min(*toughness);
                             inst.plus_counters += counters;
-                            // Any asymmetric remainder goes as a static modifier
-                            // (simplified — real MTG doesn't have this, but handles it per-card)
+                            // Any asymmetric remainder as a permanent continuous effect
                             if *power != *toughness {
-                                inst.temp_power_mod += power - counters;
-                                inst.temp_toughness_mod += toughness - counters;
+                                let ts = state.new_timestamp();
+                                state.continuous_effects.push(ContinuousEffect {
+                                    source_id: *id,
+                                    controller,
+                                    timestamp: ts,
+                                    duration: Duration::Permanent,
+                                    affected: AffectedObjects::Specific(*id),
+                                    modification: LayerModification::ModifyPT(
+                                        power - counters,
+                                        toughness - counters,
+                                    ),
+                                });
                             }
                         }
                     }
@@ -605,6 +625,121 @@ fn resolve_effect(
                     }
                 }
             }
+        }
+
+        Effect::ExileTarget { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.battlefield.contains(id) {
+                        state.move_object(*id, ZoneType::Battlefield, ZoneType::Exile);
+                    }
+                }
+            }
+            state.refresh_continuous_effects();
+            state.refresh_replacement_effects();
+        }
+
+        Effect::DestroyAll => {
+            // Destroy all creatures on the battlefield (e.g., Wrath of God)
+            let creatures: Vec<ObjectId> = state
+                .battlefield
+                .iter()
+                .copied()
+                .filter(|&id| state.is_creature(id))
+                .filter(|&id| !state.has_keyword(id, KeywordAbility::Indestructible))
+                .collect();
+
+            for &id in &creatures {
+                let dest_zone = state.death_replacement_zone(id);
+                if dest_zone != ZoneType::Battlefield {
+                    state.move_object(id, ZoneType::Battlefield, dest_zone);
+                }
+            }
+            if !creatures.is_empty() {
+                state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
+            }
+            // Fire dies triggers
+            for &id in &creatures {
+                check_triggers(state, TriggerCondition::Dies, Some(id));
+            }
+            if !creatures.is_empty() {
+                let _ = flush_triggers(state);
+            }
+        }
+
+        Effect::Debuff {
+            power,
+            toughness,
+            until_eot,
+        } => {
+            use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
+            for target in targets {
+                if let Target::Object(id) = target {
+                    let duration = if *until_eot {
+                        Duration::UntilEndOfTurn
+                    } else {
+                        Duration::Permanent
+                    };
+                    let ts = state.new_timestamp();
+                    state.continuous_effects.push(ContinuousEffect {
+                        source_id: *id,
+                        controller,
+                        timestamp: ts,
+                        duration,
+                        affected: AffectedObjects::Specific(*id),
+                        modification: LayerModification::ModifyPT(-power, -toughness),
+                    });
+                }
+            }
+        }
+
+        Effect::PutCounters { count, .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if let Some(inst) = state.objects.get_mut(id) {
+                        if *count > 0 {
+                            inst.plus_counters += count;
+                        } else {
+                            inst.minus_counters += count.abs();
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::MillCards { count, .. } => {
+            for target in targets {
+                if let Target::Player(p) = target {
+                    for _ in 0..*count {
+                        if let Some(card_id) = state.players[*p].library.pop() {
+                            state.move_object(card_id, ZoneType::Library, ZoneType::Graveyard);
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::SacrificeCreatures { count, .. } => {
+            for target in targets {
+                if let Target::Player(p) = target {
+                    let mut creatures = state.creatures_controlled_by(*p);
+                    // Sort by effective power ascending so the weakest are
+                    // sacrificed first — a reasonable heuristic standing in
+                    // for actual player choice until we surface a UI action.
+                    creatures.sort_by_key(|&id| state.effective_power(id));
+                    for &id in creatures.iter().take(*count as usize) {
+                        state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                    }
+                }
+            }
+            state.refresh_continuous_effects();
+        }
+
+        Effect::PreventCombatDamage => {
+            // Not yet implemented — no cards in the current pool use this effect.
+            // When added, this should set a flag on GameState that is checked
+            // during resolve_combat_damage() to skip damage assignment.
         }
 
         Effect::Multiple(effects) => {
@@ -853,22 +988,19 @@ pub fn check_state_based_actions(state: &mut GameState) {
 
             // CR 704.5f/g: Creature with toughness <= 0 or lethal damage
             let to_die: Vec<ObjectId> = {
-                let db = state.card_db();
                 state
                     .battlefield
                     .iter()
                     .copied()
                     .filter(|&id| {
-                        let inst = &state.objects[&id];
-                        if let Some(def) = db.get(inst.card_def_id) {
-                            if def.is_creature() {
-                                let toughness = inst.effective_toughness(def);
-                                if toughness <= 0 {
-                                    return true;
-                                }
-                                if inst.damage_marked as i32 >= toughness {
-                                    return true;
-                                }
+                        if state.is_creature(id) {
+                            let toughness = state.effective_toughness(id);
+                            let damage = state.objects[&id].damage_marked as i32;
+                            if toughness <= 0 {
+                                return true;
+                            }
+                            if damage >= toughness {
+                                return true;
                             }
                         }
                         false
@@ -877,8 +1009,19 @@ pub fn check_state_based_actions(state: &mut GameState) {
             };
 
             for &obj_id in &to_die {
-                state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
+                // Check death replacement effects (CR 614)
+                let dest_zone = state.death_replacement_zone(obj_id);
+                if dest_zone == ZoneType::Battlefield {
+                    // Replacement prevented the death — creature stays
+                    continue;
+                }
+                state.move_object(obj_id, ZoneType::Battlefield, dest_zone);
                 any_action = true;
+            }
+            if !to_die.is_empty() {
+                // Refresh continuous effects after permanents leave the battlefield
+                state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
             }
             died_this_round.extend(to_die);
 
@@ -1079,7 +1222,9 @@ fn execute_phase_entry(state: &mut GameState) {
 }
 
 fn finalize_cleanup(state: &mut GameState) {
-    // Remove EoT effects
+    // Remove end-of-turn continuous effects (layer engine)
+    state.cleanup_eot_effects();
+    // Remove legacy EoT effects on instances
     for &obj_id in &state.battlefield.clone() {
         if let Some(inst) = state.objects.get_mut(&obj_id) {
             inst.cleanup_eot();
@@ -1147,15 +1292,9 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
 
 /// Check if any creature in combat has first strike or double strike.
 fn has_first_strike_creatures(state: &GameState) -> bool {
-    let db = state.card_db();
     let check = |id: &ObjectId| -> bool {
-        let inst = &state.objects[id];
-        if let Some(def) = db.get(inst.card_def_id) {
-            inst.has_keyword(def, KeywordAbility::FirstStrike)
-                || inst.has_keyword(def, KeywordAbility::DoubleStrike)
-        } else {
-            false
-        }
+        state.has_keyword(*id, KeywordAbility::FirstStrike)
+            || state.has_keyword(*id, KeywordAbility::DoubleStrike)
     };
 
     state.combat.attackers.iter().any(check)
@@ -1175,23 +1314,17 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
     let defending_player = state.opponent(state.active_player);
     let mut damage_events: Vec<DamageEvent> = Vec::new();
 
-    // Phase 1: Collect all damage events (immutable)
+    // Phase 1: Collect all damage events (immutable — uses layer engine)
     {
-        let db = state.card_db();
         let attackers = state.combat.attackers.clone();
 
         for &attacker_id in &attackers {
-            let attacker_inst = match state.objects.get(&attacker_id) {
-                Some(i) => i.clone(),
-                None => continue,
-            };
-            let attacker_def = match db.get(attacker_inst.card_def_id) {
-                Some(d) => d.clone(),
-                None => continue,
-            };
+            if state.objects.get(&attacker_id).is_none() {
+                continue;
+            }
 
-            let has_fs = attacker_inst.has_keyword(&attacker_def, KeywordAbility::FirstStrike);
-            let has_ds = attacker_inst.has_keyword(&attacker_def, KeywordAbility::DoubleStrike);
+            let has_fs = state.has_keyword(attacker_id, KeywordAbility::FirstStrike);
+            let has_ds = state.has_keyword(attacker_id, KeywordAbility::DoubleStrike);
 
             let deals_damage = if first_strike_only {
                 has_fs || has_ds
@@ -1203,13 +1336,13 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                 continue;
             }
 
-            let power = attacker_inst.effective_power(&attacker_def).max(0) as u32;
+            let power = state.effective_power(attacker_id).max(0) as u32;
             if power == 0 {
                 continue;
             }
 
-            let lifelink = if attacker_inst.has_keyword(&attacker_def, KeywordAbility::Lifelink) {
-                Some(attacker_inst.controller)
+            let lifelink = if state.has_keyword(attacker_id, KeywordAbility::Lifelink) {
+                Some(state.objects[&attacker_id].controller)
             } else {
                 None
             };
@@ -1230,10 +1363,8 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                     lifelink_for: lifelink,
                 });
             } else {
-                let has_trample =
-                    attacker_inst.has_keyword(&attacker_def, KeywordAbility::Trample);
-                let has_deathtouch =
-                    attacker_inst.has_keyword(&attacker_def, KeywordAbility::Deathtouch);
+                let has_trample = state.has_keyword(attacker_id, KeywordAbility::Trample);
+                let has_deathtouch = state.has_keyword(attacker_id, KeywordAbility::Deathtouch);
 
                 let mut remaining = power;
 
@@ -1242,19 +1373,17 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                         break;
                     }
                     let blocker_inst = match state.objects.get(&blocker_id) {
-                        Some(i) => i.clone(),
-                        None => continue,
-                    };
-                    let blocker_def = match db.get(blocker_inst.card_def_id) {
-                        Some(d) => d,
+                        Some(i) => i,
                         None => continue,
                     };
 
-                    let toughness = blocker_inst.remaining_toughness(blocker_def).max(0) as u32;
+                    let eff_toughness = state.effective_toughness(blocker_id);
+                    let remaining_tough =
+                        (eff_toughness - blocker_inst.damage_marked as i32).max(0) as u32;
                     let damage = if has_deathtouch {
                         1.min(remaining)
                     } else {
-                        toughness.min(remaining)
+                        remaining_tough.min(remaining)
                     };
 
                     damage_events.push(DamageEvent {
@@ -1278,19 +1407,14 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
 
                 // Blockers deal damage to attacker
                 for &blocker_id in &blockers {
-                    let blocker_inst = match state.objects.get(&blocker_id) {
-                        Some(i) => i.clone(),
-                        None => continue,
-                    };
-                    let blocker_def = match db.get(blocker_inst.card_def_id) {
-                        Some(d) => d.clone(),
-                        None => continue,
-                    };
+                    if state.objects.get(&blocker_id).is_none() {
+                        continue;
+                    }
 
                     let blocker_has_fs =
-                        blocker_inst.has_keyword(&blocker_def, KeywordAbility::FirstStrike);
+                        state.has_keyword(blocker_id, KeywordAbility::FirstStrike);
                     let blocker_has_ds =
-                        blocker_inst.has_keyword(&blocker_def, KeywordAbility::DoubleStrike);
+                        state.has_keyword(blocker_id, KeywordAbility::DoubleStrike);
 
                     let blocker_deals = if first_strike_only {
                         blocker_has_fs || blocker_has_ds
@@ -1300,10 +1424,10 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
 
                     if blocker_deals {
                         let blocker_power =
-                            blocker_inst.effective_power(&blocker_def).max(0) as u32;
+                            state.effective_power(blocker_id).max(0) as u32;
                         let blocker_lifelink =
-                            if blocker_inst.has_keyword(&blocker_def, KeywordAbility::Lifelink) {
-                                Some(blocker_inst.controller)
+                            if state.has_keyword(blocker_id, KeywordAbility::Lifelink) {
+                                Some(state.objects[&blocker_id].controller)
                             } else {
                                 None
                             };

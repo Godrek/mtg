@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
 use crate::events::GameEvent;
+use crate::layers::ContinuousEffect;
 use crate::mana::ManaPool;
+use crate::replacement::{ReplacementEffect, ReplacementEventKind, ReplacementAction};
 
 /// Index into the players array (0 or 1 for a two-player game).
 pub type PlayerIndex = usize;
@@ -233,6 +235,23 @@ pub struct GameState {
     /// These accumulate during rule processing and are placed on the stack
     /// in APNAP order (active player's triggers first) before priority is given.
     pub pending_triggers: Vec<PendingTrigger>,
+
+    /// Active continuous effects on the battlefield (Phase 2A.1).
+    ///
+    /// Continuous effects from static abilities are regenerated when the
+    /// battlefield changes. Effects from resolved spells (until end of turn,
+    /// permanent) are tracked here explicitly. The layer engine uses this
+    /// list to compute characteristics on demand.
+    pub continuous_effects: Vec<ContinuousEffect>,
+
+    /// Next timestamp for continuous effect ordering (CR 613.7).
+    pub next_timestamp: u32,
+
+    /// Active replacement effects (Phase 2A.3).
+    /// Replacement effects modify or replace events as they happen (CR 614).
+    /// Self-replacement effects are applied automatically; competing player-choice
+    /// replacements are surfaced as Action::ChooseReplacementOrder.
+    pub replacement_effects: Vec<ReplacementEffect>,
 
     /// Game over flag.
     pub game_over: bool,
@@ -495,6 +514,9 @@ impl GameState {
             next_object_id: 1,
             next_stack_id: 1,
             pending_triggers: Vec::new(),
+            continuous_effects: Vec::new(),
+            next_timestamp: 1,
+            replacement_effects: Vec::new(),
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -672,5 +694,254 @@ impl GameState {
     pub fn check_player_lost(&self, player: PlayerIndex) -> bool {
         self.players[player].life <= 0
             || self.players[player].has_lost
+    }
+
+    /// Allocate a new timestamp for continuous effect ordering.
+    pub fn new_timestamp(&mut self) -> u32 {
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+        ts
+    }
+
+    /// Refresh continuous effects from static abilities on the battlefield.
+    /// This regenerates effects from permanents with static abilities,
+    /// preserving any non-static effects (from spells, until-end-of-turn, etc.).
+    ///
+    /// Uses the two-phase read-write pattern to satisfy the borrow checker:
+    /// Phase 1 collects what needs to be added (read-only), Phase 2 mutates.
+    pub fn refresh_continuous_effects(&mut self) {
+        // Remove effects whose source has left the battlefield
+        let bf = self.battlefield.clone();
+        self.continuous_effects.retain(|e| {
+            match e.duration {
+                crate::layers::Duration::WhileSourceOnBattlefield => {
+                    bf.contains(&e.source_id)
+                }
+                _ => true, // UntilEndOfTurn and Permanent effects persist
+            }
+        });
+
+        // Phase 1: Read — collect new effects to add
+        let existing_static_sources: std::collections::HashSet<ObjectId> = self
+            .continuous_effects
+            .iter()
+            .filter(|e| e.duration == crate::layers::Duration::WhileSourceOnBattlefield)
+            .map(|e| e.source_id)
+            .collect();
+
+        let mut new_effects = Vec::new();
+        let mut ts = self.next_timestamp;
+        {
+            let db = self.card_db();
+            for &obj_id in &self.battlefield {
+                if existing_static_sources.contains(&obj_id) {
+                    continue;
+                }
+                let inst = match self.objects.get(&obj_id) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let def = match db.get(inst.card_def_id) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                for sa in &def.static_abilities {
+                    let generated = sa.to_continuous_effects(obj_id, inst.controller, ts);
+                    ts += 1;
+                    new_effects.extend(generated);
+                }
+            }
+        }
+
+        // Phase 2: Write — apply collected effects
+        self.next_timestamp = ts;
+        self.continuous_effects.extend(new_effects);
+    }
+
+    /// Remove all UntilEndOfTurn continuous effects (called during cleanup).
+    pub fn cleanup_eot_effects(&mut self) {
+        self.continuous_effects
+            .retain(|e| e.duration != crate::layers::Duration::UntilEndOfTurn);
+    }
+
+    /// Compute the effective power of a creature using the layer engine.
+    pub fn effective_power(&self, obj_id: ObjectId) -> i32 {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.power)
+        .unwrap_or(0)
+    }
+
+    /// Compute the effective toughness of a creature using the layer engine.
+    pub fn effective_toughness(&self, obj_id: ObjectId) -> i32 {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.toughness)
+        .unwrap_or(0)
+    }
+
+    /// Check if an object has a keyword ability using the layer engine.
+    pub fn has_keyword(&self, obj_id: ObjectId, kw: crate::card::KeywordAbility) -> bool {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.keywords.contains(&kw))
+        .unwrap_or(false)
+    }
+
+    /// Apply damage with replacement effects (CR 614).
+    ///
+    /// Checks for damage-replacement effects before dealing damage.
+    /// Self-replacement effects are applied automatically. If multiple
+    /// non-self replacements apply, the affected player chooses the order
+    /// (surfaced via Action::ChooseReplacementOrder in a future iteration).
+    ///
+    /// Returns the actual damage dealt after replacements.
+    pub fn deal_damage_with_replacement(&mut self, amount: u32, target: &Target) -> u32 {
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::DamageDealt,
+                match target {
+                    Target::Player(p) => *p,
+                    Target::Object(id) => self.objects.get(id).map(|i| i.controller).unwrap_or(0),
+                },
+            );
+
+        let mut effective_amount = amount as i32;
+
+        // Apply self-replacement effects automatically
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx) {
+                match &effect.action {
+                    ReplacementAction::Prevent => {
+                        effective_amount = 0;
+                    }
+                    ReplacementAction::ModifyAmount { delta } => {
+                        effective_amount += delta;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // TODO: handle player-choice replacement effects (ChooseReplacementOrder)
+        // For now, apply them in order
+        // (CR 614.5: each effect applies only once per event)
+
+        effective_amount.max(0) as u32
+    }
+
+    /// Check for death replacement effects (CR 614).
+    ///
+    /// Returns the zone to send the dying creature to (normally Graveyard,
+    /// but can be Exile or other zones if a replacement applies).
+    pub fn death_replacement_zone(&self, obj_id: ObjectId) -> ZoneType {
+        let controller = self
+            .objects
+            .get(&obj_id)
+            .map(|i| i.controller)
+            .unwrap_or(0);
+
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::WouldDie,
+                controller,
+            );
+
+        // Apply self-replacement effects first
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx) {
+                match &effect.action {
+                    ReplacementAction::RedirectToZone(zone) => {
+                        return *zone;
+                    }
+                    ReplacementAction::Prevent => {
+                        // Prevented death means the creature stays on the battlefield.
+                        // This is a special case — we return Battlefield to signal "don't move".
+                        return ZoneType::Battlefield;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // TODO: handle player-choice replacement effects
+
+        ZoneType::Graveyard
+    }
+
+    /// Check for ETB replacement effects and apply them (CR 614).
+    ///
+    /// Applies modifications like "enters tapped" or "enters with counters".
+    pub fn apply_etb_replacements(&mut self, obj_id: ObjectId) {
+        let controller = self
+            .objects
+            .get(&obj_id)
+            .map(|i| i.controller)
+            .unwrap_or(0);
+
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::EntersBattlefield,
+                controller,
+            );
+
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx).cloned() {
+                match &effect.action {
+                    ReplacementAction::EntersModified {
+                        enters_tapped,
+                        extra_counters,
+                    } => {
+                        if let Some(inst) = self.objects.get_mut(&obj_id) {
+                            if *enters_tapped {
+                                inst.tapped = true;
+                            }
+                            if *extra_counters > 0 {
+                                inst.plus_counters += extra_counters;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Refresh replacement effects based on the current battlefield.
+    /// Removes effects whose source has left the battlefield.
+    pub fn refresh_replacement_effects(&mut self) {
+        self.replacement_effects
+            .retain(|e| self.battlefield.contains(&e.source_id));
+    }
+
+    /// Check if an object is a creature using the layer engine.
+    pub fn is_creature(&self, obj_id: ObjectId) -> bool {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.card_types.contains(&crate::card::CardType::Creature))
+        .unwrap_or(false)
     }
 }

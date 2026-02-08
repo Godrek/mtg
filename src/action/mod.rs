@@ -182,13 +182,13 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
         {
             // Enumerate attacker combinations
             let creatures = state.creatures_controlled_by(player);
-            let db = state.card_db();
             let eligible: Vec<ObjectId> = creatures
                 .into_iter()
                 .filter(|&id| {
                     let inst = &state.objects[&id];
-                    let def = db.get(inst.card_def_id).unwrap();
-                    inst.can_attack(def)
+                    !inst.tapped
+                        && (!inst.summoning_sick || state.has_keyword(id, KeywordAbility::Haste))
+                        && !state.has_keyword(id, KeywordAbility::Defender)
                 })
                 .collect();
 
@@ -346,27 +346,23 @@ fn can_potentially_pay(
             None => continue,
         };
         // Assume best-case: each land contributes its first ability
-        for ma in &def.mana_abilities {
+        if let Some(ma) = def.mana_abilities.first() {
             match ma {
                 ManaAbility::TapForColor(color) => {
                     pool.add_color(*color, 1);
-                    break; // one mana per land
                 }
                 ManaAbility::TapForColorless => {
                     pool.colorless += 1;
-                    break;
                 }
                 ManaAbility::TapForAny => {
                     // Optimistically add to whichever color is most needed
                     // For simplicity, add colorless (covers generic)
                     pool.colorless += 1;
-                    break;
                 }
                 ManaAbility::TapForChoice(colors) => {
                     if let Some(&color) = colors.first() {
                         pool.add_color(color, 1);
                     }
-                    break;
                 }
             }
         }
@@ -398,19 +394,15 @@ fn enumerate_targets_for_spell(
         /// Hexproof: can't be targeted by opponents. Shroud: can't be targeted by anyone.
         fn can_target_permanent(
             state: &GameState,
-            db: &crate::game::CardDatabase,
             obj_id: crate::card::ObjectId,
             caster: PlayerIndex,
         ) -> bool {
-            let inst = &state.objects[&obj_id];
-            let def = match db.get(inst.card_def_id) {
-                Some(d) => d,
-                None => return true,
-            };
-            if inst.has_keyword(def, KeywordAbility::Shroud) {
+            if state.has_keyword(obj_id, KeywordAbility::Shroud) {
                 return false;
             }
-            if inst.has_keyword(def, KeywordAbility::Hexproof) && inst.controller != caster {
+            if state.has_keyword(obj_id, KeywordAbility::Hexproof)
+                && state.objects[&obj_id].controller != caster
+            {
                 return false;
             }
             true
@@ -421,7 +413,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| d.is_creature())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -437,7 +429,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| d.is_creature())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -461,7 +453,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| !d.is_land())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -474,7 +466,7 @@ fn enumerate_targets_for_spell(
             }
             TargetSpec::AnyPermanent => {
                 for &id in &state.battlefield {
-                    if can_target_permanent(state, db, id, caster) {
+                    if can_target_permanent(state, id, caster) {
                         targets.push(Target::Object(id));
                     }
                 }
@@ -485,7 +477,7 @@ fn enumerate_targets_for_spell(
                     if let Some(d) = db.get(inst.card_def_id) {
                         if (d.is_creature()
                             || d.card_types.contains(&crate::card::CardType::Planeswalker))
-                            && can_target_permanent(state, db, id, caster)
+                            && can_target_permanent(state, id, caster)
                         {
                             targets.push(Target::Object(id));
                         }
@@ -499,11 +491,18 @@ fn enumerate_targets_for_spell(
     match effect {
         Effect::DealDamage { target, .. } => targets_for_spec(state, caster, target),
         Effect::DestroyTarget { target } => targets_for_spec(state, caster, target),
+        Effect::ExileTarget { target } => targets_for_spec(state, caster, target),
         Effect::BounceTo { target, .. } => targets_for_spec(state, caster, target),
         Effect::Counter { target } => targets_for_spec(state, caster, target),
         Effect::LoseLife { target, .. } => targets_for_spec(state, caster, target),
         Effect::DiscardCards { target, .. } => targets_for_spec(state, caster, target),
-        _ => vec![], // non-targeted spells
+        Effect::Buff { .. } | Effect::Debuff { .. } => {
+            targets_for_spec(state, caster, &crate::card::TargetSpec::AnyCreature)
+        }
+        Effect::PutCounters { target, .. } => targets_for_spec(state, caster, target),
+        Effect::MillCards { target, .. } => targets_for_spec(state, caster, target),
+        Effect::SacrificeCreatures { target, .. } => targets_for_spec(state, caster, target),
+        _ => vec![], // non-targeted spells (DestroyAll, GainLife, DrawCards, etc.)
     }
 }
 
@@ -543,16 +542,10 @@ fn generate_subsets(items: &[ObjectId], max_items: usize) -> Vec<Vec<ObjectId>> 
 ///
 /// Produces at most 7 distinct actions (after dedup) instead of 2^n.
 fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<ObjectId>> {
-    let db = state.card_db();
-
     // Sort eligible by effective power descending, break ties by object ID for stability.
     let mut by_power: Vec<(ObjectId, i32)> = eligible
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            (id, inst.effective_power(def))
-        })
+        .map(|&id| (id, state.effective_power(id)))
         .collect();
     by_power.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
 
@@ -580,12 +573,10 @@ fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<
     let evasive: Vec<ObjectId> = eligible
         .iter()
         .filter(|&&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            inst.has_keyword(def, KeywordAbility::Flying)
-                || inst.has_keyword(def, KeywordAbility::Fear)
-                || inst.has_keyword(def, KeywordAbility::Intimidate)
-                || inst.has_keyword(def, KeywordAbility::Menace)
+            state.has_keyword(id, KeywordAbility::Flying)
+                || state.has_keyword(id, KeywordAbility::Fear)
+                || state.has_keyword(id, KeywordAbility::Intimidate)
+                || state.has_keyword(id, KeywordAbility::Menace)
         })
         .copied()
         .collect();
@@ -614,11 +605,7 @@ fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<
     //    with them carries no defensive cost. Strategically distinct posture.
     let vigilant: Vec<ObjectId> = eligible
         .iter()
-        .filter(|&&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            inst.has_keyword(def, KeywordAbility::Vigilance)
-        })
+        .filter(|&&id| state.has_keyword(id, KeywordAbility::Vigilance))
         .copied()
         .collect();
     if !vigilant.is_empty() {
@@ -641,13 +628,11 @@ fn generate_block_buckets(
     attackers: &[ObjectId],
     state: &GameState,
 ) -> Vec<Vec<(ObjectId, ObjectId)>> {
-    let db = state.card_db();
-
     if blockers.is_empty() || attackers.is_empty() {
         return vec![vec![]];
     }
 
-    // Pre-compute legality, power, and toughness.
+    // Pre-compute legality, power, and toughness using layer engine.
     let can_block_matrix: Vec<Vec<bool>> = blockers
         .iter()
         .map(|&b| {
@@ -662,25 +647,17 @@ fn generate_block_buckets(
 
     let attacker_stats: Vec<CreatureStats> = attackers
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            CreatureStats {
-                power: inst.effective_power(def),
-                toughness: inst.effective_toughness(def),
-            }
+        .map(|&id| CreatureStats {
+            power: state.effective_power(id),
+            toughness: state.effective_toughness(id),
         })
         .collect();
 
     let blocker_stats: Vec<CreatureStats> = blockers
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            CreatureStats {
-                power: inst.effective_power(def),
-                toughness: inst.effective_toughness(def),
-            }
+        .map(|&id| CreatureStats {
+            power: state.effective_power(id),
+            toughness: state.effective_toughness(id),
         })
         .collect();
 
@@ -823,28 +800,22 @@ fn can_block(
 ) -> bool {
     use crate::card::KeywordAbility;
 
-    let db = state.card_db();
-    let blocker_inst = &state.objects[&blocker_id];
-    let blocker_def = match db.get(blocker_inst.card_def_id) {
-        Some(d) => d,
-        None => return false,
-    };
-    let attacker_inst = &state.objects[&attacker_id];
-    let attacker_def = match db.get(attacker_inst.card_def_id) {
-        Some(d) => d,
-        None => return false,
-    };
-
     // Flying: only flying/reach creatures can block flyers
-    if attacker_inst.has_keyword(attacker_def, KeywordAbility::Flying)
-        && !blocker_inst.has_keyword(blocker_def, KeywordAbility::Flying)
-        && !blocker_inst.has_keyword(blocker_def, KeywordAbility::Reach)
+    if state.has_keyword(attacker_id, KeywordAbility::Flying)
+        && !state.has_keyword(blocker_id, KeywordAbility::Flying)
+        && !state.has_keyword(blocker_id, KeywordAbility::Reach)
     {
         return false;
     }
 
     // Fear: can only be blocked by artifact creatures or black creatures
-    if attacker_inst.has_keyword(attacker_def, KeywordAbility::Fear) {
+    if state.has_keyword(attacker_id, KeywordAbility::Fear) {
+        let db = state.card_db();
+        let blocker_inst = &state.objects[&blocker_id];
+        let blocker_def = match db.get(blocker_inst.card_def_id) {
+            Some(d) => d,
+            None => return false,
+        };
         let is_artifact = blocker_def.card_types.contains(&crate::card::CardType::Artifact);
         let is_black = blocker_def.color_identity().contains(&crate::mana::Color::Black);
         if !is_artifact && !is_black {
@@ -853,7 +824,16 @@ fn can_block(
     }
 
     // Intimidate: can only be blocked by artifact creatures or creatures sharing a color
-    if attacker_inst.has_keyword(attacker_def, KeywordAbility::Intimidate) {
+    if state.has_keyword(attacker_id, KeywordAbility::Intimidate) {
+        let db = state.card_db();
+        let attacker_def = match db.get(state.objects[&attacker_id].card_def_id) {
+            Some(d) => d,
+            None => return false,
+        };
+        let blocker_def = match db.get(state.objects[&blocker_id].card_def_id) {
+            Some(d) => d,
+            None => return false,
+        };
         let is_artifact = blocker_def.card_types.contains(&crate::card::CardType::Artifact);
         let attacker_colors = attacker_def.color_identity();
         let blocker_colors = blocker_def.color_identity();
@@ -885,16 +865,10 @@ fn generate_blocking_assignments(
         return assignments;
     }
 
-    let db = state.card_db();
-
-    // Determine which attackers have menace
+    // Determine which attackers have menace (using layer engine)
     let menace_attackers: Vec<bool> = attackers
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            inst.has_keyword(def, KeywordAbility::Menace)
-        })
+        .map(|&id| state.has_keyword(id, KeywordAbility::Menace))
         .collect();
 
     // Build a legal-block matrix: which blocker can block which attacker
