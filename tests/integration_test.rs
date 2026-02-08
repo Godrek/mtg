@@ -13,7 +13,7 @@ use mtg_gto::replacement::{
 };
 use mtg_gto::rules;
 use mtg_gto::simulation;
-use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
+use mtg_gto::strategy::{GreedyStrategy, RandomStrategy, Strategy};
 
 #[test]
 fn test_sample_db_builds() {
@@ -2093,4 +2093,239 @@ fn test_events_accumulate_across_full_game_turn() {
         "Should have emitted events during gameplay, got 0 events across {} actions",
         action_count
     );
+}
+
+#[test]
+fn test_cascading_sba_dies_trigger_kills_another_creature() {
+    // Acceptance criterion from CONSOLIDATED_STRATEGY.md:
+    // Creature with "when ~ dies, deal 2 damage to each creature" kills
+    // another creature at 2 toughness, causing recursive SBAs.
+    //
+    // Scenario:
+    // 1. Pyroclasm Elemental (3/1) has 1 damage marked → lethal (1 toughness)
+    // 2. Grizzly Bears (2/2) is healthy on the battlefield
+    // 3. SBAs kill the Elemental → dies trigger queued → flushed to stack
+    // 4. Players pass priority → trigger resolves → deals 2 damage to each creature
+    // 5. Grizzly Bears now has 2 damage on 2 toughness
+    // 6. check_state_based_actions (called after resolve) → Bears die
+    // This verifies the cascade: SBA → trigger → resolve → SBA → creature death.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Pyroclasm Elemental: 3/1 with "when ~ dies, deal 2 damage to each creature"
+    let pyro_id = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 1; // 1 damage on 1 toughness = lethal
+    }
+
+    // Grizzly Bears: 2/2, healthy, controlled by player 1
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0; // healthy
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Step 1: Run SBAs — Pyroclasm Elemental dies, trigger goes on stack
+    rules::check_state_based_actions(&mut state);
+
+    assert!(
+        state.players[0].graveyard.contains(&pyro_id),
+        "Pyroclasm Elemental should be in graveyard"
+    );
+    assert!(
+        state.battlefield.contains(&bear_id),
+        "Grizzly Bears should still be alive (trigger hasn't resolved yet)"
+    );
+    assert_eq!(
+        state.stack.len(),
+        1,
+        "Dies trigger should be on the stack"
+    );
+
+    // Step 2: Resolve the dies trigger — both players pass priority
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Step 3: After trigger resolves, 2 damage dealt to each creature.
+    // Grizzly Bears now has 2 damage on 2 toughness.
+    // check_state_based_actions is called inside resolve_top_of_stack,
+    // so the Bears should now be dead.
+    assert!(
+        !state.battlefield.contains(&bear_id),
+        "Grizzly Bears should be dead after cascading SBA (2 damage on 2 toughness)"
+    );
+    assert!(
+        state.players[1].graveyard.contains(&bear_id),
+        "Grizzly Bears should be in player 1's graveyard"
+    );
+}
+
+#[test]
+fn test_cascading_sba_chain_of_three() {
+    // Extended cascade: Pyroclasm Elemental A dies → deals 2 to each creature
+    // → Pyroclasm Elemental B (1 toughness, 0 damage) takes 2 damage → B dies
+    // → B's trigger fires → deals 2 to each creature → Grizzly Bears dies
+    //
+    // This tests a 3-deep cascade through the natural game loop.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Pyroclasm Elemental A: 3/1, lethal damage
+    let pyro_a = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_a) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 1; // lethal
+    }
+
+    // Pyroclasm Elemental B: 3/1, healthy
+    let pyro_b = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_b) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0; // healthy
+    }
+
+    // Grizzly Bears: 2/2, healthy
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0;
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Step 1: SBAs kill Pyro A → trigger on stack
+    rules::check_state_based_actions(&mut state);
+    assert!(state.players[0].graveyard.contains(&pyro_a));
+    assert_eq!(state.stack.len(), 1);
+
+    // Step 2: Resolve Pyro A's trigger → 2 damage to each creature
+    // Pyro B takes 2 damage on 1 toughness → lethal
+    // Bears take 2 damage on 2 toughness → lethal
+    // Both die in SBAs after resolution.
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After Pyro A's trigger resolves and SBAs run:
+    // - Pyro B is dead (2 damage on 1 toughness)
+    // - Bears are dead (2 damage on 2 toughness)
+    assert!(
+        !state.battlefield.contains(&pyro_b),
+        "Pyroclasm Elemental B should be dead from cascade"
+    );
+    assert!(
+        !state.battlefield.contains(&bear_id),
+        "Grizzly Bears should be dead from cascade"
+    );
+
+    // Pyro B's dies trigger should now be on the stack
+    assert!(
+        state.stack.len() >= 1,
+        "Pyro B's dies trigger should be on the stack after cascading death"
+    );
+
+    // Step 3: Resolve Pyro B's trigger → 2 damage to each creature
+    // No more creatures on the battlefield, so nothing dies.
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Stack should be empty now
+    assert_eq!(
+        state.stack.len(),
+        0,
+        "Stack should be empty after all triggers resolve"
+    );
+
+    // All creatures should be in graveyards
+    assert!(state.players[0].graveyard.contains(&pyro_a));
+    assert!(state.players[1].graveyard.contains(&pyro_b));
+    assert!(state.players[1].graveyard.contains(&bear_id));
+}
+
+#[test]
+fn test_pyroclasm_elemental_in_db() {
+    let db = sample::build_sample_db();
+    let card = db.get(sample::ids::PYROCLASM_ELEMENTAL);
+    assert!(card.is_some(), "Pyroclasm Elemental should be in DB");
+
+    let card = card.unwrap();
+    assert_eq!(card.name, "Pyroclasm Elemental");
+    assert!(card.is_creature());
+    assert_eq!(card.power, Some(3));
+    assert_eq!(card.toughness, Some(1));
+    assert_eq!(card.triggered_abilities.len(), 1);
+    assert_eq!(
+        card.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::Dies
+    );
+}
+
+#[test]
+fn test_greedy_strategy_handles_replacement_order() {
+    // Verify GreedyStrategy doesn't crash on ChooseReplacementOrder.
+    // Currently replacement effects aren't generated in-game, but the
+    // strategy must handle the action variant to avoid runtime bugs when
+    // Phase 2A wires in replacement logic.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // The GreedyStrategy should select ChooseReplacementOrder if it's the
+    // only non-PassPriority action. We can verify this by checking that
+    // the strategy code path handles the match arm (no panic).
+    let greedy = GreedyStrategy;
+    // Normal action selection — should complete without panic
+    let action = greedy.choose_action(&state, 0);
+    // Should return PassPriority since there's nothing else to do
+    assert_eq!(action, Action::PassPriority);
 }

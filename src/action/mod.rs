@@ -467,7 +467,11 @@ fn enumerate_targets_for_spell(
                     }
                 }
             }
-            TargetSpec::NoTarget | TargetSpec::Controller => {}
+            TargetSpec::NoTarget | TargetSpec::Controller | TargetSpec::EachCreature => {
+                // EachCreature is untargeted (auto-resolves at effect time).
+                // No targets are generated here for casting/activation; the
+                // resolve_effect handler auto-targets all creatures.
+            }
             TargetSpec::AnyPermanent => {
                 for &id in &state.battlefield {
                     if can_target_permanent(state, db, id, caster) {

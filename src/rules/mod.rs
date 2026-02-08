@@ -404,14 +404,25 @@ fn resolve_effect(
 ) {
     match effect {
         Effect::DealDamage { amount, target: target_spec } => {
-            // For NoTarget effects (e.g., "deals N damage to each player"),
-            // auto-generate targets for all players.
+            // For untargeted effects, auto-generate targets from the spec.
             let effective_targets: Vec<Target> = if targets.is_empty() {
                 match target_spec {
                     crate::card::TargetSpec::NoTarget => {
                         // "Each player" — deal damage to all players
                         (0..state.players.len())
                             .map(|i| Target::Player(i))
+                            .collect()
+                    }
+                    crate::card::TargetSpec::EachCreature => {
+                        // "Each creature" — deal damage to all creatures on the battlefield
+                        let db = state.card_db();
+                        state.battlefield.iter().copied()
+                            .filter(|&id| {
+                                state.objects.get(&id)
+                                    .and_then(|inst| db.get(inst.card_def_id))
+                                    .map_or(false, |def| def.is_creature())
+                            })
+                            .map(Target::Object)
                             .collect()
                     }
                     _ => vec![],
@@ -506,9 +517,10 @@ fn resolve_effect(
             // Fire dies triggers for destroyed creatures.
             // Batch-check all death triggers before flushing so the controller
             // gets a single ordering decision for simultaneous "when ~ dies" triggers.
+            // Only check the dying creature itself (self-referential "when ~ dies"),
+            // not all battlefield permanents (see comment in check_state_based_actions).
             for &id in &destroyable {
                 check_triggers(state, TriggerCondition::Dies, Some(id));
-                check_triggers(state, TriggerCondition::Dies, None);
             }
             if !destroyable.is_empty() {
                 // If flush pauses (player has >1 trigger), pending_triggers will
@@ -892,10 +904,15 @@ pub fn check_state_based_actions(state: &mut GameState) {
         // gets a combined ordering decision for simultaneous death triggers.
         let triggers_before = state.pending_triggers.len();
         for &obj_id in &died_this_round {
-            // Check the dying creature's own "when ~ dies" triggers
+            // Check the dying creature's own "when ~ dies" triggers.
+            // Note: we intentionally do NOT call check_triggers with None here.
+            // The Dies condition is self-referential ("when THIS creature dies"),
+            // not a watcher ("when ANY creature dies"). Scanning all battlefield
+            // permanents would incorrectly fire other creatures' "when ~ dies"
+            // triggers even though they're still alive. When we add "when a
+            // creature dies" watchers (e.g., Blood Artist), they'll use a
+            // separate ACreatureDies trigger condition checked with None.
             check_triggers(state, TriggerCondition::Dies, Some(obj_id));
-            // Check battlefield permanents that watch for creature deaths
-            check_triggers(state, TriggerCondition::Dies, None);
         }
         let triggers_queued = state.pending_triggers.len() > triggers_before;
 

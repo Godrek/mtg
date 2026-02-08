@@ -40,6 +40,9 @@ pub mod ids {
     /// A creature with "When ~ dies, deal 2 damage to each player."
     /// Used to test SBA recurrence loop (CR 704.3).
     pub const FIERY_CONCLUSION_ELEMENTAL: u64 = 200;
+    /// A creature with "When ~ dies, deal 2 damage to each creature."
+    /// Used to test cascading SBA recurrence (CR 704.3 acceptance criteria).
+    pub const PYROCLASM_ELEMENTAL: u64 = 201;
 }
 
 pub fn build_sample_db() -> CardDatabase {
@@ -645,6 +648,36 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         enters_tapped: false,
         oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
+    });
+
+    // Pyroclasm Elemental: 2R 3/1 Elemental
+    // "When ~ dies, deal 2 damage to each creature."
+    // Used to test cascading SBA — its dies trigger can kill other creatures,
+    // causing recursive SBAs per CR 704.3.
+    db.insert(CardDef {
+        id: ids::PYROCLASM_ELEMENTAL,
+        name: "Pyroclasm Elemental".into(),
+        mana_cost: Some(ManaCost::new(2, 1, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![],
+        subtypes: vec![Subtype("Elemental".into())],
+        keywords: vec![],
+        power: Some(3),
+        toughness: Some(1),
+        mana_abilities: vec![],
+        spell_effect: None,
+        activated_abilities: vec![],
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::Dies,
+            effect: Effect::DealDamage {
+                amount: 2,
+                target: TargetSpec::EachCreature,
+            },
+            description: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
+        }],
+        starting_loyalty: None,
+        enters_tapped: false,
+        oracle_text: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
     });
 
     db

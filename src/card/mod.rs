@@ -145,6 +145,8 @@ pub enum TargetSpec {
     AnySpell,
     /// No target (e.g., "each opponent").
     NoTarget,
+    /// Each creature on the battlefield (no targeting — affects all).
+    EachCreature,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
