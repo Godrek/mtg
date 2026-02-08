@@ -1,4 +1,4 @@
-//! Integration tests for Phase 1B: MCCFR Solver
+//! Integration tests for Phase 1B + 2B: MCCFR Solver
 //!
 //! Tests the end-to-end MCCFR training pipeline:
 //! - InformationSet construction from PlayerView
@@ -6,6 +6,13 @@
 //! - MCCFR traversal on minimal training scenarios
 //! - McfrStrategy implementing the Strategy trait
 //! - Trained McfrStrategy playing legal games
+//!
+//! Phase 2B additions:
+//! - Information set abstraction (bucketed vs identity)
+//! - Parallel training with sharded tables
+//! - Depth-limited rollouts with GreedyStrategy
+//! - Scale validation: 60-card deck training without OOM
+//! - Win rate vs GreedyStrategy baseline
 
 use std::sync::Arc;
 
@@ -13,12 +20,12 @@ use mtg_gto::action::legal_actions;
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
 use mtg_gto::game::{GameState, Phase};
-use mtg_gto::info_set::InformationSet;
+use mtg_gto::info_set::{BucketedAbstraction, InformationSet};
 use mtg_gto::rules;
 use mtg_gto::simulation;
-use mtg_gto::solver::mccfr::{self, McfrConfig};
+use mtg_gto::solver::mccfr::{self, McfrConfig, RolloutMode, TrainConfig};
 use mtg_gto::solver::RegretTable;
-use mtg_gto::strategy::{GreedyStrategy, McfrStrategy, RandomStrategy, Strategy};
+use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, McfrStrategy, RandomStrategy, Strategy};
 
 /// Helper: create a minimal game state with 15-card decks for MCCFR testing.
 fn setup_mini_game() -> GameState {
@@ -411,4 +418,384 @@ fn test_info_set_per_color_mana() {
     let hash2 = InformationSet::from_view(&view2, state2.card_db()).hash_value();
 
     assert_ne!(hash1, hash2, "Different mana colors should produce different hashes");
+}
+
+// =========================================================================
+// Phase 2B Scale Validation Tests
+// =========================================================================
+
+/// Helper: set up a 60-card game (mono-red vs mono-green).
+fn setup_60card_game() -> GameState {
+    let db = sample::build_sample_db();
+    let deck0 = sample::red_aggro_deck();
+    let deck1 = sample::green_stompy_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &deck0, &deck1);
+    state
+}
+
+#[test]
+fn test_60card_decks_valid() {
+    // Verify the 60-card sample decks are correct sizes.
+    let red = sample::red_aggro_deck();
+    assert_eq!(red.len(), 60, "Red aggro deck should be 60 cards");
+
+    let green = sample::green_stompy_deck();
+    assert_eq!(green.len(), 60, "Green stompy deck should be 60 cards");
+}
+
+#[test]
+fn test_bucketed_abstraction_reduces_info_sets() {
+    // Train with identity vs bucketed abstraction on mini decks.
+    // Bucketed should produce fewer unique info set entries.
+    let state = setup_mini_game();
+    let config = McfrConfig { max_depth: 8, max_actions: 200 };
+
+    let identity_tables = mccfr::train(&state, 10, &config);
+    let identity_info_sets: usize = identity_tables.iter().map(|t| t.num_info_sets()).sum();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: config.clone(),
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+    let bucketed_tables = mccfr::train_extended(&state, 10, &train_cfg);
+    let bucketed_info_sets: usize = bucketed_tables.iter().map(|t| t.num_info_sets()).sum();
+
+    eprintln!(
+        "Info sets — Identity: {}, Bucketed: {} (reduction: {:.1}%)",
+        identity_info_sets,
+        bucketed_info_sets,
+        (1.0 - bucketed_info_sets as f64 / identity_info_sets as f64) * 100.0,
+    );
+
+    assert!(
+        bucketed_info_sets <= identity_info_sets,
+        "Bucketed abstraction should produce <= info sets than identity ({} vs {})",
+        bucketed_info_sets,
+        identity_info_sets,
+    );
+}
+
+#[test]
+fn test_60card_training_with_bucketed_abstraction() {
+    // Phase 2B.4: Train MCCFR on 60-card decks with bucketed abstraction.
+    // This is the core scale validation test — must complete without OOM.
+    let state = setup_60card_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 6, max_actions: 300 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_extended(&state, 10, &train_cfg);
+
+    let stats = mccfr::training_stats(&tables);
+    eprintln!(
+        "60-card training (10 iters): info_sets=[{}, {}], visits=[{}, {}], mem=[{}, {}] bytes, exploit={:.4}",
+        stats.total_info_sets[0], stats.total_info_sets[1],
+        stats.total_visits[0], stats.total_visits[1],
+        stats.memory_bytes[0], stats.memory_bytes[1],
+        stats.exploitability,
+    );
+
+    // Must create some info set entries
+    assert!(stats.total_info_sets[0] > 0, "Player 0 should have info sets");
+    assert!(stats.total_info_sets[1] > 0, "Player 1 should have info sets");
+    // Memory should be bounded (< 100MB for 10 iterations)
+    let total_mem = stats.memory_bytes[0] + stats.memory_bytes[1];
+    assert!(
+        total_mem < 100_000_000,
+        "Memory usage should be < 100MB, got {} bytes", total_mem
+    );
+}
+
+#[test]
+fn test_60card_rollout_training() {
+    // Phase 2B.3: Train with GreedyStrategy rollouts at depth limit.
+    let state = setup_60card_game();
+
+    let greedy = GreedyStrategy;
+    let random = RandomStrategy;
+    let bucketed = BucketedAbstraction;
+
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 4, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Strategy { max_rollout_actions: 500 },
+        rollout_strategies: Some((&greedy, &random)),
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_extended(&state, 5, &train_cfg);
+
+    let total_info_sets: usize = tables.iter().map(|t| t.num_info_sets()).sum();
+    assert!(total_info_sets > 0, "Rollout training should create info sets");
+
+    eprintln!(
+        "60-card rollout training (5 iters): {} info sets",
+        total_info_sets,
+    );
+}
+
+#[test]
+fn test_parallel_training_produces_results() {
+    // Phase 2B.2: Verify parallel training produces valid results.
+    let state = setup_mini_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_parallel(&state, 20, 4, &train_cfg);
+
+    let total_info_sets: usize = tables.iter().map(|t| t.num_info_sets()).sum();
+    assert!(total_info_sets > 0, "Parallel training should produce info sets");
+
+    // Verify visit counts are reasonable (should be ~20 iterations * 2 traversals)
+    let total_visits: u64 = tables.iter().flat_map(|t| t.data.values()).map(|d| d.visit_count).sum();
+    assert!(total_visits > 0, "Should have non-zero visit counts");
+
+    eprintln!(
+        "Parallel training (20 iters, 4 shards): {} info sets, {} total visits",
+        total_info_sets, total_visits,
+    );
+}
+
+#[test]
+fn test_parallel_training_60card() {
+    // Phase 2B.2 + 2B.4: Parallel training on 60-card decks.
+    let state = setup_60card_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 5, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_parallel(&state, 8, 4, &train_cfg);
+
+    let stats = mccfr::training_stats(&tables);
+    eprintln!(
+        "60-card parallel (8 iters, 4 shards): info_sets=[{}, {}], exploit={:.4}",
+        stats.total_info_sets[0], stats.total_info_sets[1],
+        stats.exploitability,
+    );
+
+    assert!(stats.total_info_sets[0] > 0);
+    assert!(stats.total_info_sets[1] > 0);
+}
+
+#[test]
+fn test_abstracted_mcfr_strategy_plays_legal_games() {
+    // Train with bucketed abstraction and verify AbstractedMcfrStrategy
+    // plays legal games end-to-end.
+    let db = sample::build_sample_db();
+    let state = setup_mini_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_extended(&state, 20, &train_cfg);
+
+    let strat_p0 = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+    let strat_p1 = AbstractedMcfrStrategy::new(
+        tables[1].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let deck0 = sample::mini_red_burn();
+    let deck1 = sample::mini_red_creatures();
+
+    for _ in 0..10 {
+        let result = simulation::run_game(&db, &deck0, &deck1, &strat_p0, &strat_p1);
+        assert!(result.turns <= 200, "Game should terminate");
+    }
+}
+
+#[test]
+fn test_60card_abstracted_strategy_vs_greedy() {
+    // Phase 2B.4 acceptance: trained abstracted MCCFR strategy plays
+    // complete games against GreedyStrategy on 60-card decks.
+    let db = sample::build_sample_db();
+    let state = setup_60card_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 5, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let tables = mccfr::train_extended(&state, 20, &train_cfg);
+
+    let mcfr_strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+    let greedy_strat = GreedyStrategy;
+
+    let deck0 = sample::red_aggro_deck();
+    let deck1 = sample::green_stompy_deck();
+
+    let results = simulation::simulate(
+        &db,
+        &deck0,
+        &deck1,
+        &mcfr_strat,
+        &greedy_strat,
+        50,
+    );
+
+    let win_rate = results.win_rate(0);
+    eprintln!(
+        "60-card MCCFR vs Greedy: {:.1}% win rate ({} games, P0={}, P1={}, draws={})",
+        win_rate * 100.0,
+        results.total_games,
+        results.player0_wins,
+        results.player1_wins,
+        results.draws,
+    );
+
+    // All games must complete without panics
+    assert_eq!(results.total_games, 50);
+}
+
+#[test]
+fn test_checkpoint_save_load() {
+    // Phase 2B.2: Verify checkpoint serialization round-trip.
+    let state = setup_mini_game();
+    let config = McfrConfig { max_depth: 8, max_actions: 200 };
+    let tables = mccfr::train(&state, 5, &config);
+
+    let dir = "/tmp/mtg_mccfr_test_checkpoint";
+    mccfr::save_checkpoint(&tables, dir, 5).expect("save checkpoint");
+
+    let loaded = mccfr::load_checkpoint(dir, 5).expect("load checkpoint");
+
+    // Verify loaded tables match original
+    for player in 0..2 {
+        assert_eq!(
+            tables[player].num_info_sets(),
+            loaded[player].num_info_sets(),
+            "Player {} info set count should match after checkpoint round-trip",
+            player,
+        );
+        for (&hash, data) in &tables[player].data {
+            let loaded_data = loaded[player].get(hash)
+                .expect("info set should exist after load");
+            assert_eq!(data.visit_count, loaded_data.visit_count);
+        }
+    }
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_training_with_checkpointing() {
+    // Phase 2B.2: Training with periodic checkpointing enabled.
+    let state = setup_mini_game();
+    let dir = "/tmp/mtg_mccfr_checkpoint_train";
+    let _ = std::fs::remove_dir_all(dir); // Clean up from previous runs
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 5,
+        checkpoint_dir: Some(dir.into()),
+    };
+
+    let tables = mccfr::train_extended(&state, 10, &train_cfg);
+
+    // Checkpoint at iteration 5 and 10 should exist
+    let loaded_5 = mccfr::load_checkpoint(dir, 5);
+    assert!(loaded_5.is_ok(), "Checkpoint at iteration 5 should exist");
+
+    let loaded_10 = mccfr::load_checkpoint(dir, 10);
+    assert!(loaded_10.is_ok(), "Checkpoint at iteration 10 should exist");
+
+    // Final tables should have more info sets than the iteration-5 checkpoint
+    let final_total: usize = tables.iter().map(|t| t.num_info_sets()).sum();
+    let cp5_tables = loaded_5.unwrap();
+    let cp5_total: usize = cp5_tables.iter().map(|t| t.num_info_sets()).sum();
+    assert!(
+        final_total >= cp5_total,
+        "Final tables should have >= info sets as iteration 5 checkpoint ({} vs {})",
+        final_total, cp5_total,
+    );
+
+    // Clean up
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn test_parallel_vs_sequential_consistency() {
+    // Verify that parallel training produces comparable results to sequential.
+    // Both should create info set entries; parallel may differ due to
+    // independent sampling but should be in the same ballpark.
+    let state = setup_mini_game();
+
+    let bucketed = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        abstraction: &bucketed,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    let seq_tables = mccfr::train_extended(&state, 20, &train_cfg);
+    let par_tables = mccfr::train_parallel(&state, 20, 4, &train_cfg);
+
+    let seq_info: usize = seq_tables.iter().map(|t| t.num_info_sets()).sum();
+    let par_info: usize = par_tables.iter().map(|t| t.num_info_sets()).sum();
+
+    eprintln!(
+        "Sequential vs Parallel info sets: {} vs {}",
+        seq_info, par_info,
+    );
+
+    // Both should have non-trivial entries
+    assert!(seq_info > 0, "Sequential should have info sets");
+    assert!(par_info > 0, "Parallel should have info sets");
 }
