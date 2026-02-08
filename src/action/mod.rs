@@ -496,11 +496,18 @@ fn enumerate_targets_for_spell(
     match effect {
         Effect::DealDamage { target, .. } => targets_for_spec(state, caster, target),
         Effect::DestroyTarget { target } => targets_for_spec(state, caster, target),
+        Effect::ExileTarget { target } => targets_for_spec(state, caster, target),
         Effect::BounceTo { target, .. } => targets_for_spec(state, caster, target),
         Effect::Counter { target } => targets_for_spec(state, caster, target),
         Effect::LoseLife { target, .. } => targets_for_spec(state, caster, target),
         Effect::DiscardCards { target, .. } => targets_for_spec(state, caster, target),
-        _ => vec![], // non-targeted spells
+        Effect::Buff { .. } | Effect::Debuff { .. } => {
+            targets_for_spec(state, caster, &crate::card::TargetSpec::AnyCreature)
+        }
+        Effect::PutCounters { target, .. } => targets_for_spec(state, caster, target),
+        Effect::MillCards { target, .. } => targets_for_spec(state, caster, target),
+        Effect::SacrificeCreatures { target, .. } => targets_for_spec(state, caster, target),
+        _ => vec![], // non-targeted spells (DestroyAll, GainLife, DrawCards, etc.)
     }
 }
 

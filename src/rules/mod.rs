@@ -627,6 +627,116 @@ fn resolve_effect(
             }
         }
 
+        Effect::ExileTarget { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.battlefield.contains(id) {
+                        state.move_object(*id, ZoneType::Battlefield, ZoneType::Exile);
+                    }
+                }
+            }
+            state.refresh_continuous_effects();
+            state.refresh_replacement_effects();
+        }
+
+        Effect::DestroyAll => {
+            // Destroy all creatures on the battlefield (e.g., Wrath of God)
+            let creatures: Vec<ObjectId> = state
+                .battlefield
+                .iter()
+                .copied()
+                .filter(|&id| state.is_creature(id))
+                .filter(|&id| !state.has_keyword(id, KeywordAbility::Indestructible))
+                .collect();
+
+            for &id in &creatures {
+                let dest_zone = state.death_replacement_zone(id);
+                if dest_zone != ZoneType::Battlefield {
+                    state.move_object(id, ZoneType::Battlefield, dest_zone);
+                }
+            }
+            if !creatures.is_empty() {
+                state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
+            }
+            // Fire dies triggers
+            for &id in &creatures {
+                check_triggers(state, TriggerCondition::Dies, Some(id));
+            }
+            if !creatures.is_empty() {
+                let _ = flush_triggers(state);
+            }
+        }
+
+        Effect::Debuff {
+            power,
+            toughness,
+            until_eot,
+        } => {
+            use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
+            for target in targets {
+                if let Target::Object(id) = target {
+                    let duration = if *until_eot {
+                        Duration::UntilEndOfTurn
+                    } else {
+                        Duration::Permanent
+                    };
+                    let ts = state.new_timestamp();
+                    state.continuous_effects.push(ContinuousEffect {
+                        source_id: *id,
+                        controller,
+                        timestamp: ts,
+                        duration,
+                        affected: AffectedObjects::Specific(*id),
+                        modification: LayerModification::ModifyPT(-power, -toughness),
+                    });
+                }
+            }
+        }
+
+        Effect::PutCounters { count, .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if let Some(inst) = state.objects.get_mut(id) {
+                        if *count > 0 {
+                            inst.plus_counters += count;
+                        } else {
+                            inst.minus_counters += count.abs();
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::MillCards { count, .. } => {
+            for target in targets {
+                if let Target::Player(p) = target {
+                    for _ in 0..*count {
+                        if let Some(card_id) = state.players[*p].library.pop() {
+                            state.move_object(card_id, ZoneType::Library, ZoneType::Graveyard);
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::SacrificeCreatures { count, .. } => {
+            for target in targets {
+                if let Target::Player(p) = target {
+                    let creatures = state.creatures_controlled_by(*p);
+                    for &id in creatures.iter().take(*count as usize) {
+                        state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                    }
+                }
+            }
+            state.refresh_continuous_effects();
+        }
+
+        Effect::PreventCombatDamage => {
+            // Simplified: we don't model this as a replacement effect yet.
+            // In practice, this would set a flag checked during combat damage.
+        }
+
         Effect::Multiple(effects) => {
             for e in effects {
                 resolve_effect(state, e, controller, targets);

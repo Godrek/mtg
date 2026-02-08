@@ -113,11 +113,25 @@ pub enum Effect {
     LoseLife { amount: u32, target: TargetSpec },
     DrawCards { count: u32 },
     DestroyTarget { target: TargetSpec },
+    /// Exile target (e.g., Swords to Plowshares, Path to Exile).
+    ExileTarget { target: TargetSpec },
+    /// Destroy all creatures (e.g., Wrath of God, Day of Judgment).
+    DestroyAll,
     BounceTo { zone: ZoneType, target: TargetSpec },
     Buff { power: i32, toughness: i32, until_eot: bool },
+    /// Debuff: target creature gets -N/-N until end of turn.
+    Debuff { power: i32, toughness: i32, until_eot: bool },
     DiscardCards { count: u32, target: TargetSpec },
     CreateToken(TokenDef),
     Counter { target: TargetSpec },
+    /// Put +1/+1 counters on target creature.
+    PutCounters { count: i32, target: TargetSpec },
+    /// Each player mills N cards.
+    MillCards { count: u32, target: TargetSpec },
+    /// Each player sacrifices N creatures.
+    SacrificeCreatures { count: u32, target: TargetSpec },
+    /// Prevent all combat damage this turn.
+    PreventCombatDamage,
     Multiple(Vec<Effect>),
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
