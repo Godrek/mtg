@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use crate::action::legal_actions;
 use crate::card::CardId;
@@ -93,7 +94,7 @@ fn run_game_inner(
     verbose: bool,
 ) -> GameResult {
     let mut state = GameState::new(2);
-    state.card_db = Some(card_db.clone());
+    state.card_db = Some(Arc::new(card_db.clone()));
 
     rules::setup_game(&mut state, deck0, deck1);
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
 use mtg_gto::game::GameState;
@@ -30,7 +32,7 @@ fn test_game_setup() {
     let green = sample::green_stompy_deck();
 
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
     mtg_gto::rules::setup_game(&mut state, &red, &green);
 
     // Both players should have 7 cards in hand
@@ -129,7 +131,7 @@ fn test_etb_trigger_elvish_visionary() {
     // Test that Elvish Visionary's ETB trigger draws a card
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     // Give player 0 some forests and an Elvish Visionary in hand
     for _ in 0..3 {

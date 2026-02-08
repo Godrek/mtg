@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
 use crate::mana::ManaPool;
@@ -156,10 +157,10 @@ impl CombatState {
 /// This must be cheaply cloneable for MCTS/CFR tree search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
-    /// Card definitions (shared, immutable).
-    /// In practice we'd use an Arc, but for simplicity we store a reference-counted DB.
+    /// Card definitions (shared, immutable). Wrapped in `Arc` so that
+    /// `GameState::clone()` is O(1) for the DB — critical for MCTS/CFR search.
     #[serde(skip)]
-    pub card_db: Option<CardDatabase>,
+    pub card_db: Option<Arc<CardDatabase>>,
 
     /// All card instances in the game, keyed by ObjectId.
     pub objects: HashMap<ObjectId, CardInstance>,
