@@ -1,3 +1,5 @@
+pub mod canonical;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;

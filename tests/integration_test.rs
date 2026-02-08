@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use rand::seq::SliceRandom;
 
+use mtg_gto::action::canonical::{canonicalize, resolve};
 use mtg_gto::action::{legal_actions, legal_actions_abstracted, Action};
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
-use mtg_gto::game::GameState;
+use mtg_gto::game::{GameState, Phase};
 use mtg_gto::rules;
 use mtg_gto::simulation;
 use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
@@ -1010,4 +1011,421 @@ fn test_abstracted_game_completes() {
         state.game_over,
         "Abstracted game should complete within 500 turns"
     );
+}
+
+// ======================================================================
+// Phase 0: Shared Interface Contract Tests
+// ======================================================================
+
+#[test]
+fn test_player_view_basic_fields() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Set up a basic game
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+    state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 0, ZoneType::Hand);
+    state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 0, ZoneType::Hand);
+    state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Hand);
+    let _bear = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 3;
+
+    let view0 = state.visible_state(0);
+    let view1 = state.visible_state(1);
+
+    // Public info should match
+    assert_eq!(view0.phase, Phase::PreCombatMain);
+    assert_eq!(view0.active_player, 0);
+    assert_eq!(view0.turn_number, 3);
+    assert_eq!(view1.phase, Phase::PreCombatMain);
+    assert_eq!(view1.active_player, 0);
+
+    // Player 0's view: sees own hand (2 bolts), opponent's hand size (1 bear)
+    assert_eq!(view0.my_hand.len(), 2);
+    assert_eq!(view0.opp_hand_size, 1);
+    assert_eq!(view0.my_life, 20);
+    assert_eq!(view0.opp_life, 20);
+
+    // Player 1's view: sees own hand (1 bear), opponent's hand size (2 bolts)
+    assert_eq!(view1.my_hand.len(), 1);
+    assert_eq!(view1.opp_hand_size, 2);
+
+    // Battlefield is the same from both perspectives
+    assert_eq!(view0.battlefield.len(), view1.battlefield.len());
+
+    // Library sizes visible as opponent info
+    assert_eq!(view0.opp_library_size, state.players[1].library.len());
+    assert_eq!(view1.opp_library_size, state.players[0].library.len());
+}
+
+#[test]
+fn test_player_view_hides_opponent_hand_contents() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+    state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 1, ZoneType::Hand);
+    state.create_card_in_zone(sample::ids::COUNTERSPELL, 1, ZoneType::Hand);
+    state.create_card_in_zone(sample::ids::SERRA_ANGEL, 1, ZoneType::Hand);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+
+    // Player 0 can see opponent has 3 cards but NOT what they are
+    assert_eq!(view0.opp_hand_size, 3);
+    // my_hand should be empty (player 0 has no cards in hand)
+    assert_eq!(view0.my_hand.len(), 0);
+}
+
+#[test]
+fn test_player_view_graveyard_and_exile_visible() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+    state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 0, ZoneType::Graveyard);
+    state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Graveyard);
+    state.create_card_in_zone(sample::ids::GREY_OGRE, 0, ZoneType::Exile);
+
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+    let view1 = state.visible_state(1);
+
+    // Both graveyards are public info — contents visible from both views
+    assert_eq!(view0.my_graveyard.len(), 1);
+    assert_eq!(view0.opp_graveyard.len(), 1);
+    assert_eq!(view1.my_graveyard.len(), 1);
+    assert_eq!(view1.opp_graveyard.len(), 1);
+
+    // Exile is also public
+    assert_eq!(view0.my_exile.len(), 1);
+    assert_eq!(view0.opp_exile.len(), 0);
+    assert_eq!(view1.my_exile.len(), 0);
+    assert_eq!(view1.opp_exile.len(), 1);
+}
+
+#[test]
+fn test_canonical_roundtrip_combat_phase() {
+    // Test canonical round-trip during DeclareAttackers phase
+    let state = setup_combat_state(
+        &[
+            sample::ids::GRIZZLY_BEARS,
+            sample::ids::GREY_OGRE,
+            sample::ids::GOBLIN_GUIDE,
+        ],
+        &[sample::ids::SAVANNAH_LIONS],
+    );
+
+    let actions = legal_actions(&state);
+    assert!(!actions.is_empty());
+
+    for action in &actions {
+        let canonical = canonicalize(action, &state);
+        let resolved = resolve(&canonical, &state, 0);
+        assert!(
+            resolved.is_some(),
+            "Failed to resolve canonical for {:?}",
+            action
+        );
+        let resolved = resolved.unwrap();
+        match (&resolved, action) {
+            (
+                Action::DeclareAttackers { attackers: a },
+                Action::DeclareAttackers { attackers: b },
+            ) => {
+                let mut a_sorted = a.clone();
+                let mut b_sorted = b.clone();
+                a_sorted.sort();
+                b_sorted.sort();
+                assert_eq!(a_sorted, b_sorted);
+            }
+            _ => assert_eq!(resolved, *action),
+        }
+    }
+}
+
+#[test]
+fn test_canonical_roundtrip_trigger_ordering() {
+    // Test canonical round-trip for OrderTriggers actions
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    let vis1 = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+    let vis2 = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis1,
+        ability_index: 0,
+        controller: 0,
+        targets: vec![],
+    });
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis2,
+        ability_index: 0,
+        controller: 0,
+        targets: vec![],
+    });
+
+    let actions = legal_actions(&state);
+    let order_actions: Vec<&Action> = actions
+        .iter()
+        .filter(|a| matches!(a, Action::OrderTriggers { .. }))
+        .collect();
+
+    assert_eq!(order_actions.len(), 2, "Should have 2 orderings");
+
+    for action in &order_actions {
+        let canonical = canonicalize(action, &state);
+        let resolved = resolve(&canonical, &state, 0);
+        assert!(
+            resolved.is_some(),
+            "Failed to resolve canonical OrderTriggers: {:?}",
+            canonical
+        );
+        assert_eq!(resolved.unwrap(), **action);
+    }
+}
+
+#[test]
+fn test_canonical_roundtrip_full_game_all_actions() {
+    // Run a complete game and verify canonical round-trip for every action taken.
+    // This is the ultimate acceptance test for Phase 0.2.
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+    let green = sample::green_stompy_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &red, &green);
+
+    let mut rng = rand::thread_rng();
+    let mut actions_tested = 0;
+    let mut turns = 0;
+
+    while !state.game_over && turns < 100 {
+        let player = state.priority_player;
+        let actions = legal_actions(&state);
+        if actions.is_empty() {
+            break;
+        }
+
+        // Verify round-trip for every legal action in this state
+        for action in &actions {
+            let canonical = canonicalize(action, &state);
+            let resolved = resolve(&canonical, &state, player);
+            assert!(
+                resolved.is_some(),
+                "Round-trip failed at turn {} for action {:?} -> canonical {:?}",
+                state.turn_number,
+                action,
+                canonical
+            );
+        }
+        actions_tested += actions.len();
+
+        // Choose random action and advance
+        let chosen = actions.choose(&mut rng).unwrap().clone();
+        rules::apply_action(&mut state, &chosen);
+        if state.phase == Phase::Untap {
+            turns += 1;
+        }
+    }
+
+    assert!(
+        actions_tested > 100,
+        "Should have tested many actions across the game, got {}",
+        actions_tested
+    );
+}
+
+#[test]
+fn test_canonical_hand_duplicate_disambiguation() {
+    // When a player holds two copies of the same card, canonicalize must
+    // distinguish between them so resolve() returns the exact same ObjectId.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Two Mountains in hand — exact duplicates
+    let m1 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+    let m2 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Canonicalize playing each Mountain separately
+    let action1 = Action::PlayLand { object_id: m1 };
+    let action2 = Action::PlayLand { object_id: m2 };
+
+    let c1 = canonicalize(&action1, &state);
+    let c2 = canonicalize(&action2, &state);
+
+    // Canonical forms must differ (different hand_index)
+    assert_ne!(c1, c2, "Two duplicate cards in hand should produce different canonical actions");
+
+    // Round-trip must recover the exact ObjectId
+    let r1 = resolve(&c1, &state, 0).unwrap();
+    let r2 = resolve(&c2, &state, 0).unwrap();
+    assert_eq!(r1, action1, "Round-trip must return exact ObjectId for first Mountain");
+    assert_eq!(r2, action2, "Round-trip must return exact ObjectId for second Mountain");
+}
+
+#[test]
+fn test_canonical_discard_hand_duplicate_disambiguation() {
+    // Same test for Discard with duplicate cards in hand
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // 8 Mountains in hand (need to discard one in cleanup)
+    let mut mountain_ids = Vec::new();
+    for _ in 0..8 {
+        mountain_ids.push(state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand));
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Cleanup;
+    state.turn_number = 1;
+
+    // Each discard action should have a distinct canonical form
+    let canonical_actions: Vec<_> = mountain_ids
+        .iter()
+        .map(|&id| canonicalize(&Action::Discard { object_id: id }, &state))
+        .collect();
+
+    // All should be unique
+    for i in 0..canonical_actions.len() {
+        for j in (i + 1)..canonical_actions.len() {
+            assert_ne!(
+                canonical_actions[i], canonical_actions[j],
+                "Discard actions for different copies must have different canonical forms"
+            );
+        }
+    }
+
+    // Each round-trips to the exact same ObjectId
+    for &id in &mountain_ids {
+        let action = Action::Discard { object_id: id };
+        let canonical = canonicalize(&action, &state);
+        let resolved = resolve(&canonical, &state, 0).unwrap();
+        assert_eq!(resolved, action);
+    }
+}
+
+#[test]
+fn test_player_view_objects_excludes_opponent_hand() {
+    // PlayerView.objects must NOT contain the opponent's hand contents.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Player 1 has secret cards in hand
+    let opp_bolt = state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 1, ZoneType::Hand);
+    let opp_angel = state.create_card_in_zone(sample::ids::SERRA_ANGEL, 1, ZoneType::Hand);
+
+    // Player 0 has a card in hand (should be visible to themselves)
+    let my_bear = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Hand);
+
+    // A shared battlefield creature
+    let bf_creature = state.create_card_in_zone(sample::ids::GREY_OGRE, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+
+    // Player 0's view should contain their own hand card
+    assert!(
+        view0.objects.contains_key(&my_bear),
+        "Player's own hand cards should be in visible objects"
+    );
+
+    // Player 0's view should contain battlefield creatures
+    assert!(
+        view0.objects.contains_key(&bf_creature),
+        "Battlefield creatures should be in visible objects"
+    );
+
+    // Player 0's view should NOT contain opponent's hand
+    assert!(
+        !view0.objects.contains_key(&opp_bolt),
+        "Opponent's hand cards must NOT be in visible objects"
+    );
+    assert!(
+        !view0.objects.contains_key(&opp_angel),
+        "Opponent's hand cards must NOT be in visible objects"
+    );
+
+    // Player 1's view should see their own hand but not player 0's
+    let view1 = state.visible_state(1);
+    assert!(view1.objects.contains_key(&opp_bolt));
+    assert!(view1.objects.contains_key(&opp_angel));
+    assert!(!view1.objects.contains_key(&my_bear));
+}
+
+#[test]
+fn test_player_view_objects_excludes_libraries() {
+    // PlayerView.objects must NOT contain any library contents.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let lib0_card = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+    let lib1_card = state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+
+    // A battlefield card for comparison
+    let bf_card = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
+
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+
+    assert!(view0.objects.contains_key(&bf_card), "Battlefield should be visible");
+    assert!(!view0.objects.contains_key(&lib0_card), "Own library contents must be hidden");
+    assert!(!view0.objects.contains_key(&lib1_card), "Opponent library contents must be hidden");
 }
