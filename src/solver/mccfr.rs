@@ -90,6 +90,7 @@ impl Default for McfrConfig {
 /// When the MCCFR traversal reaches its depth limit, instead of using
 /// a static heuristic, it can play out the rest of the game with a
 /// simpler strategy and use the game outcome as the evaluation.
+#[derive(Debug)]
 pub enum RolloutMode {
     /// Use the static heuristic (life + board presence). Phase 1B default.
     Heuristic,
@@ -339,6 +340,10 @@ fn evaluate_at_depth_limit(
 
 /// Play out the game from the current state using rollout strategies
 /// and return +1/-1/0 based on the outcome (or heuristic if not terminal).
+///
+/// Note: rollouts use `legal_actions()` (full action space, not abstracted)
+/// because rollout speed matters more than matching training-time bucketing.
+/// The strategy's `choose_action()` handles its own action selection.
 fn rollout_utility(
     state: &GameState,
     traverser: PlayerIndex,
@@ -518,6 +523,11 @@ pub fn train_parallel(
                 iterations_per_shard
             };
 
+            // Skip zero-work shards (happens when num_shards > num_iterations)
+            if iters == 0 {
+                return [RegretTable::new(), RegretTable::new()];
+            }
+
             let mut tables = [RegretTable::new(), RegretTable::new()];
 
             for i in 0..iters {
@@ -530,7 +540,10 @@ pub fn train_parallel(
                     train_config.rollout_strategies,
                 );
 
-                // Per-shard checkpointing
+                // Per-shard checkpointing — writes to {dir}/shard_{idx}/.
+                // Note: these per-shard checkpoints are not automatically cleaned
+                // up after merging. For long runs, consider only checkpointing
+                // the final merged result via train_extended() instead.
                 if train_config.checkpoint_interval > 0
                     && (i + 1) % train_config.checkpoint_interval == 0
                 {
@@ -668,8 +681,9 @@ pub fn training_stats(tables: &[RegretTable; 2]) -> TrainingStats {
     for i in 0..2 {
         stats.total_info_sets[i] = tables[i].num_info_sets();
         stats.total_visits[i] = tables[i].data.values().map(|d| d.visit_count).sum();
-        // Estimate memory: each entry is ~(hash:8 + action_data + visit:8) bytes
-        // action_data: ~(action:~32 + entry:16) * num_actions per info set
+        // Rough memory estimate (lower bound). Does not account for HashMap
+        // overhead (load factor, bucket metadata), so actual RSS may be 1.5-2x
+        // higher. Suitable for relative comparisons, not absolute sizing.
         let estimated = tables[i].data.iter().map(|(_, d)| {
             8 + 8 + d.action_data.len() * 48
         }).sum();

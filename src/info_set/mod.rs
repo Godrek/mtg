@@ -334,16 +334,19 @@ impl InfoSetAbstraction for IdentityAbstraction {
 /// Bucketed abstraction for scaling MCCFR to realistic (60-card) decks.
 ///
 /// Reduces the information set space by bucketizing continuous values:
-/// - **Life**: {1-5, 6-10, 11-15, 16-20, 21+} (5 buckets per player)
-/// - **Board**: aggregate stats (total power, total toughness, creature count,
-///   mana available) instead of exact permanent identities
-/// - **Hand**: categorize by role (land count, cheap creature count,
-///   expensive creature count, removal count) instead of exact card IDs
-/// - **Turn**: {early 1-3, mid 4-6, late 7+} (3 buckets)
+/// - **Life**: {<=0, 1-5, 6-10, 11-15, 16-20, 21+} (6 buckets per player)
+/// - **Board**: permanent count per controller (no power/toughness — that
+///   requires card_db; see `CardAwareBucketedAbstraction` for richer stats)
+/// - **Hand**: hand size and opponent hand size (no role classification
+///   without card_db; see `CardAwareBucketedAbstraction`)
+/// - **Turn**: {early 0-3, mid 4-6, late 7+} (3 buckets)
+///
+/// This abstraction operates without a `CardDatabase` reference, making it
+/// suitable for use in contexts where only the `InformationSet` is available.
 pub struct BucketedAbstraction;
 
 impl BucketedAbstraction {
-    /// Bucket a life total into 5 categories.
+    /// Bucket a life total into 6 categories.
     fn life_bucket(life: i32) -> u8 {
         match life {
             i32::MIN..=0 => 0,
@@ -362,73 +365,6 @@ impl BucketedAbstraction {
             4..=6 => 1,  // mid
             _ => 2,      // late
         }
-    }
-
-    /// Compute aggregate board stats for one side.
-    /// Returns (total_power, total_toughness, creature_count).
-    fn board_stats(battlefield: &[PermanentInfo], controller: usize, card_db: Option<&crate::game::CardDatabase>) -> (i32, i32, u32) {
-        let mut total_power: i32 = 0;
-        let mut total_toughness: i32 = 0;
-        let mut creature_count: u32 = 0;
-
-        for perm in battlefield {
-            if perm.controller == controller {
-                // We need card_db to know if something is a creature, but in the
-                // abstraction context we use a heuristic: if it has non-zero
-                // base stats tracked in PermanentInfo, count it.
-                // Since PermanentInfo doesn't store power/toughness directly,
-                // we count all permanents and use card_db if available.
-                if let Some(db) = card_db {
-                    if let Some(def) = db.get(perm.card_id) {
-                        if def.is_creature() {
-                            let p = def.power.unwrap_or(0) + perm.plus_counters - perm.minus_counters;
-                            let t = def.toughness.unwrap_or(0) + perm.plus_counters - perm.minus_counters;
-                            total_power += p;
-                            total_toughness += t;
-                            creature_count += 1;
-                        }
-                    }
-                } else {
-                    // Without card_db, count all permanents (conservative)
-                    creature_count += 1;
-                }
-            }
-        }
-
-        (total_power, total_toughness, creature_count)
-    }
-
-    /// Classify hand cards by role: (lands, cheap_spells <=2 cmc, expensive_spells >2 cmc, removal).
-    fn hand_categories(hand: &[u64], card_db: Option<&crate::game::CardDatabase>) -> (u8, u8, u8, u8) {
-        let mut lands: u8 = 0;
-        let mut cheap: u8 = 0;
-        let mut expensive: u8 = 0;
-        let mut removal: u8 = 0;
-
-        for &card_id in hand {
-            if let Some(db) = card_db {
-                if let Some(def) = db.get(card_id) {
-                    if def.is_land() {
-                        lands += 1;
-                    } else {
-                        let cmc = def.cmc();
-                        if cmc <= 2 {
-                            cheap += 1;
-                        } else {
-                            expensive += 1;
-                        }
-                        // Check if it's removal (deals damage or destroys)
-                        if let Some(ref effect) = def.spell_effect {
-                            if is_removal_effect(effect) {
-                                removal += 1;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        (lands, cheap, expensive, removal)
     }
 }
 
@@ -508,8 +444,68 @@ impl InfoSetAbstraction for BucketedAbstraction {
 
 /// Extended bucketed abstraction that uses the card database for richer
 /// classification (hand roles, board power/toughness aggregates).
+///
+/// Unlike `BucketedAbstraction`, this requires a `CardDatabase` reference
+/// and can classify hand cards by role (land, cheap, expensive, removal)
+/// and aggregate board stats (total power, toughness, creature count).
 pub struct CardAwareBucketedAbstraction<'a> {
     pub card_db: &'a crate::game::CardDatabase,
+}
+
+impl<'a> CardAwareBucketedAbstraction<'a> {
+    /// Compute aggregate board stats for one side.
+    /// Returns (total_power, total_toughness, creature_count).
+    fn board_stats(battlefield: &[PermanentInfo], controller: usize, card_db: &crate::game::CardDatabase) -> (i32, i32, u32) {
+        let mut total_power: i32 = 0;
+        let mut total_toughness: i32 = 0;
+        let mut creature_count: u32 = 0;
+
+        for perm in battlefield {
+            if perm.controller == controller {
+                if let Some(def) = card_db.get(perm.card_id) {
+                    if def.is_creature() {
+                        let p = def.power.unwrap_or(0) + perm.plus_counters - perm.minus_counters;
+                        let t = def.toughness.unwrap_or(0) + perm.plus_counters - perm.minus_counters;
+                        total_power += p;
+                        total_toughness += t;
+                        creature_count += 1;
+                    }
+                }
+            }
+        }
+
+        (total_power, total_toughness, creature_count)
+    }
+
+    /// Classify hand cards by role: (lands, cheap_spells <=2 cmc, expensive_spells >2 cmc, removal).
+    fn hand_categories(hand: &[u64], card_db: &crate::game::CardDatabase) -> (u8, u8, u8, u8) {
+        let mut lands: u8 = 0;
+        let mut cheap: u8 = 0;
+        let mut expensive: u8 = 0;
+        let mut removal: u8 = 0;
+
+        for &card_id in hand {
+            if let Some(def) = card_db.get(card_id) {
+                if def.is_land() {
+                    lands += 1;
+                } else {
+                    let cmc = def.cmc();
+                    if cmc <= 2 {
+                        cheap += 1;
+                    } else {
+                        expensive += 1;
+                    }
+                    if let Some(ref effect) = def.spell_effect {
+                        if is_removal_effect(effect) {
+                            removal += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        (lands, cheap, expensive, removal)
+    }
 }
 
 impl<'a> InfoSetAbstraction for CardAwareBucketedAbstraction<'a> {
@@ -532,7 +528,7 @@ impl<'a> InfoSetAbstraction for CardAwareBucketedAbstraction<'a> {
 
         // Hand categorization (using card_db)
         let (lands, cheap, expensive, removal) =
-            BucketedAbstraction::hand_categories(&info_set.my_hand, Some(self.card_db));
+            Self::hand_categories(&info_set.my_hand, self.card_db);
         lands.hash(&mut hasher);
         cheap.hash(&mut hasher);
         expensive.hash(&mut hasher);
@@ -546,9 +542,9 @@ impl<'a> InfoSetAbstraction for CardAwareBucketedAbstraction<'a> {
         let me = info_set.priority_player;
         let opp = 1 - me;
         let (my_power, my_toughness, my_count) =
-            BucketedAbstraction::board_stats(&info_set.battlefield, me, Some(self.card_db));
+            Self::board_stats(&info_set.battlefield, me, self.card_db);
         let (opp_power, opp_toughness, opp_count) =
-            BucketedAbstraction::board_stats(&info_set.battlefield, opp, Some(self.card_db));
+            Self::board_stats(&info_set.battlefield, opp, self.card_db);
 
         my_count.hash(&mut hasher);
         my_power.hash(&mut hasher);
