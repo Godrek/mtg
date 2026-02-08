@@ -238,6 +238,14 @@ impl CardDatabase {
     pub fn get(&self, id: CardId) -> Option<&CardDef> {
         self.cards.get(&id)
     }
+
+    pub fn find_by_name(&self, name: &str) -> Option<CardId> {
+        let target = name.trim();
+        self.cards
+            .values()
+            .find(|card| card.name.eq_ignore_ascii_case(target))
+            .map(|card| card.id)
+    }
 }
 
 impl GameState {
