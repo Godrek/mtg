@@ -204,6 +204,66 @@ impl Strategy for McfrStrategy {
     }
 }
 
+/// MCCFR-trained strategy with information set abstraction (Phase 2B).
+///
+/// Like `McfrStrategy`, but uses an `InfoSetAbstraction` to hash the info set
+/// the same way the training did. This is essential when training uses
+/// `BucketedAbstraction` — the play-time strategy must use the same abstraction
+/// or it will never find matching entries in the regret table.
+pub struct AbstractedMcfrStrategy {
+    /// Trained regret table (read-only during play).
+    policy: RegretTable,
+    /// Abstraction used during training (must match).
+    abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
+}
+
+impl AbstractedMcfrStrategy {
+    /// Create a new strategy from a trained regret table and matching abstraction.
+    pub fn new(
+        policy: RegretTable,
+        abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
+    ) -> Self {
+        AbstractedMcfrStrategy { policy, abstraction }
+    }
+}
+
+impl Strategy for AbstractedMcfrStrategy {
+    fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
+        let actions = legal_actions_abstracted(state);
+        if actions.is_empty() {
+            return Action::PassPriority;
+        }
+        if actions.len() == 1 {
+            return actions[0].clone();
+        }
+
+        let canonical_actions: Vec<_> = actions
+            .iter()
+            .map(|a| canonicalize(a, state))
+            .collect();
+
+        let view = state.visible_state(player);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = self.abstraction.abstract_info_set(&info_set);
+
+        let distribution = match self.policy.get(info_hash) {
+            Some(data) => data.average_strategy(&canonical_actions),
+            None => {
+                let n = actions.len();
+                vec![1.0 / n as f64; n]
+            }
+        };
+
+        let mut rng = rand::thread_rng();
+        let idx = sample_from_distribution(&distribution, &mut rng);
+        actions[idx].clone()
+    }
+
+    fn name(&self) -> &str {
+        "MCCFR-Abstracted"
+    }
+}
+
 /// Evaluate a blocking assignment. Positive = good for the defender.
 fn evaluate_blocks(state: &GameState, blocks: &[(ObjectId, ObjectId)]) -> i32 {
     let db = state.card_db();

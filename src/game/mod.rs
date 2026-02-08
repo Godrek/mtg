@@ -1,12 +1,59 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
 use crate::events::GameEvent;
-use crate::layers::ContinuousEffect;
+use crate::layers::{ComputedCharacteristics, ContinuousEffect};
 use crate::mana::ManaPool;
 use crate::replacement::{ReplacementEffect, ReplacementEventKind, ReplacementAction};
+
+// ---------------------------------------------------------------------------
+// Characteristics cache (Fix 1 + Fix 3)
+// ---------------------------------------------------------------------------
+
+/// Interior of the transient characteristics cache.
+#[derive(Debug, Default)]
+struct CharacteristicsCacheInner {
+    entries: HashMap<ObjectId, ComputedCharacteristics>,
+    /// Lazily-built set for O(1) battlefield membership tests.
+    battlefield_set: Option<HashSet<ObjectId>>,
+}
+
+/// Transient cache for [`compute_characteristics`](crate::layers::compute_characteristics) results.
+///
+/// Uses `Mutex` for interior mutability so the read-only query methods
+/// (`effective_power`, `has_keyword`, etc.) can populate the cache through
+/// shared `&self` references. `Mutex` (rather than `RefCell`) is required
+/// because `GameState` must be `Sync` for rayon parallel iteration.
+/// Each clone gets its own empty cache, so contention never occurs.
+///
+/// Per the Snapshot Contract (Phase 0.3), this cache is:
+/// - **NOT serialized** (`#[serde(skip)]`) — it's derived state
+/// - **NOT cloned** — `Clone` produces an empty cache (cheap `GameState::clone()`)
+/// - **Invalidated** whenever canonical state that affects characteristics changes
+pub struct CharacteristicsCache(Mutex<CharacteristicsCacheInner>);
+
+impl Clone for CharacteristicsCache {
+    fn clone(&self) -> Self {
+        // Per Snapshot Contract: derived/cached fields reset on clone.
+        CharacteristicsCache(Mutex::new(CharacteristicsCacheInner::default()))
+    }
+}
+
+impl Default for CharacteristicsCache {
+    fn default() -> Self {
+        CharacteristicsCache(Mutex::new(CharacteristicsCacheInner::default()))
+    }
+}
+
+impl std::fmt::Debug for CharacteristicsCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CharacteristicsCache")
+            .field("entries", &self.0.lock().map(|c| c.entries.len()).unwrap_or(0))
+            .finish()
+    }
+}
 
 /// Index into the players array (0 or 1 for a two-player game).
 pub type PlayerIndex = usize;
@@ -274,6 +321,13 @@ pub struct GameState {
     ///   present at clone time are copied but this is O(0) in practice
     #[serde(skip)]
     pub pending_events: Vec<GameEvent>,
+
+    /// Transient cache for `compute_characteristics` results.
+    /// Avoids redundant recomputation (~90× per combat step) by caching
+    /// the layer-engine output and a `HashSet` for O(1) battlefield membership.
+    /// Reset on clone, not serialized, invalidated on canonical-state mutation.
+    #[serde(skip)]
+    pub characteristics_cache: CharacteristicsCache,
 }
 
 /// A trigger that has been queued but not yet placed on the stack.
@@ -520,6 +574,7 @@ impl GameState {
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
+            characteristics_cache: CharacteristicsCache::default(),
         }
     }
 
@@ -571,6 +626,8 @@ impl GameState {
         from: ZoneType,
         to: ZoneType,
     ) {
+        self.invalidate_characteristics_cache();
+
         // Emit zone change event
         self.emit_event(GameEvent::ZoneChange {
             object: obj_id,
@@ -710,8 +767,10 @@ impl GameState {
     /// Uses the two-phase read-write pattern to satisfy the borrow checker:
     /// Phase 1 collects what needs to be added (read-only), Phase 2 mutates.
     pub fn refresh_continuous_effects(&mut self) {
+        self.invalidate_characteristics_cache();
+
         // Remove effects whose source has left the battlefield
-        let bf = self.battlefield.clone();
+        let bf: HashSet<ObjectId> = self.battlefield.iter().copied().collect();
         self.continuous_effects.retain(|e| {
             match e.duration {
                 crate::layers::Duration::WhileSourceOnBattlefield => {
@@ -760,47 +819,77 @@ impl GameState {
 
     /// Remove all UntilEndOfTurn continuous effects (called during cleanup).
     pub fn cleanup_eot_effects(&mut self) {
+        self.invalidate_characteristics_cache();
         self.continuous_effects
             .retain(|e| e.duration != crate::layers::Duration::UntilEndOfTurn);
     }
 
-    /// Compute the effective power of a creature using the layer engine.
-    pub fn effective_power(&self, obj_id: ObjectId) -> i32 {
-        crate::layers::compute_characteristics(
+    /// Get the computed characteristics for an object, using the transient cache
+    /// to avoid redundant recomputation within a single game step.
+    ///
+    /// On a cache miss the battlefield `HashSet` is built once (amortised across
+    /// all objects in the same cache epoch) and passed to the layer engine for
+    /// O(1) membership tests.
+    fn get_characteristics(&self, obj_id: ObjectId) -> Option<ComputedCharacteristics> {
+        let mut cache = self.characteristics_cache.0.lock().unwrap();
+
+        // Fast path: cache hit
+        if let Some(cached) = cache.entries.get(&obj_id) {
+            return Some(cached.clone());
+        }
+
+        // Ensure battlefield HashSet is built (once per cache epoch)
+        if cache.battlefield_set.is_none() {
+            cache.battlefield_set = Some(self.battlefield.iter().copied().collect());
+        }
+
+        // Compute characteristics with the cached battlefield set
+        let bf_set = cache.battlefield_set.as_ref().unwrap();
+        let result = crate::layers::compute_characteristics(
             obj_id,
             &self.continuous_effects,
             &self.objects,
-            &self.battlefield,
+            bf_set,
             self.card_db(),
-        )
-        .map(|c| c.power)
-        .unwrap_or(0)
+        );
+
+        if let Some(ref chars) = result {
+            cache.entries.insert(obj_id, chars.clone());
+        }
+
+        result
+    }
+
+    /// Invalidate the characteristics cache.
+    ///
+    /// Must be called whenever canonical state that affects characteristics
+    /// changes: battlefield membership, continuous effects, or object
+    /// counters/controller.
+    pub fn invalidate_characteristics_cache(&self) {
+        let mut cache = self.characteristics_cache.0.lock().unwrap();
+        cache.entries.clear();
+        cache.battlefield_set = None;
+    }
+
+    /// Compute the effective power of a creature using the layer engine.
+    pub fn effective_power(&self, obj_id: ObjectId) -> i32 {
+        self.get_characteristics(obj_id)
+            .map(|c| c.power)
+            .unwrap_or(0)
     }
 
     /// Compute the effective toughness of a creature using the layer engine.
     pub fn effective_toughness(&self, obj_id: ObjectId) -> i32 {
-        crate::layers::compute_characteristics(
-            obj_id,
-            &self.continuous_effects,
-            &self.objects,
-            &self.battlefield,
-            self.card_db(),
-        )
-        .map(|c| c.toughness)
-        .unwrap_or(0)
+        self.get_characteristics(obj_id)
+            .map(|c| c.toughness)
+            .unwrap_or(0)
     }
 
     /// Check if an object has a keyword ability using the layer engine.
     pub fn has_keyword(&self, obj_id: ObjectId, kw: crate::card::KeywordAbility) -> bool {
-        crate::layers::compute_characteristics(
-            obj_id,
-            &self.continuous_effects,
-            &self.objects,
-            &self.battlefield,
-            self.card_db(),
-        )
-        .map(|c| c.keywords.contains(&kw))
-        .unwrap_or(false)
+        self.get_characteristics(obj_id)
+            .map(|c| c.keywords.contains(&kw))
+            .unwrap_or(false)
     }
 
     /// Apply damage with replacement effects (CR 614).
@@ -903,6 +992,7 @@ impl GameState {
                 controller,
             );
 
+        let mut counters_changed = false;
         for &idx in &self_replacements {
             if let Some(effect) = self.replacement_effects.get(idx).cloned() {
                 match &effect.action {
@@ -916,6 +1006,7 @@ impl GameState {
                             }
                             if *extra_counters > 0 {
                                 inst.plus_counters += extra_counters;
+                                counters_changed = true;
                             }
                         }
                     }
@@ -923,25 +1014,23 @@ impl GameState {
                 }
             }
         }
+        if counters_changed {
+            self.invalidate_characteristics_cache();
+        }
     }
 
     /// Refresh replacement effects based on the current battlefield.
     /// Removes effects whose source has left the battlefield.
     pub fn refresh_replacement_effects(&mut self) {
+        let bf: HashSet<ObjectId> = self.battlefield.iter().copied().collect();
         self.replacement_effects
-            .retain(|e| self.battlefield.contains(&e.source_id));
+            .retain(|e| bf.contains(&e.source_id));
     }
 
     /// Check if an object is a creature using the layer engine.
     pub fn is_creature(&self, obj_id: ObjectId) -> bool {
-        crate::layers::compute_characteristics(
-            obj_id,
-            &self.continuous_effects,
-            &self.objects,
-            &self.battlefield,
-            self.card_db(),
-        )
-        .map(|c| c.card_types.contains(&crate::card::CardType::Creature))
-        .unwrap_or(false)
+        self.get_characteristics(obj_id)
+            .map(|c| c.card_types.contains(&crate::card::CardType::Creature))
+            .unwrap_or(false)
     }
 }

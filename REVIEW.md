@@ -1,61 +1,65 @@
-# PR #18 Review — Pass 2 (Post-Fix)
+# PR #19 Review: Fix compute_characteristics() caching, O(n) battlefield scans, and add SwitchPT+counters tests
 
-## Previous Review
+## Summary
 
-Pass 1 identified 3 bugs and 4 code quality issues. Commit `13b4788` ("Address PR #18 review: fix 3 bugs and 4 code quality issues") addresses all of them.
+Single commit (`00e0ee0`) addressing the 3 non-blocking observations from the PR #18 review:
+1. `compute_characteristics()` called redundantly (~90x per combat step)
+2. Missing test for counters + SwitchPT interaction
+3. O(n) `battlefield.contains()` scans in effect filtering
 
-## Fix Verification
+**+221 / -53 lines** across 3 files. All 155 tests pass (59 unit + 70 integration + 25 MCCFR + 1 deck import).
 
-### Bug 1 (High): `is_creature_on_battlefield` — FIXED
+## Fix 1: CharacteristicsCache — CORRECT
 
-`src/layers/mod.rs:408-423` — Now accepts `card_db`, looks up the card definition, and checks `d.card_types.contains(&CardType::Creature)`. The `effect_applies_to()` call sites all pass `card_db` through. Existing unit tests pass because `make_creature_def` correctly sets `CardType::Creature`, and the Humility test (which creates an enchantment at id 99 with `CardType::Enchantment`) correctly excludes it from `AllCreatures` targeting now.
+**`src/game/mod.rs:14-55, 325-333, 836-889`**
 
-**Verdict**: Fix is correct.
+A `Mutex<CharacteristicsCacheInner>` wrapping a `HashMap<ObjectId, ComputedCharacteristics>` plus a lazily-built `HashSet<ObjectId>` for battlefield membership. Key design decisions:
 
-### Bug 2 (High): Layer 7d counters before 7e SwitchPT — FIXED
+- **Interior mutability via `Mutex`**: Needed because read-only methods (`effective_power`, `has_keyword`) populate the cache through `&self`. `Mutex` (not `RefCell`) for rayon `Sync` compatibility. Correct choice.
+- **Clone produces empty cache**: No contention risk between cloned states. O(0) cache on clone is consistent with the Snapshot Contract and keeps `GameState::clone()` cheap for MCCFR.
+- **`#[serde(skip)]`**: Not serialized (derived state). Deserialize uses `Default` (empty cache). Correct.
+- **Lazy battlefield HashSet**: Built once per cache epoch on first miss, amortized across all objects queried in the same step. Eliminates redundant `Vec::contains()` O(n) scans.
 
-`src/layers/mod.rs:327-344` — Uses a `counters_applied` flag. When a `SwitchPT` effect is encountered, counters are applied first (if not already applied), then the swap happens. After the loop, counters are applied only if no SwitchPT was present. This correctly places counter application between layers 7c and 7e.
+### Cache invalidation audit — COMPLETE, NO GAPS
 
-Edge case analysis:
-- **No SwitchPT**: Counters applied after loop (after all 7c effects). Correct — 7d position.
-- **One SwitchPT**: Counters applied before swap. Correct — 7d before 7e.
-- **Multiple SwitchPT**: Counters applied before first swap only (flag prevents double-apply). Subsequent swaps just swap. Correct — two swaps cancel out.
+Exhaustive audit of all mutation sites that affect characteristics:
 
-**Verdict**: Fix is correct. Would benefit from a unit test with counters + SwitchPT to lock in the behavior.
+| Mutation type | Sites found | All invalidated? |
+|---------------|-------------|-------------------|
+| `continuous_effects` push/retain/extend | 6 | Yes |
+| `move_object()` (changes battlefield) | 13 | Yes (invalidated inside `move_object`) |
+| `plus_counters` / `minus_counters` | 4 | Yes |
+| `controller` changes | 1 | Yes (via downstream `move_object` + `refresh_continuous_effects`) |
+| `cleanup_eot_effects` | 1 | Yes |
 
-### Bug 3 (Medium): `SacrificeCreatures` player choice — MITIGATED
+Fields like `tapped` and `damage_marked` are correctly NOT triggering invalidation — they don't affect computed characteristics.
 
-`src/rules/mod.rs:726-730` — Now sorts creatures by `effective_power` ascending before taking the first N, so the weakest creatures are sacrificed. Comment acknowledges this is a heuristic standing in for actual player choice.
+## Fix 2: O(n) Battlefield Scans → HashSet — CORRECT
 
-**Verdict**: Acceptable as a heuristic. Not rules-correct (player should choose), but reasonable for MCCFR simulation where the solver will learn around it. Consider surfacing this as a player action in a future phase.
+**`src/layers/mod.rs:216, 364, 411`** — `compute_characteristics`, `effect_applies_to`, and `is_creature_on_battlefield` now accept `&HashSet<ObjectId>` instead of `&[ObjectId]`.
 
-### Issue 1 (Clippy error): Loop that never loops — FIXED
+**`src/game/mod.rs:773`** — `refresh_continuous_effects` builds a local `HashSet` for its own retain check.
 
-`src/action/mod.rs:349` — Rewritten from `for ma in &def.mana_abilities { ... break; }` to `if let Some(ma) = def.mana_abilities.first()`. Clean fix, clippy now passes with only warnings (no errors).
+**`src/game/mod.rs:855-860`** — `get_characteristics` lazily builds the `HashSet` inside the cache, amortized across all queries in the same epoch.
 
-### Issue 2 (Code Quality): Identical `AddKeyword` branches — FIXED
+All 14 unit tests in `layers::tests` updated from `vec![...]` to `HashSet` literals.
 
-`src/layers/mod.rs:294-299` — Collapsed to a single branch with a clear comment: "Grants apply regardless of whether abilities were removed."
+## Fix 3: SwitchPT + Counters Tests — CORRECT
 
-### Issue 3 (Minor): Unused `_db` parameter — FIXED
+Two new unit tests:
 
-`src/action/mod.rs:394` — `_db` parameter removed from `can_target_permanent()` and all 5 call sites updated.
+**`test_counters_with_switch_pt`** (`src/layers/mod.rs:800-826`): 2/4 creature with 1 +1/+1 counter and SwitchPT. Verifies: base 2/4 → counters 3/5 (7d) → swap 5/3 (7e). Asymmetric P/T makes the ordering observable.
 
-### Issue 4 (Minor): `PreventCombatDamage` no-op — IMPROVED
+**`test_anthem_counters_switch_pt`** (`src/layers/mod.rs:832-875`): 1/3 creature with anthem (+1/+1), 1 counter, and SwitchPT. Verifies: base 1/3 → anthem 2/4 (7c) → counters 3/5 (7d) → swap 5/3 (7e). Tests all three sublayers in sequence.
 
-`src/rules/mod.rs:739-742` — Comment now clarifies no cards in the current pool use this effect and describes the intended implementation path. Acceptable.
+Both tests would fail if counters were applied after SwitchPT (the old bug from PR #18), confirming the fix is locked in.
 
-## Remaining Observations
+## Minor Observations (Non-Blocking)
 
-### 1. Performance: `compute_characteristics()` still called redundantly (unchanged)
-This was noted as a suggestion, not a blocking issue. Still worth addressing before scaling MCCFR training. Each combat step with N attackers and M blockers triggers O(NM) calls to `compute_characteristics()`, each of which filters/sorts/iterates all active effects.
+1. **`ComputedCharacteristics::clone()` on cache hit**: The `get_characteristics()` method clones the cached entry on every hit. Since `ComputedCharacteristics` contains multiple `Vec`s (card_types, subtypes, colors, keywords), this allocates on every call. For the MCCFR hot path, returning an `Arc<ComputedCharacteristics>` or a cache reference could avoid this — but it's a micro-optimization and not needed now.
 
-### 2. Missing test: counters + SwitchPT interaction
-The 7d/7e fix is logically correct but there's no unit test that exercises the counters-before-SwitchPT path. A test like "2/2 creature with 2 +1/+1 counters and SwitchPT should be 4/4 (not 2/2 → switch → 2/2 + counters → 4/4)" would lock this in.
-
-### 3. `battlefield.contains()` O(n) scans
-Multiple `battlefield.contains(&obj_id)` calls in `effect_applies_to()` are O(n). With many permanents and many effects, this could become quadratic. Low priority for now.
+2. **Mutex overhead**: The `Mutex` lock/unlock on every `effective_power`/`has_keyword` call adds some overhead. In practice this is uncontended (each `GameState` clone gets its own cache), so the cost is just the atomic operations. Fine for now.
 
 ## Verdict
 
-**Approve.** All 3 bugs are fixed correctly, all 4 code quality issues are resolved, clippy passes cleanly (warnings only, no errors), and all 130 tests pass. The architecture is sound and ready to merge.
+**Approve.** All 3 observations addressed correctly. Cache invalidation is complete with no gaps. Tests lock in layer ordering. 155 tests pass, clippy clean (warnings only).

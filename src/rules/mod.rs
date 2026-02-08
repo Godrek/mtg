@@ -585,6 +585,7 @@ fn resolve_effect(
                     }
                 }
             }
+            state.invalidate_characteristics_cache();
         }
 
         Effect::DiscardCards { count, .. } => {
@@ -692,6 +693,7 @@ fn resolve_effect(
                     });
                 }
             }
+            state.invalidate_characteristics_cache();
         }
 
         Effect::PutCounters { count, .. } => {
@@ -706,6 +708,7 @@ fn resolve_effect(
                     }
                 }
             }
+            state.invalidate_characteristics_cache();
         }
 
         Effect::MillCards { count, .. } => {
