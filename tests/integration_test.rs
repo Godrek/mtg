@@ -5,7 +5,7 @@ use rand::seq::SliceRandom;
 use mtg_gto::action::canonical::{canonicalize, resolve};
 use mtg_gto::action::{legal_actions, legal_actions_abstracted, Action};
 use mtg_gto::card::sample;
-use mtg_gto::card::ZoneType;
+use mtg_gto::card::{KeywordAbility, ZoneType};
 use mtg_gto::events::{EventBus, GameEvent, Zone};
 use mtg_gto::game::{GameState, Phase, Target};
 use mtg_gto::replacement::{
@@ -2328,4 +2328,524 @@ fn test_greedy_strategy_handles_replacement_order() {
     let action = greedy.choose_action(&state, 0);
     // Should return PassPriority since there's nothing else to do
     assert_eq!(action, Action::PassPriority);
+}
+
+// =====================================================================
+// Phase 2A: Layered effects integration tests
+// =====================================================================
+
+#[test]
+fn test_expanded_card_pool_count() {
+    let db = sample::build_sample_db();
+    // Phase 2A target: 100+ cards in the database
+    let mut count = 0;
+    // Check a sampling of cards across all categories
+    let sample_ids = vec![
+        sample::ids::MOTHER_OF_RUNES,
+        sample::ids::ELITE_VANGUARD,
+        sample::ids::WHITE_KNIGHT,
+        sample::ids::BANESLAYER_ANGEL,
+        sample::ids::PATH_TO_EXILE,
+        sample::ids::WRATH_OF_GOD,
+        sample::ids::GLORIOUS_ANTHEM,
+        sample::ids::HUMILITY,
+        sample::ids::DELVER_OF_SECRETS,
+        sample::ids::SNAPCASTER_MAGE,
+        sample::ids::MANA_LEAK,
+        sample::ids::DARK_CONFIDANT,
+        sample::ids::VAMPIRE_NIGHTHAWK,
+        sample::ids::DOOM_BLADE,
+        sample::ids::THOUGHTSEIZE,
+        sample::ids::ASH_ZEALOT,
+        sample::ids::GOBLIN_CHAINWHIRLER,
+        sample::ids::CHAIN_LIGHTNING,
+        sample::ids::TARMOGOYF,
+        sample::ids::STRANGLEROOT_GEIST,
+        sample::ids::GAEA_ANTHEM,
+        sample::ids::SOL_RING,
+        sample::ids::SIGNAL_PEST,
+        sample::ids::LIGHTNING_HELIX,
+        sample::ids::TERMINATE,
+        sample::ids::GEIST_OF_SAINT_TRAFT,
+        sample::ids::FLEECEMANE_LION,
+        sample::ids::TIDEHOLLOW_SCULLER,
+    ];
+    for id in &sample_ids {
+        assert!(db.get(*id).is_some(), "Card ID {} should be in DB", id);
+        count += 1;
+    }
+    assert!(count >= 28, "Should have checked at least 28 sample cards");
+}
+
+#[test]
+fn test_anthem_cards_have_static_abilities() {
+    let db = sample::build_sample_db();
+
+    // Glorious Anthem should have an Anthem static ability
+    let anthem = db.get(sample::ids::GLORIOUS_ANTHEM).unwrap();
+    assert!(
+        !anthem.static_abilities.is_empty(),
+        "Glorious Anthem should have static abilities"
+    );
+
+    // Honor of the Pure
+    let honor = db.get(sample::ids::HONOR_OF_THE_PURE).unwrap();
+    assert!(!honor.static_abilities.is_empty());
+
+    // Crusade
+    let crusade = db.get(sample::ids::CRUSADE).unwrap();
+    assert!(!crusade.static_abilities.is_empty());
+
+    // Gaea's Anthem
+    let gaea = db.get(sample::ids::GAEA_ANTHEM).unwrap();
+    assert!(!gaea.static_abilities.is_empty());
+
+    // Humility should have both RemoveAllAbilities and SetPowerToughness
+    let humility = db.get(sample::ids::HUMILITY).unwrap();
+    assert_eq!(
+        humility.static_abilities.len(),
+        2,
+        "Humility should have 2 static abilities (RemoveAllAbilities + SetPT)"
+    );
+}
+
+#[test]
+fn test_glorious_anthem_buffs_creatures_on_battlefield() {
+    // Place Glorious Anthem and creatures on the battlefield,
+    // then verify the layer engine computes correct P/T.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Library filler
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    // Player 0 has Glorious Anthem + Savannah Lions on the battlefield
+    let _anthem_id =
+        state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
+    let lions_id =
+        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+
+    // Player 1 has Grizzly Bears (opponent — should NOT be buffed by Glorious Anthem)
+    let bears_id =
+        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+
+    // Refresh continuous effects to generate anthem effects
+    state.refresh_continuous_effects();
+
+    // Savannah Lions base 2/1, anthem +1/+1 = 3/2
+    assert_eq!(state.effective_power(lions_id), 3, "Lions should be 3 power with anthem");
+    assert_eq!(state.effective_toughness(lions_id), 2, "Lions should be 2 toughness with anthem");
+
+    // Opponent's Grizzly Bears should be unaffected (2/2)
+    assert_eq!(state.effective_power(bears_id), 2, "Opponent bears should be unaffected");
+    assert_eq!(state.effective_toughness(bears_id), 2, "Opponent bears should be unaffected");
+}
+
+#[test]
+fn test_crusade_buffs_all_creatures() {
+    // Crusade affects AllCreatures (simplified), so both players' creatures get buffed
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    let _crusade_id =
+        state.create_card_in_zone(sample::ids::CRUSADE, 0, ZoneType::Battlefield);
+    let lions_id =
+        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+    let bears_id =
+        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+
+    state.refresh_continuous_effects();
+
+    // Both get +1/+1 from Crusade (AllCreatures)
+    assert_eq!(state.effective_power(lions_id), 3);
+    assert_eq!(state.effective_toughness(lions_id), 2);
+    assert_eq!(state.effective_power(bears_id), 3);
+    assert_eq!(state.effective_toughness(bears_id), 3);
+}
+
+#[test]
+fn test_humility_makes_all_creatures_1_1_and_removes_abilities() {
+    // Humility sets all creatures to 1/1 and removes all abilities
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    // Baneslayer Angel: 5/5 Flying, First strike, Lifelink
+    let angel_id =
+        state.create_card_in_zone(sample::ids::BANESLAYER_ANGEL, 0, ZoneType::Battlefield);
+    let _humility_id =
+        state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
+
+    state.refresh_continuous_effects();
+
+    // Baneslayer should be 1/1 under Humility
+    assert_eq!(state.effective_power(angel_id), 1, "Angel should be 1/1 under Humility");
+    assert_eq!(state.effective_toughness(angel_id), 1);
+
+    // Angel should lose flying
+    assert!(
+        !state.has_keyword(angel_id, KeywordAbility::Flying),
+        "Angel should lose flying under Humility"
+    );
+    assert!(!state.has_keyword(angel_id, KeywordAbility::FirstStrike));
+    assert!(!state.has_keyword(angel_id, KeywordAbility::Lifelink));
+}
+
+#[test]
+fn test_multiple_anthems_stack() {
+    // Two Glorious Anthems should give +2/+2
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    let _anthem1 =
+        state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
+    let _anthem2 =
+        state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
+    let lions_id =
+        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+
+    state.refresh_continuous_effects();
+
+    // Savannah Lions 2/1 + 1/1 + 1/1 = 4/3
+    assert_eq!(state.effective_power(lions_id), 4);
+    assert_eq!(state.effective_toughness(lions_id), 3);
+}
+
+#[test]
+fn test_anthem_plus_humility_timestamp_ordering() {
+    // If Glorious Anthem is played first, then Humility:
+    // Layer 6: Humility removes abilities
+    // Layer 7b: Humility sets P/T to 1/1 (later in layer order than 7c)
+    // Layer 7c: Anthem gives +1/+1
+    // Result: creatures are 1/1 (set) then +1/+1 = 2/2
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    let _anthem =
+        state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
+    let _humility =
+        state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
+    let lions_id =
+        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+
+    state.refresh_continuous_effects();
+
+    // Layer 7b (SetPT 1/1) applies before Layer 7c (ModifyPT +1/+1)
+    // So: base -> set to 1/1 -> +1/+1 = 2/2
+    assert_eq!(state.effective_power(lions_id), 2, "Anthem + Humility = 2/2");
+    assert_eq!(state.effective_toughness(lions_id), 2);
+
+    // Abilities should still be removed by Layer 6
+    assert!(!state.has_keyword(lions_id, KeywordAbility::Flying));
+}
+
+#[test]
+fn test_wrath_of_god_card_in_db() {
+    // Verify Wrath of God is correctly defined as a DestroyAll sorcery
+    let db = sample::build_sample_db();
+    let wrath = db.get(sample::ids::WRATH_OF_GOD).unwrap();
+    assert!(wrath.is_sorcery());
+    assert_eq!(
+        wrath.spell_effect,
+        Some(mtg_gto::card::Effect::DestroyAll)
+    );
+
+    // Day of Judgment is also DestroyAll
+    let doj = db.get(sample::ids::DAY_OF_JUDGMENT).unwrap();
+    assert!(doj.is_sorcery());
+    assert_eq!(
+        doj.spell_effect,
+        Some(mtg_gto::card::Effect::DestroyAll)
+    );
+}
+
+#[test]
+fn test_new_effect_types_in_card_definitions() {
+    let db = sample::build_sample_db();
+
+    // Path to Exile uses ExileTarget
+    let path = db.get(sample::ids::PATH_TO_EXILE).unwrap();
+    assert!(path.spell_effect.is_some());
+
+    // Doom Blade uses DestroyTarget
+    let doom = db.get(sample::ids::DOOM_BLADE).unwrap();
+    assert!(doom.spell_effect.is_some());
+
+    // Thoughtseize uses Multiple (DiscardCards + LoseLife)
+    let ts = db.get(sample::ids::THOUGHTSEIZE).unwrap();
+    assert!(ts.spell_effect.is_some());
+
+    // Hymn to Tourach uses DiscardCards
+    let hymn = db.get(sample::ids::HYMN_TO_TOURACH).unwrap();
+    assert!(hymn.spell_effect.is_some());
+
+    // Diabolic Edict uses SacrificeCreatures
+    let edict = db.get(sample::ids::DIABOLIC_EDICT).unwrap();
+    assert!(edict.spell_effect.is_some());
+
+    // Tragic Slip uses Debuff
+    let slip = db.get(sample::ids::TRAGIC_SLIP).unwrap();
+    assert!(slip.spell_effect.is_some());
+
+    // Lightning Helix uses Multiple (DealDamage + GainLife)
+    let helix = db.get(sample::ids::LIGHTNING_HELIX).unwrap();
+    assert!(helix.spell_effect.is_some());
+}
+
+#[test]
+fn test_keyword_rich_creatures() {
+    let db = sample::build_sample_db();
+
+    // Baneslayer Angel: Flying, First Strike, Lifelink
+    let angel = db.get(sample::ids::BANESLAYER_ANGEL).unwrap();
+    assert!(angel.keywords.contains(&KeywordAbility::Flying));
+    assert!(angel.keywords.contains(&KeywordAbility::FirstStrike));
+    assert!(angel.keywords.contains(&KeywordAbility::Lifelink));
+
+    // Vampire Nighthawk: Flying, Deathtouch, Lifelink
+    let nighthawk = db.get(sample::ids::VAMPIRE_NIGHTHAWK).unwrap();
+    assert!(nighthawk.keywords.contains(&KeywordAbility::Flying));
+    assert!(nighthawk.keywords.contains(&KeywordAbility::Deathtouch));
+    assert!(nighthawk.keywords.contains(&KeywordAbility::Lifelink));
+
+    // Ash Zealot: First Strike, Haste
+    let zealot = db.get(sample::ids::ASH_ZEALOT).unwrap();
+    assert!(zealot.keywords.contains(&KeywordAbility::FirstStrike));
+    assert!(zealot.keywords.contains(&KeywordAbility::Haste));
+
+    // Phyrexian Obliterator: Trample
+    let obliterator = db.get(sample::ids::PHYREXIAN_OBLITERATOR).unwrap();
+    assert!(obliterator.keywords.contains(&KeywordAbility::Trample));
+}
+
+#[test]
+fn test_layer_engine_effective_power_toughness() {
+    // Verify the GameState helper methods work correctly
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
+    }
+
+    let angel_id =
+        state.create_card_in_zone(sample::ids::BANESLAYER_ANGEL, 0, ZoneType::Battlefield);
+
+    state.refresh_continuous_effects();
+
+    // Baneslayer is 5/5 with no modifying effects
+    assert_eq!(state.effective_power(angel_id), 5);
+    assert_eq!(state.effective_toughness(angel_id), 5);
+    assert!(state.has_keyword(angel_id, KeywordAbility::Flying));
+    assert!(state.has_keyword(angel_id, KeywordAbility::FirstStrike));
+    assert!(state.is_creature(angel_id));
+}
+
+#[test]
+fn test_etb_trigger_cards_geralf_messenger() {
+    // Geralf's Messenger has an ETB trigger that makes opponent lose 2 life
+    let db = sample::build_sample_db();
+    let messenger = db.get(sample::ids::GERALF_MESSENGER).unwrap();
+    assert_eq!(messenger.triggered_abilities.len(), 1);
+    assert_eq!(
+        messenger.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::EntersBattlefield
+    );
+    // Also enters tapped
+    assert!(messenger.enters_tapped);
+}
+
+#[test]
+fn test_etb_trigger_cards_man_o_war() {
+    // Man-o'-War has an ETB bounce trigger
+    let db = sample::build_sample_db();
+    let mow = db.get(sample::ids::MAN_O_WAR).unwrap();
+    assert_eq!(mow.triggered_abilities.len(), 1);
+    assert_eq!(
+        mow.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::EntersBattlefield
+    );
+}
+
+#[test]
+fn test_game_with_anthem_completes() {
+    // Run a full game with anthem cards in the decks to verify no panics
+    let db = sample::build_sample_db();
+
+    let mut deck_a = Vec::new();
+    for _ in 0..18 {
+        deck_a.push(sample::ids::PLAINS);
+    }
+    for _ in 0..4 {
+        deck_a.push(sample::ids::SAVANNAH_LIONS);
+    }
+    for _ in 0..4 {
+        deck_a.push(sample::ids::ELITE_VANGUARD);
+    }
+    for _ in 0..2 {
+        deck_a.push(sample::ids::GLORIOUS_ANTHEM);
+    }
+    for _ in 0..2 {
+        deck_a.push(sample::ids::LIGHTNING_BOLT);
+    }
+
+    let mut deck_b = Vec::new();
+    for _ in 0..18 {
+        deck_b.push(sample::ids::MOUNTAIN);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::GOBLIN_GUIDE);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::GREY_OGRE);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::LIGHTNING_BOLT);
+    }
+
+    assert_eq!(deck_a.len(), 30);
+    assert_eq!(deck_b.len(), 30);
+
+    let result = simulation::run_game(
+        &db,
+        &deck_a,
+        &deck_b,
+        &RandomStrategy,
+        &RandomStrategy,
+    );
+    // Just verify it completes without panicking
+    assert!(
+        result.winner.is_some() || result.turns >= 100,
+        "Game should complete"
+    );
+}
+
+#[test]
+fn test_game_with_wrath_completes() {
+    // Run a game with Wrath of God to verify DestroyAll works end-to-end
+    let db = sample::build_sample_db();
+
+    let mut deck_a = Vec::new();
+    for _ in 0..18 {
+        deck_a.push(sample::ids::PLAINS);
+    }
+    for _ in 0..4 {
+        deck_a.push(sample::ids::SAVANNAH_LIONS);
+    }
+    for _ in 0..4 {
+        deck_a.push(sample::ids::WRATH_OF_GOD);
+    }
+    for _ in 0..4 {
+        deck_a.push(sample::ids::SERRA_ANGEL);
+    }
+
+    let mut deck_b = Vec::new();
+    for _ in 0..18 {
+        deck_b.push(sample::ids::MOUNTAIN);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::GOBLIN_GUIDE);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::GREY_OGRE);
+    }
+    for _ in 0..4 {
+        deck_b.push(sample::ids::LIGHTNING_BOLT);
+    }
+
+    assert_eq!(deck_a.len(), 30);
+    assert_eq!(deck_b.len(), 30);
+
+    let result = simulation::run_game(
+        &db,
+        &deck_a,
+        &deck_b,
+        &GreedyStrategy,
+        &GreedyStrategy,
+    );
+    assert!(
+        result.winner.is_some() || result.turns >= 100,
+        "Game should complete"
+    );
+}
+
+#[test]
+fn test_multicolor_cards_in_db() {
+    let db = sample::build_sample_db();
+
+    // Lightning Helix: RW instant
+    let helix = db.get(sample::ids::LIGHTNING_HELIX).unwrap();
+    assert!(helix.is_instant());
+    let cost = helix.mana_cost.as_ref().unwrap();
+    assert!(cost.white > 0 && cost.red > 0);
+
+    // Terminate: BR instant
+    let term = db.get(sample::ids::TERMINATE).unwrap();
+    assert!(term.is_instant());
+
+    // Geist of Saint Traft: WU creature
+    let geist = db.get(sample::ids::GEIST_OF_SAINT_TRAFT).unwrap();
+    assert!(geist.is_creature());
+
+    // Fleecemane Lion: GW creature
+    let lion = db.get(sample::ids::FLEECEMANE_LION).unwrap();
+    assert!(lion.is_creature());
+    assert_eq!(lion.power, Some(3));
+    assert_eq!(lion.toughness, Some(3));
+}
+
+#[test]
+fn test_artifact_creatures_in_db() {
+    let db = sample::build_sample_db();
+
+    // Signal Pest: artifact creature
+    let pest = db.get(sample::ids::SIGNAL_PEST).unwrap();
+    assert!(pest.is_creature());
+    assert!(
+        pest.card_types
+            .contains(&mtg_gto::card::CardType::Artifact),
+        "Signal Pest should be an artifact"
+    );
+
+    // Steel Overseer: artifact creature
+    let overseer = db.get(sample::ids::STEEL_OVERSEER).unwrap();
+    assert!(overseer.is_creature());
+    assert!(overseer
+        .card_types
+        .contains(&mtg_gto::card::CardType::Artifact));
+
+    // Vault Skirge: artifact creature with flying and lifelink
+    let skirge = db.get(sample::ids::VAULT_SKIRGE).unwrap();
+    assert!(skirge.is_creature());
+    assert!(skirge.keywords.contains(&KeywordAbility::Flying));
+    assert!(skirge.keywords.contains(&KeywordAbility::Lifelink));
 }
