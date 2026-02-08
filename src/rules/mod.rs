@@ -199,13 +199,22 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 state.phase = Phase::EndOfCombat;
                 state.priority_player = state.active_player;
             } else {
-                // Fire attack triggers for each attacker
+                // Batch-check attack triggers for all attackers before flushing,
+                // so the player gets a single ordering decision for all simultaneous triggers.
                 for &attacker_id in attackers {
-                    fire_triggers(state, TriggerCondition::Attacks, Some(attacker_id));
+                    check_triggers(state, TriggerCondition::Attacks, Some(attacker_id));
                 }
-                // Advance to declare blockers
-                state.phase = Phase::DeclareBlockers;
-                state.priority_player = state.opponent(state.active_player);
+                let flushed = flush_triggers(state);
+
+                if flushed {
+                    // All triggers flushed (0-1 per player) — advance normally
+                    state.phase = Phase::DeclareBlockers;
+                    state.priority_player = state.opponent(state.active_player);
+                }
+                // else: triggers need ordering — priority_player already set by
+                // flush_triggers. Phase stays DeclareAttackers; legal_actions will
+                // offer OrderTriggers. After ordering completes, advance_phase will
+                // naturally move to DeclareBlockers.
             }
         }
 
@@ -239,6 +248,32 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 .damage_assignment
                 .insert(*attacker, assignment.clone());
             state.consecutive_passes = 0;
+        }
+
+        Action::OrderTriggers { ordering } => {
+            let player = state.priority_player;
+
+            // Place this player's triggers on the stack in the chosen order.
+            // The first element goes on the stack first (resolves last due to LIFO).
+            for &(source_id, ability_index) in ordering {
+                if let Some(pos) = state.pending_triggers.iter().position(|t| {
+                    t.controller == player
+                        && t.source_id == source_id
+                        && t.ability_index == ability_index
+                }) {
+                    let trigger = state.pending_triggers.remove(pos);
+                    push_trigger_to_stack(state, &trigger);
+                }
+            }
+
+            // Continue flushing remaining triggers (the other player's).
+            // This may auto-push them or pause again if that player also has >1.
+            // Return value intentionally unused: if the other player also needs to
+            // order, the game loop will present OrderTriggers on the next iteration.
+            let _ = flush_triggers(state);
+
+            // Don't reset consecutive_passes — this is a pre-priority ordering
+            // decision, not a normal game action.
         }
 
         Action::Concede => {
@@ -323,8 +358,10 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
-        // Queue ETB triggered abilities (they go on the stack, not resolve immediately)
-        fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+        // Queue ETB triggered abilities (they go on the stack, not resolve immediately).
+        // If flush pauses (controller has >1 ETB trigger), pending_triggers stays
+        // populated and the game loop will offer OrderTriggers.
+        let _ = fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
     } else {
         if let Some(ref effect) = def.spell_effect {
             resolve_effect(state, effect, controller, targets);
@@ -395,13 +432,18 @@ fn resolve_effect(
             for &id in &destroyable {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
             }
-            // Fire dies triggers for destroyed creatures
+            // Fire dies triggers for destroyed creatures.
+            // Batch-check all death triggers before flushing so the controller
+            // gets a single ordering decision for simultaneous "when ~ dies" triggers.
             for &id in &destroyable {
                 check_triggers(state, TriggerCondition::Dies, Some(id));
                 check_triggers(state, TriggerCondition::Dies, None);
             }
             if !destroyable.is_empty() {
-                flush_triggers(state);
+                // If flush pauses (player has >1 trigger), pending_triggers will
+                // remain populated and legal_actions() will offer OrderTriggers
+                // on the next game loop iteration.
+                let _ = flush_triggers(state);
             }
         }
 
@@ -547,49 +589,92 @@ fn check_triggers(state: &mut GameState, condition: TriggerCondition, source_hin
     state.pending_triggers.extend(triggers);
 }
 
-/// Flush all pending triggers onto the stack in APNAP order
-/// (Active Player, Non-Active Player). Within each player's triggers,
-/// they go on the stack in the order the controller chooses (simplified: FIFO).
-fn flush_triggers(state: &mut GameState) {
+/// Flush pending triggers onto the stack in APNAP order
+/// (Active Player, Non-Active Player). When a player controls multiple
+/// simultaneous triggers, they must choose the ordering — this is surfaced
+/// as an `Action::OrderTriggers` decision point for MCCFR to observe.
+///
+/// If a player has >1 trigger, this function pauses (leaves triggers in
+/// `pending_triggers` and sets `priority_player`) so the game loop can
+/// present the ordering choice. Returns `true` if all triggers were flushed,
+/// `false` if paused waiting for a player's ordering decision.
+#[must_use]
+fn flush_triggers(state: &mut GameState) -> bool {
     if state.pending_triggers.is_empty() {
-        return;
+        return true;
     }
 
     let active = state.active_player;
-    let triggers = std::mem::take(&mut state.pending_triggers);
 
-    // Sort: active player's triggers first (they go on the stack first = resolve last)
-    let mut ap_triggers: Vec<PendingTrigger> = Vec::new();
-    let mut nap_triggers: Vec<PendingTrigger> = Vec::new();
+    // Count each player's pending triggers
+    let ap_count = state
+        .pending_triggers
+        .iter()
+        .filter(|t| t.controller == active)
+        .count();
+    let nap_count = state
+        .pending_triggers
+        .iter()
+        .filter(|t| t.controller != active)
+        .count();
 
-    for t in triggers {
-        if t.controller == active {
-            ap_triggers.push(t);
-        } else {
-            nap_triggers.push(t);
-        }
+    // APNAP: handle active player's triggers first
+    if ap_count > 1 {
+        // AP has multiple triggers — pause for ordering decision
+        state.priority_player = active;
+        return false;
     }
 
-    // APNAP: active player's triggers go on stack first, then non-active player's
-    // (non-active player's resolve first since stack is LIFO)
-    for trigger in ap_triggers.into_iter().chain(nap_triggers.into_iter()) {
-        let stack_id = state.new_stack_id();
-        state.stack.push(StackEntry {
-            id: stack_id,
-            source: StackSource::TriggeredAbility {
-                source_id: trigger.source_id,
-                ability_index: trigger.ability_index,
-            },
-            controller: trigger.controller,
-            targets: trigger.targets,
-        });
+    // AP has 0-1 triggers: auto-push them to the stack
+    let ap_triggers: Vec<PendingTrigger> = state
+        .pending_triggers
+        .iter()
+        .filter(|t| t.controller == active)
+        .cloned()
+        .collect();
+    for trigger in ap_triggers {
+        push_trigger_to_stack(state, &trigger);
     }
+    state.pending_triggers.retain(|t| t.controller != active);
+
+    // Now handle non-active player's triggers
+    if nap_count > 1 {
+        // NAP has multiple triggers — pause for ordering decision
+        let nap = state.opponent(active);
+        state.priority_player = nap;
+        return false;
+    }
+
+    // NAP has 0-1 triggers: auto-push them
+    let nap_triggers = std::mem::take(&mut state.pending_triggers);
+    for trigger in nap_triggers {
+        push_trigger_to_stack(state, &trigger);
+    }
+
+    true
+}
+
+/// Push a single trigger onto the stack as a TriggeredAbility entry.
+fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
+    let stack_id = state.new_stack_id();
+    state.stack.push(StackEntry {
+        id: stack_id,
+        source: StackSource::TriggeredAbility {
+            source_id: trigger.source_id,
+            ability_index: trigger.ability_index,
+        },
+        controller: trigger.controller,
+        targets: trigger.targets.clone(),
+    });
 }
 
 /// Check triggers for a specific game event and flush them to the stack.
-pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) {
+/// Returns `true` if all triggers were flushed, `false` if paused waiting
+/// for a player's ordering decision (i.e. pending_triggers is non-empty).
+#[must_use]
+pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) -> bool {
     check_triggers(state, condition, source_hint);
-    flush_triggers(state);
+    flush_triggers(state)
 }
 
 // ========================================================================
@@ -702,7 +787,9 @@ pub fn check_state_based_actions(state: &mut GameState) {
         }
     }
 
-    // Fire dies triggers after all SBA are resolved
+    // Fire dies triggers after all SBA are resolved.
+    // Batch-check all death triggers before a single flush so the controller
+    // gets a combined ordering decision for simultaneous death triggers.
     for &obj_id in &all_died {
         // Check the dying creature's own "when ~ dies" triggers
         check_triggers(state, TriggerCondition::Dies, Some(obj_id));
@@ -710,7 +797,10 @@ pub fn check_state_based_actions(state: &mut GameState) {
         check_triggers(state, TriggerCondition::Dies, None);
     }
     if !all_died.is_empty() {
-        flush_triggers(state);
+        // If flush pauses (player has >1 trigger), pending_triggers will
+        // remain populated and legal_actions() will offer OrderTriggers
+        // on the next game loop iteration.
+        let _ = flush_triggers(state);
     }
 }
 
@@ -772,9 +862,16 @@ fn execute_phase_entry(state: &mut GameState) {
         }
 
         Phase::Upkeep => {
+            // Fire beginning-of-upkeep triggers. Set priority before firing so that
+            // if flush_triggers pauses, the priority_player it sets takes precedence.
+            // If flush completes, AP keeps priority for normal upkeep actions.
             state.priority_player = active;
-            // Fire beginning-of-upkeep triggers
-            fire_triggers(state, TriggerCondition::BeginningOfUpkeep, None);
+            let flushed = fire_triggers(state, TriggerCondition::BeginningOfUpkeep, None);
+            if flushed {
+                // All triggers auto-flushed; AP keeps priority
+                state.priority_player = active;
+            }
+            // else: flush_triggers set priority_player to whoever needs to order
         }
 
         Phase::PreCombatMain | Phase::PostCombatMain => {
@@ -820,9 +917,14 @@ fn execute_phase_entry(state: &mut GameState) {
         }
 
         Phase::EndStep => {
+            // Fire end-of-turn triggers. Same pattern as Upkeep:
+            // set priority before firing, re-set after if flush completes.
             state.priority_player = active;
-            // Fire end-of-turn triggers
-            fire_triggers(state, TriggerCondition::EndOfTurn, None);
+            let flushed = fire_triggers(state, TriggerCondition::EndOfTurn, None);
+            if flushed {
+                state.priority_player = active;
+            }
+            // else: flush_triggers set priority_player to whoever needs to order
         }
 
         Phase::Cleanup => {
