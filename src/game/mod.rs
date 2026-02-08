@@ -373,10 +373,13 @@ impl GameState {
         }
         // Stack — spells/abilities are public
         for entry in &self.stack {
-            if let StackSource::Spell(id) = entry.source {
-                if let Some(inst) = self.objects.get(&id) {
-                    visible.insert(id, inst);
-                }
+            let source_id = match entry.source {
+                StackSource::Spell(id) => id,
+                StackSource::ActivatedAbility { source_id, .. } => source_id,
+                StackSource::TriggeredAbility { source_id, .. } => source_id,
+            };
+            if let Some(inst) = self.objects.get(&source_id) {
+                visible.insert(source_id, inst);
             }
         }
         // Both graveyards — public
@@ -413,15 +416,18 @@ impl GameState {
                 visible.insert(trigger.source_id, inst);
             }
         }
-        // Combat participants — attackers and blockers
+        // Combat participants — attackers and blockers (both keys and values)
         for &id in &self.combat.attackers {
             if let Some(inst) = self.objects.get(&id) {
                 visible.insert(id, inst);
             }
         }
-        for (&blocker, _) in &self.combat.blockers {
+        for (&blocker, &attacker) in &self.combat.blockers {
             if let Some(inst) = self.objects.get(&blocker) {
                 visible.insert(blocker, inst);
+            }
+            if let Some(inst) = self.objects.get(&attacker) {
+                visible.insert(attacker, inst);
             }
         }
 

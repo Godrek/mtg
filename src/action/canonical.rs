@@ -105,6 +105,14 @@ pub enum CanonicalAction {
 
 /// Convert a concrete `Action` (with ObjectIds) into a `CanonicalAction`
 /// (with CardIds) given the current game state for lookups.
+///
+/// # Timing contract
+///
+/// Must be called **before** `apply_action()`. The action's ObjectIds must
+/// still reside in their pre-action zones (hand for PlayLand/CastSpell/Discard,
+/// battlefield for ActivateAbility/DeclareAttackers/etc.). Calling this after
+/// the action has already moved objects to different zones will produce
+/// incorrect instance indices or panic on missing ObjectIds.
 pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
     match action {
         Action::PassPriority => CanonicalAction::PassPriority,
@@ -241,6 +249,12 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
 /// Convert a `CanonicalAction` back into a concrete `Action` given the
 /// current game state. Returns `None` if the mapping is ambiguous or the
 /// referenced objects cannot be found.
+///
+/// # Timing contract
+///
+/// Same as `canonicalize()`: the game state must reflect the **pre-action**
+/// position. Objects referenced by the canonical action must still reside
+/// in their expected zones (hand, battlefield, pending triggers, etc.).
 pub fn resolve(
     canonical: &CanonicalAction,
     state: &GameState,
