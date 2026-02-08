@@ -30,10 +30,7 @@ impl fmt::Display for DeckImportError {
                 line_number,
                 line,
                 message,
-            } => write!(
-                f,
-                "invalid line {line_number}: {message} (got: '{line}')"
-            ),
+            } => write!(f, "invalid line {line_number}: {message} (got: '{line}')"),
             DeckImportError::UnknownCard { line_number, name } => {
                 write!(f, "unknown card on line {line_number}: '{name}'")
             }
@@ -56,6 +53,11 @@ impl From<std::io::Error> for DeckImportError {
     }
 }
 
+/// Import a deck list from a text file using the `<quantity> <card name>` format.
+///
+/// The deck name is derived from the filename stem. Lines starting with `#` or `//`
+/// are treated as comments and skipped. Parsing stops at a `Sideboard:` or `SB:`
+/// marker line.
 pub fn import_deck_from_file<P: AsRef<Path>>(
     path: P,
     card_db: &CardDatabase,
@@ -78,15 +80,24 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
         if trimmed.is_empty() {
             continue;
         }
+        if trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+        let trimmed_lower = trimmed.to_lowercase();
+        if matches!(
+            trimmed_lower.as_str(),
+            "sideboard" | "sideboard:" | "sb" | "sb:"
+        ) {
+            break;
+        }
 
-        let first_space = trimmed
-            .find(|c: char| c.is_whitespace())
-            .ok_or_else(|| DeckImportError::InvalidLine {
+        let (qty_str, rest) = trimmed.split_once(char::is_whitespace).ok_or_else(|| {
+            DeckImportError::InvalidLine {
                 line_number,
                 line: raw_line.to_string(),
                 message: "missing card name after quantity".to_string(),
-            })?;
-        let (qty_str, rest) = trimmed.split_at(first_space);
+            }
+        })?;
         let quantity: u32 = qty_str.parse().map_err(|_| DeckImportError::InvalidLine {
             line_number,
             line: raw_line.to_string(),

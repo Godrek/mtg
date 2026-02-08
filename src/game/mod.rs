@@ -222,16 +222,19 @@ pub struct PendingTrigger {
 #[derive(Debug, Clone, Default)]
 pub struct CardDatabase {
     pub cards: HashMap<CardId, CardDef>,
+    name_index: HashMap<String, CardId>,
 }
 
 impl CardDatabase {
     pub fn new() -> Self {
         CardDatabase {
             cards: HashMap::new(),
+            name_index: HashMap::new(),
         }
     }
 
     pub fn insert(&mut self, card: CardDef) {
+        self.name_index.insert(card.name.to_lowercase(), card.id);
         self.cards.insert(card.id, card);
     }
 
@@ -240,11 +243,8 @@ impl CardDatabase {
     }
 
     pub fn find_by_name(&self, name: &str) -> Option<CardId> {
-        let target = name.trim();
-        self.cards
-            .values()
-            .find(|card| card.name.eq_ignore_ascii_case(target))
-            .map(|card| card.id)
+        let target = name.trim().to_lowercase();
+        self.name_index.get(&target).copied()
     }
 }
 
@@ -271,7 +271,9 @@ impl GameState {
     }
 
     pub fn card_db(&self) -> &CardDatabase {
-        self.card_db.as_ref().expect("CardDatabase not set on GameState")
+        self.card_db
+            .as_ref()
+            .expect("CardDatabase not set on GameState")
     }
 
     /// Allocate a new unique ObjectId.
@@ -305,19 +307,14 @@ impl GameState {
             ZoneType::Battlefield => self.battlefield.push(obj_id),
             ZoneType::Graveyard => self.players[owner].graveyard.push(obj_id),
             ZoneType::Exile => self.players[owner].exile.push(obj_id),
-            ZoneType::Stack => {} // handled separately
+            ZoneType::Stack => {}   // handled separately
             ZoneType::Command => {} // not implemented yet
         }
         obj_id
     }
 
     /// Move a card instance from one zone to another.
-    pub fn move_object(
-        &mut self,
-        obj_id: ObjectId,
-        _from: ZoneType,
-        to: ZoneType,
-    ) {
+    pub fn move_object(&mut self, obj_id: ObjectId, _from: ZoneType, to: ZoneType) {
         // Remove from all zones (brute force but correct)
         let owner = self.objects[&obj_id].owner;
         let controller = self.objects[&obj_id].controller;
@@ -330,7 +327,9 @@ impl GameState {
         if controller != owner {
             self.players[controller].library.retain(|&id| id != obj_id);
             self.players[controller].hand.retain(|&id| id != obj_id);
-            self.players[controller].graveyard.retain(|&id| id != obj_id);
+            self.players[controller]
+                .graveyard
+                .retain(|&id| id != obj_id);
             self.players[controller].exile.retain(|&id| id != obj_id);
         }
         self.battlefield.retain(|&id| id != obj_id);
@@ -348,7 +347,8 @@ impl GameState {
             ZoneType::Hand => self.players[owner].hand.push(obj_id),
             ZoneType::Battlefield => {
                 // Reset battlefield state when entering
-                let enters_tapped = self.card_db()
+                let enters_tapped = self
+                    .card_db()
                     .get(self.objects[&obj_id].card_def_id)
                     .map_or(false, |d| d.enters_tapped);
                 if let Some(inst) = self.objects.get_mut(&obj_id) {
@@ -399,8 +399,7 @@ impl GameState {
             .copied()
             .filter(|&id| {
                 let inst = &self.objects[&id];
-                inst.controller == player
-                    && db.get(inst.card_def_id).map_or(false, |d| d.is_land())
+                inst.controller == player && db.get(inst.card_def_id).map_or(false, |d| d.is_land())
             })
             .collect()
     }
@@ -420,7 +419,6 @@ impl GameState {
 
     /// Check if a player has lost.
     pub fn check_player_lost(&self, player: PlayerIndex) -> bool {
-        self.players[player].life <= 0
-            || self.players[player].has_lost
+        self.players[player].life <= 0 || self.players[player].has_lost
     }
 }
