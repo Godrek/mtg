@@ -130,3 +130,24 @@ and correctly integrates with the existing codebase. The abstraction layer is
 clean, parallelism is correctly implemented, and all acceptance criteria are
 met. The suggestions above are mostly about documentation accuracy and minor
 code organization — none are blockers.
+
+---
+
+## Follow-up Review: Commit `0dd15b7` — All 7 Items Addressed
+
+The follow-up commit cleanly addresses every review item:
+
+| # | Issue | Resolution | Status |
+|---|-------|------------|--------|
+| 1 | `BucketedAbstraction` doc overstated board tracking | Doc rewritten: now says "permanent count per controller (no power/toughness)" and points to `CardAwareBucketedAbstraction` for richer stats | Resolved |
+| 2 | `board_stats()` / `hand_categories()` misplaced on `BucketedAbstraction` | Both methods moved to `CardAwareBucketedAbstraction` impl block. Signatures simplified — `Option<&CardDatabase>` → `&CardDatabase` (no longer optional since the type always has one) | Resolved |
+| 3 | `rollout_utility()` action space not documented | Doc comment added explaining rollouts intentionally use full action space for speed | Resolved |
+| 4 | Zero-work shards in `train_parallel()` | Early return guard added: `if iters == 0 { return [RegretTable::new(), ...]; }` | Resolved |
+| 5 | `RolloutMode` missing `Debug` derive | `#[derive(Debug)]` added to `RolloutMode` | Resolved |
+| 6 | Per-shard checkpoint cleanup undocumented | Inline comment added warning that per-shard checkpoints are not auto-cleaned and suggesting `train_extended()` for merged-only checkpointing | Resolved |
+| 7 | Memory estimate accuracy undocumented | Comment updated: "Rough memory estimate (lower bound). Does not account for HashMap overhead... actual RSS may be 1.5-2x higher" | Resolved |
+
+All 78 tests pass. Clean build, zero warnings. No behavioral changes — purely
+doc accuracy, code organization, and minor guards.
+
+**Final verdict: Approve.** Ready to merge.
