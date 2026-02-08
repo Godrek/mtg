@@ -40,10 +40,11 @@ impl Strategy for GreedyStrategy {
         let actions = legal_actions(state);
         let db = state.card_db();
 
-        // Priority 0: If we must order triggers, pick the first ordering (FIFO).
-        // A real MCCFR solver would evaluate all orderings; greedy just uses FIFO.
+        // Priority 0: If we must order triggers or replacement effects, pick
+        // the first ordering (FIFO). A real MCCFR solver would evaluate all
+        // orderings; greedy just uses FIFO.
         for action in &actions {
-            if let Action::OrderTriggers { .. } = action {
+            if matches!(action, Action::OrderTriggers { .. } | Action::ChooseReplacementOrder { .. }) {
                 return action.clone();
             }
         }

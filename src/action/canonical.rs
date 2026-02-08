@@ -100,6 +100,12 @@ pub enum CanonicalAction {
         assignment: Vec<(CardId, usize, u32)>,
     },
 
+    /// Choose the order to apply replacement effects (CR 614).
+    /// Each entry is (source_card_id, source_instance_index, effect_index).
+    ChooseReplacementOrder {
+        source_card_ids: Vec<(CardId, usize, usize)>,
+    },
+
     Concede,
 }
 
@@ -242,6 +248,18 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
                 attacker_instance_index: a_idx,
                 assignment: canonical_assignment,
             }
+        }
+
+        Action::ChooseReplacementOrder { ordering } => {
+            let source_card_ids: Vec<(CardId, usize, usize)> = ordering
+                .iter()
+                .map(|&(source_id, effect_index)| {
+                    let card_id = state.objects[&source_id].card_def_id;
+                    let instance_index = battlefield_instance_index(state, source_id);
+                    (card_id, instance_index, effect_index)
+                })
+                .collect();
+            CanonicalAction::ChooseReplacementOrder { source_card_ids }
         }
     }
 }
@@ -394,6 +412,15 @@ pub fn resolve(
                 attacker,
                 assignment: concrete,
             })
+        }
+
+        CanonicalAction::ChooseReplacementOrder { source_card_ids } => {
+            let mut ordering = Vec::with_capacity(source_card_ids.len());
+            for &(card_id, instance_index, effect_index) in source_card_ids {
+                let obj_id = find_on_battlefield_by_index(state, card_id, instance_index)?;
+                ordering.push((obj_id, effect_index));
+            }
+            Some(Action::ChooseReplacementOrder { ordering })
         }
     }
 }

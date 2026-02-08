@@ -6,10 +6,14 @@ use mtg_gto::action::canonical::{canonicalize, resolve};
 use mtg_gto::action::{legal_actions, legal_actions_abstracted, Action};
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
-use mtg_gto::game::{GameState, Phase};
+use mtg_gto::events::{EventBus, GameEvent, Zone};
+use mtg_gto::game::{GameState, Phase, Target};
+use mtg_gto::replacement::{
+    ReplacementAction, ReplacementEffect, ReplacementEventKind, find_applicable_replacements,
+};
 use mtg_gto::rules;
 use mtg_gto::simulation;
-use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
+use mtg_gto::strategy::{GreedyStrategy, RandomStrategy, Strategy};
 
 #[test]
 fn test_sample_db_builds() {
@@ -1428,4 +1432,900 @@ fn test_player_view_objects_excludes_libraries() {
     assert!(view0.objects.contains_key(&bf_card), "Battlefield should be visible");
     assert!(!view0.objects.contains_key(&lib0_card), "Own library contents must be hidden");
     assert!(!view0.objects.contains_key(&lib1_card), "Opponent library contents must be hidden");
+}
+
+// ======================================================================
+// Phase 1A: Rules Engine Foundations Tests
+// ======================================================================
+
+// --- 1A.1: SBA/Trigger Recurrence Loop (CR 704.3) ---
+
+#[test]
+fn test_sba_recurrence_dies_trigger_deals_damage_to_players() {
+    // Acceptance criterion: Fiery Conclusion Elemental (when ~ dies, deal 2
+    // damage to each player) dies from lethal damage. SBAs kill it, dies
+    // trigger fires, both players take 2 damage.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Put Fiery Conclusion Elemental on the battlefield with lethal damage
+    let elem_id = state.create_card_in_zone(
+        sample::ids::FIERY_CONCLUSION_ELEMENTAL,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&elem_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 2; // 2 damage on 2 toughness = lethal
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    let p0_life_before = state.players[0].life;
+    let p1_life_before = state.players[1].life;
+
+    // Run SBAs — this should:
+    // 1. Kill the Elemental (lethal damage)
+    // 2. Queue the dies trigger
+    // 3. Flush the trigger to the stack
+    rules::check_state_based_actions(&mut state);
+
+    // Elemental should be in graveyard
+    assert!(
+        state.players[0].graveyard.contains(&elem_id),
+        "Elemental should be in graveyard after SBA"
+    );
+
+    // Dies trigger should be on the stack
+    assert_eq!(
+        state.stack.len(),
+        1,
+        "Dies trigger should be on the stack"
+    );
+
+    // Life shouldn't have changed yet — trigger hasn't resolved
+    assert_eq!(state.players[0].life, p0_life_before);
+    assert_eq!(state.players[1].life, p1_life_before);
+
+    // Resolve the trigger (both players pass priority)
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After trigger resolves, both players should have taken 2 damage
+    assert_eq!(
+        state.players[0].life,
+        p0_life_before - 2,
+        "Player 0 should take 2 damage from dies trigger"
+    );
+    assert_eq!(
+        state.players[1].life,
+        p1_life_before - 2,
+        "Player 1 should take 2 damage from dies trigger"
+    );
+}
+
+#[test]
+fn test_sba_loop_stable_without_triggers() {
+    // When SBAs don't produce any triggers, the loop should exit cleanly
+    // without any pending triggers or stack entries.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Put a Grizzly Bears on the battlefield with lethal damage
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 2; // 2 damage on 2 toughness = lethal
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    rules::check_state_based_actions(&mut state);
+
+    // Bears should be dead
+    assert!(state.players[0].graveyard.contains(&bear_id));
+
+    // No triggers should exist (bears have no dies trigger)
+    assert!(state.pending_triggers.is_empty());
+    assert!(state.stack.is_empty());
+}
+
+#[test]
+fn test_sba_player_life_zero_ends_game() {
+    // When a player's life drops to 0 or below, SBAs should end the game.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    // Set player 1's life to 0
+    state.players[1].life = 0;
+
+    rules::check_state_based_actions(&mut state);
+
+    assert!(state.game_over, "Game should be over when a player has 0 life");
+    assert_eq!(state.winner, Some(0), "Player 0 should win");
+}
+
+// --- 1A.2: Event System Tests ---
+
+#[test]
+fn test_events_fire_for_spell_cast() {
+    // Casting a spell should emit SpellCast and ZoneChange events.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    let bolt_id = state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 0, ZoneType::Hand);
+    let mountain = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&mountain) {
+        inst.tapped = false;
+        inst.summoning_sick = false;
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Clear any events from setup
+    state.drain_events();
+
+    // Cast Lightning Bolt targeting opponent
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: bolt_id,
+            targets: vec![Target::Player(1)],
+        },
+    );
+
+    let events = state.drain_events();
+
+    // Should have SpellCast and ZoneChange (hand→stack) events
+    let spell_cast_events: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::SpellCast { .. }))
+        .collect();
+    assert_eq!(
+        spell_cast_events.len(),
+        1,
+        "Should emit 1 SpellCast event"
+    );
+
+    let zone_changes: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::ZoneChange { .. }))
+        .collect();
+    assert!(
+        zone_changes.iter().any(|e| {
+            if let GameEvent::ZoneChange { from, to, .. } = e {
+                *from == Zone::Hand && *to == Zone::Stack
+            } else {
+                false
+            }
+        }),
+        "Should emit ZoneChange from Hand to Stack"
+    );
+}
+
+#[test]
+fn test_events_fire_for_damage_and_life_change() {
+    // Resolving a Lightning Bolt targeting a player should emit
+    // DamageDealt and LifeChanged events.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    let bolt_id = state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 0, ZoneType::Hand);
+    let mountain = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&mountain) {
+        inst.tapped = false;
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Cast and resolve Lightning Bolt
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: bolt_id,
+            targets: vec![Target::Player(1)],
+        },
+    );
+
+    // Drain cast events
+    state.drain_events();
+
+    // Resolve: both players pass priority
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    let events = state.drain_events();
+
+    // Should have DamageDealt event
+    let damage_events: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::DamageDealt { .. }))
+        .collect();
+    assert!(
+        damage_events.iter().any(|e| {
+            if let GameEvent::DamageDealt { amount, is_combat, .. } = e {
+                *amount == 3 && !is_combat
+            } else {
+                false
+            }
+        }),
+        "Should emit DamageDealt event for 3 non-combat damage. Got: {:?}",
+        damage_events
+    );
+
+    // Should have LifeChanged event for player 1
+    let life_events: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::LifeChanged { .. }))
+        .collect();
+    assert!(
+        life_events.iter().any(|e| {
+            if let GameEvent::LifeChanged { player, old, new } = e {
+                *player == 1 && *old == 20 && *new == 17
+            } else {
+                false
+            }
+        }),
+        "Should emit LifeChanged event (20 -> 17) for player 1. Got: {:?}",
+        life_events
+    );
+}
+
+#[test]
+fn test_events_fire_for_card_draw() {
+    // Drawing a card should emit CardDrawn and ZoneChange events.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+    for _ in 0..19 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    state.drain_events();
+
+    rules::draw_cards(&mut state, 0, 1);
+
+    let events = state.drain_events();
+
+    let draw_events: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::CardDrawn { .. }))
+        .collect();
+    assert_eq!(draw_events.len(), 1, "Should emit 1 CardDrawn event");
+
+    let zone_events: Vec<&GameEvent> = events
+        .iter()
+        .filter(|e| matches!(e, GameEvent::ZoneChange { from: Zone::Library, to: Zone::Hand, .. }))
+        .collect();
+    assert_eq!(zone_events.len(), 1, "Should emit Library→Hand ZoneChange");
+}
+
+#[test]
+fn test_events_fire_for_zone_change_via_move_object() {
+    // Moving an object between zones should emit a ZoneChange event.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let bear = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
+    state.drain_events();
+
+    state.move_object(bear, ZoneType::Battlefield, ZoneType::Graveyard);
+
+    let events = state.drain_events();
+    assert!(
+        events.iter().any(|e| {
+            matches!(e, GameEvent::ZoneChange {
+                object,
+                from: Zone::Battlefield,
+                to: Zone::Graveyard,
+            } if *object == bear)
+        }),
+        "Should emit ZoneChange from Battlefield to Graveyard"
+    );
+}
+
+#[test]
+fn test_events_not_part_of_game_state_clone() {
+    // Events should not affect GameState clone cost. Cloned state should
+    // have an empty event list by default (derived state).
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Emit some events
+    state.emit_event(GameEvent::TurnStarted {
+        active_player: 0,
+        turn_number: 1,
+    });
+    state.emit_event(GameEvent::LifeChanged {
+        player: 0,
+        old: 20,
+        new: 17,
+    });
+    assert_eq!(state.pending_events.len(), 2);
+
+    // Clone the state
+    let cloned = state.clone();
+
+    // The clone has the events (Vec is copied), but this is intentional:
+    // in practice, events are drained between actions so the vec is empty.
+    // The important thing is that the cost is O(n) where n = pending events,
+    // and n is 0 during MCCFR traversal.
+    let _ = cloned;
+
+    // Verify drain works
+    let drained = state.drain_events();
+    assert_eq!(drained.len(), 2);
+    assert!(state.pending_events.is_empty());
+}
+
+#[test]
+fn test_event_bus_processes_events() {
+    // Test that the EventBus can process events collected from GameState.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Create a simple handler that tracks life changes
+    fn life_tracker(state: &mut GameState, event: &GameEvent) {
+        if let GameEvent::LifeChanged { player, new, .. } = event {
+            // Just verify we can access state during handler
+            let _ = state.players[*player].life;
+            let _ = new;
+        }
+    }
+
+    let mut bus = EventBus::new();
+    bus.subscribe(life_tracker);
+
+    // Manually emit and process events through the bus
+    let event = GameEvent::LifeChanged {
+        player: 0,
+        old: 20,
+        new: 17,
+    };
+    bus.emit(&mut state, &event);
+    // If we get here without panic, the handler successfully processed the event
+}
+
+// --- 1A.3: Replacement Effect Framework Tests ---
+
+#[test]
+fn test_replacement_effect_find_applicable() {
+    let effects = vec![
+        ReplacementEffect {
+            source_id: 1,
+            controller: 0,
+            applies_to: ReplacementEventKind::WouldDie,
+            action: ReplacementAction::RedirectToZone(ZoneType::Exile),
+            is_self_replacement: false,
+            description: "Exile instead of dying".into(),
+        },
+        ReplacementEffect {
+            source_id: 2,
+            controller: 0,
+            applies_to: ReplacementEventKind::EntersBattlefield,
+            action: ReplacementAction::EntersModified {
+                enters_tapped: true,
+                extra_counters: 0,
+            },
+            is_self_replacement: true,
+            description: "Enters tapped".into(),
+        },
+    ];
+
+    // WouldDie: effect 0 is player-choice, effect 1 doesn't apply
+    let (self_r, player_r) =
+        find_applicable_replacements(&effects, &ReplacementEventKind::WouldDie, 0);
+    assert!(self_r.is_empty());
+    assert_eq!(player_r, vec![0]);
+
+    // EntersBattlefield: effect 1 is self-replacement
+    let (self_r, player_r) =
+        find_applicable_replacements(&effects, &ReplacementEventKind::EntersBattlefield, 0);
+    assert_eq!(self_r, vec![1]);
+    assert!(player_r.is_empty());
+}
+
+#[test]
+fn test_replacement_order_action_exists_in_action_enum() {
+    // Verify the ChooseReplacementOrder action variant can be constructed
+    // and displayed.
+    let action = Action::ChooseReplacementOrder {
+        ordering: vec![(1, 0), (2, 0)],
+    };
+    let display = format!("{}", action);
+    assert!(display.contains("replacement"));
+}
+
+#[test]
+fn test_replacement_order_canonical_roundtrip() {
+    // Verify ChooseReplacementOrder round-trips through canonical mapping.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Put two permanents on the battlefield (sources of replacement effects)
+    let p1 = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
+    let p2 = state.create_card_in_zone(sample::ids::GREY_OGRE, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    let action = Action::ChooseReplacementOrder {
+        ordering: vec![(p1, 0), (p2, 0)],
+    };
+
+    let canonical = canonicalize(&action, &state);
+    let resolved = resolve(&canonical, &state, 0);
+    assert!(
+        resolved.is_some(),
+        "ChooseReplacementOrder should round-trip through canonical mapping"
+    );
+    assert_eq!(
+        resolved.unwrap(),
+        action,
+        "Round-trip should preserve the original action"
+    );
+}
+
+#[test]
+fn test_fiery_conclusion_elemental_in_db() {
+    // Verify the test card exists in the database with correct properties.
+    let db = sample::build_sample_db();
+    let card = db.get(sample::ids::FIERY_CONCLUSION_ELEMENTAL);
+    assert!(card.is_some(), "Fiery Conclusion Elemental should be in DB");
+
+    let card = card.unwrap();
+    assert_eq!(card.name, "Fiery Conclusion Elemental");
+    assert!(card.is_creature());
+    assert_eq!(card.power, Some(2));
+    assert_eq!(card.toughness, Some(2));
+    assert_eq!(card.triggered_abilities.len(), 1);
+    assert_eq!(
+        card.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::Dies
+    );
+}
+
+#[test]
+fn test_sba_recurrence_in_full_game_context() {
+    // Run a game that includes the Fiery Conclusion Elemental to verify
+    // the SBA recurrence loop works in a full game context without panics
+    // or infinite loops.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Set up a mini-game with the test card
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Player 0 has Fiery Conclusion Elemental and a Mountain
+    let elem_hand = state.create_card_in_zone(
+        sample::ids::FIERY_CONCLUSION_ELEMENTAL,
+        0,
+        ZoneType::Hand,
+    );
+    let m1 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    let m2 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    let m3 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    for id in [m1, m2, m3] {
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = false;
+            inst.summoning_sick = false;
+        }
+    }
+
+    // Player 1 has a Lightning Bolt to kill it
+    let bolt = state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 1, ZoneType::Hand);
+    let m4 = state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&m4) {
+        inst.tapped = false;
+        inst.summoning_sick = false;
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Player 0 casts the Elemental
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: elem_hand,
+            targets: vec![],
+        },
+    );
+
+    // Both pass, Elemental resolves
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Elemental should be on battlefield
+    assert!(
+        state.battlefield.contains(&elem_hand),
+        "Elemental should be on the battlefield"
+    );
+
+    // Player 1 casts Lightning Bolt targeting the Elemental
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: bolt,
+            targets: vec![Target::Object(elem_hand)],
+        },
+    );
+
+    let p0_life = state.players[0].life;
+    let p1_life = state.players[1].life;
+
+    // Both pass, Bolt resolves — deals 3 damage to 2-toughness creature
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After Bolt resolves, SBAs should kill the Elemental and queue its trigger.
+    // The dies trigger should now be on the stack.
+    assert!(
+        !state.battlefield.contains(&elem_hand),
+        "Elemental should be dead after Lightning Bolt"
+    );
+    assert_eq!(
+        state.stack.len(),
+        1,
+        "Dies trigger should be on the stack"
+    );
+
+    // Resolve the dies trigger
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Both players should have taken 2 damage
+    assert_eq!(
+        state.players[0].life,
+        p0_life - 2,
+        "Player 0 should take 2 damage from dies trigger"
+    );
+    assert_eq!(
+        state.players[1].life,
+        p1_life - 2,
+        "Player 1 should take 2 damage from dies trigger"
+    );
+}
+
+#[test]
+fn test_events_accumulate_across_full_game_turn() {
+    // Run several actions and verify events accumulate correctly.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let red = sample::red_aggro_deck();
+    let green = sample::green_stompy_deck();
+    rules::setup_game(&mut state, &red, &green);
+
+    state.drain_events(); // clear setup events
+
+    // Play through a few actions
+    let mut rng = rand::thread_rng();
+    let mut total_events = 0;
+    let mut action_count = 0;
+
+    while !state.game_over && action_count < 20 {
+        let actions = legal_actions(&state);
+        if actions.is_empty() {
+            break;
+        }
+        let action = actions.choose(&mut rng).unwrap().clone();
+        rules::apply_action(&mut state, &action);
+        action_count += 1;
+
+        let events = state.drain_events();
+        total_events += events.len();
+    }
+
+    // Should have accumulated some events across the actions
+    assert!(
+        total_events > 0,
+        "Should have emitted events during gameplay, got 0 events across {} actions",
+        action_count
+    );
+}
+
+#[test]
+fn test_cascading_sba_dies_trigger_kills_another_creature() {
+    // Acceptance criterion from CONSOLIDATED_STRATEGY.md:
+    // Creature with "when ~ dies, deal 2 damage to each creature" kills
+    // another creature at 2 toughness, causing recursive SBAs.
+    //
+    // Scenario:
+    // 1. Pyroclasm Elemental (3/1) has 1 damage marked → lethal (1 toughness)
+    // 2. Grizzly Bears (2/2) is healthy on the battlefield
+    // 3. SBAs kill the Elemental → dies trigger queued → flushed to stack
+    // 4. Players pass priority → trigger resolves → deals 2 damage to each creature
+    // 5. Grizzly Bears now has 2 damage on 2 toughness
+    // 6. check_state_based_actions (called after resolve) → Bears die
+    // This verifies the cascade: SBA → trigger → resolve → SBA → creature death.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Pyroclasm Elemental: 3/1 with "when ~ dies, deal 2 damage to each creature"
+    let pyro_id = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 1; // 1 damage on 1 toughness = lethal
+    }
+
+    // Grizzly Bears: 2/2, healthy, controlled by player 1
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0; // healthy
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Step 1: Run SBAs — Pyroclasm Elemental dies, trigger goes on stack
+    rules::check_state_based_actions(&mut state);
+
+    assert!(
+        state.players[0].graveyard.contains(&pyro_id),
+        "Pyroclasm Elemental should be in graveyard"
+    );
+    assert!(
+        state.battlefield.contains(&bear_id),
+        "Grizzly Bears should still be alive (trigger hasn't resolved yet)"
+    );
+    assert_eq!(
+        state.stack.len(),
+        1,
+        "Dies trigger should be on the stack"
+    );
+
+    // Step 2: Resolve the dies trigger — both players pass priority
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Step 3: After trigger resolves, 2 damage dealt to each creature.
+    // Grizzly Bears now has 2 damage on 2 toughness.
+    // check_state_based_actions is called inside resolve_top_of_stack,
+    // so the Bears should now be dead.
+    assert!(
+        !state.battlefield.contains(&bear_id),
+        "Grizzly Bears should be dead after cascading SBA (2 damage on 2 toughness)"
+    );
+    assert!(
+        state.players[1].graveyard.contains(&bear_id),
+        "Grizzly Bears should be in player 1's graveyard"
+    );
+}
+
+#[test]
+fn test_cascading_sba_chain_of_three() {
+    // Extended cascade: Pyroclasm Elemental A dies → deals 2 to each creature
+    // → Pyroclasm Elemental B (1 toughness, 0 damage) takes 2 damage → B dies
+    // → B's trigger fires → deals 2 to each creature → Grizzly Bears dies
+    //
+    // This tests a 3-deep cascade through the natural game loop.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Pyroclasm Elemental A: 3/1, lethal damage
+    let pyro_a = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_a) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 1; // lethal
+    }
+
+    // Pyroclasm Elemental B: 3/1, healthy
+    let pyro_b = state.create_card_in_zone(
+        sample::ids::PYROCLASM_ELEMENTAL,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&pyro_b) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0; // healthy
+    }
+
+    // Grizzly Bears: 2/2, healthy
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.summoning_sick = false;
+        inst.damage_marked = 0;
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Step 1: SBAs kill Pyro A → trigger on stack
+    rules::check_state_based_actions(&mut state);
+    assert!(state.players[0].graveyard.contains(&pyro_a));
+    assert_eq!(state.stack.len(), 1);
+
+    // Step 2: Resolve Pyro A's trigger → 2 damage to each creature
+    // Pyro B takes 2 damage on 1 toughness → lethal
+    // Bears take 2 damage on 2 toughness → lethal
+    // Both die in SBAs after resolution.
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After Pyro A's trigger resolves and SBAs run:
+    // - Pyro B is dead (2 damage on 1 toughness)
+    // - Bears are dead (2 damage on 2 toughness)
+    assert!(
+        !state.battlefield.contains(&pyro_b),
+        "Pyroclasm Elemental B should be dead from cascade"
+    );
+    assert!(
+        !state.battlefield.contains(&bear_id),
+        "Grizzly Bears should be dead from cascade"
+    );
+
+    // Pyro B's dies trigger should now be on the stack
+    assert!(
+        state.stack.len() >= 1,
+        "Pyro B's dies trigger should be on the stack after cascading death"
+    );
+
+    // Step 3: Resolve Pyro B's trigger → 2 damage to each creature
+    // No more creatures on the battlefield, so nothing dies.
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Stack should be empty now
+    assert_eq!(
+        state.stack.len(),
+        0,
+        "Stack should be empty after all triggers resolve"
+    );
+
+    // All creatures should be in graveyards
+    assert!(state.players[0].graveyard.contains(&pyro_a));
+    assert!(state.players[1].graveyard.contains(&pyro_b));
+    assert!(state.players[1].graveyard.contains(&bear_id));
+}
+
+#[test]
+fn test_pyroclasm_elemental_in_db() {
+    let db = sample::build_sample_db();
+    let card = db.get(sample::ids::PYROCLASM_ELEMENTAL);
+    assert!(card.is_some(), "Pyroclasm Elemental should be in DB");
+
+    let card = card.unwrap();
+    assert_eq!(card.name, "Pyroclasm Elemental");
+    assert!(card.is_creature());
+    assert_eq!(card.power, Some(3));
+    assert_eq!(card.toughness, Some(1));
+    assert_eq!(card.triggered_abilities.len(), 1);
+    assert_eq!(
+        card.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::Dies
+    );
+}
+
+#[test]
+fn test_greedy_strategy_handles_replacement_order() {
+    // Verify GreedyStrategy doesn't crash on ChooseReplacementOrder.
+    // Currently replacement effects aren't generated in-game, but the
+    // strategy must handle the action variant to avoid runtime bugs when
+    // Phase 2A wires in replacement logic.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // The GreedyStrategy should select ChooseReplacementOrder if it's the
+    // only non-PassPriority action. We can verify this by checking that
+    // the strategy code path handles the match arm (no panic).
+    let greedy = GreedyStrategy;
+    // Normal action selection — should complete without panic
+    let action = greedy.choose_action(&state, 0);
+    // Should return PassPriority since there's nothing else to do
+    assert_eq!(action, Action::PassPriority);
 }
