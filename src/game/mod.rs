@@ -155,6 +155,36 @@ impl CombatState {
 
 /// The complete game state — everything needed to determine legal actions and advance the game.
 /// This must be cheaply cloneable for MCTS/CFR tree search.
+///
+/// # Snapshot Contract (Phase 0.3)
+///
+/// Defines what gets cloned vs. shared vs. reconstructed when `GameState::clone()` is called.
+/// This contract ensures MCCFR traversal (which clones millions of states) stays fast while
+/// the rules engine can freely add derived/cached fields without breaking the solver.
+///
+/// ## Always cloned (canonical state)
+/// These fields define the unique game position. Two `GameState`s with identical values
+/// for all canonical fields represent the same game state:
+/// - `objects` — all card instances and their game-specific state
+/// - `players` — life, zones (library, hand, graveyard, exile), mana, flags
+/// - `battlefield`, `stack` — shared zones
+/// - `combat` — attacker/blocker/damage assignment
+/// - `pending_triggers` — triggers waiting to be placed on the stack
+/// - All scalar fields: `active_player`, `phase`, `priority_player`, `turn_number`,
+///   `consecutive_passes`, `next_object_id`, `next_stack_id`, `game_over`, `winner`
+///
+/// ## Shared via Arc (immutable reference data)
+/// - `card_db` — card definitions are immutable after game setup; shared O(1) via `Arc`
+///
+/// ## Reconstructed after clone (derived / cached state)
+/// Future fields that are derivable from canonical state must NOT be part of `Clone`:
+/// - Event bus state (Phase 1A) — transient; not part of game state
+/// - Continuous effects caches (Phase 2A) — recomputed from canonical state on demand
+/// - Dirty flags / memoization caches — local optimization, not state
+///
+/// **Rule**: Any field added to `GameState` that is derivable from other fields must be
+/// marked `#[serde(skip)]` and excluded from equality/hashing. The canonical game state
+/// is the minimal set of fields needed to reconstruct the full state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameState {
     /// Card definitions (shared, immutable). Wrapped in `Arc` so that
@@ -246,6 +276,110 @@ impl CardDatabase {
             .values()
             .find(|card| card.name.eq_ignore_ascii_case(target))
             .map(|card| card.id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 0.1 — Observation API: PlayerView
+// ---------------------------------------------------------------------------
+
+/// Everything a player can observe — the information set boundary.
+/// The rules engine writes to `GameState`; MCCFR reads through this view.
+///
+/// `PlayerView` exposes only information that the given player is entitled to
+/// see under the MTG rules: public zones (battlefield, graveyard, exile, stack),
+/// opponent's hand *size* and library *size* (but not contents), and the
+/// player's own private hand.
+///
+/// When the rules engine adds internal fields (event bus, effects manager,
+/// continuous effects cache), MCCFR is insulated — only `visible_state()`
+/// needs updating.
+pub struct PlayerView<'a> {
+    // --- Public information (both players can see) ---
+    /// Current game phase/step.
+    pub phase: Phase,
+    /// Whose turn it is.
+    pub active_player: PlayerIndex,
+    /// Current turn number (starts at 1).
+    pub turn_number: u32,
+    /// All permanents on the battlefield (both players).
+    pub battlefield: &'a [ObjectId],
+    /// The stack (spells and abilities waiting to resolve).
+    pub stack: &'a [StackEntry],
+    /// Combat state (attackers, blockers, damage assignment).
+    pub combat: &'a CombatState,
+    /// Triggered abilities waiting to be placed on the stack.
+    pub pending_triggers: &'a [PendingTrigger],
+    /// Which player currently has priority.
+    pub priority_player: PlayerIndex,
+
+    // --- Per-player public info ---
+    /// Viewing player's life total.
+    pub my_life: i32,
+    /// Opponent's life total.
+    pub opp_life: i32,
+    /// Viewing player's graveyard.
+    pub my_graveyard: &'a [ObjectId],
+    /// Opponent's graveyard.
+    pub opp_graveyard: &'a [ObjectId],
+    /// Viewing player's exile zone.
+    pub my_exile: &'a [ObjectId],
+    /// Opponent's exile zone.
+    pub opp_exile: &'a [ObjectId],
+    /// Number of cards in the opponent's hand (contents hidden).
+    pub opp_hand_size: usize,
+    /// Number of cards in the opponent's library (contents hidden).
+    pub opp_library_size: usize,
+
+    // --- Private information (only the viewing player sees) ---
+    /// The viewing player's hand (private — hidden from opponent).
+    pub my_hand: &'a [ObjectId],
+
+    // --- Mana ---
+    /// Viewing player's current mana pool.
+    pub my_mana_pool: &'a ManaPool,
+    /// Remaining land plays this turn for the viewing player.
+    pub my_land_plays_remaining: u32,
+
+    // --- Object lookup (shared, read-only) ---
+    /// All card instances in the game, keyed by ObjectId.
+    pub objects: &'a HashMap<ObjectId, CardInstance>,
+    /// Card definitions database (shared, immutable).
+    pub card_db: &'a CardDatabase,
+}
+
+impl GameState {
+    /// Build a `PlayerView` for the given player, exposing only information
+    /// that player is entitled to see under the MTG rules.
+    pub fn visible_state(&self, player: PlayerIndex) -> PlayerView<'_> {
+        let opp = self.opponent(player);
+        PlayerView {
+            phase: self.phase,
+            active_player: self.active_player,
+            turn_number: self.turn_number,
+            battlefield: &self.battlefield,
+            stack: &self.stack,
+            combat: &self.combat,
+            pending_triggers: &self.pending_triggers,
+            priority_player: self.priority_player,
+
+            my_life: self.players[player].life,
+            opp_life: self.players[opp].life,
+            my_graveyard: &self.players[player].graveyard,
+            opp_graveyard: &self.players[opp].graveyard,
+            my_exile: &self.players[player].exile,
+            opp_exile: &self.players[opp].exile,
+            opp_hand_size: self.players[opp].hand.len(),
+            opp_library_size: self.players[opp].library.len(),
+
+            my_hand: &self.players[player].hand,
+
+            my_mana_pool: &self.players[player].mana_pool,
+            my_land_plays_remaining: self.players[player].land_plays_remaining,
+
+            objects: &self.objects,
+            card_db: self.card_db(),
+        }
     }
 }
 
