@@ -219,3 +219,31 @@ fn test_new_sample_cards_in_db() {
         mtg_gto::card::TriggerCondition::EntersBattlefield
     );
 }
+
+#[test]
+fn test_cleanup_requires_discard_action() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..8 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::Cleanup;
+    state.turn_number = 1;
+
+    let actions = mtg_gto::action::legal_actions(&state);
+    assert_eq!(actions.len(), 8);
+    assert!(actions.iter().all(|action| matches!(action, Action::Discard { .. })));
+
+    let discard_action = actions[0].clone();
+    rules::apply_action(&mut state, &discard_action);
+
+    assert_eq!(state.players[0].hand.len(), 7);
+    assert_eq!(state.players[0].graveyard.len(), 1);
+    assert_eq!(state.turn_number, 2);
+    assert_eq!(state.phase, mtg_gto::game::Phase::Upkeep);
+}

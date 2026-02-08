@@ -10,6 +10,9 @@ pub enum Action {
     /// Pass priority.
     PassPriority,
 
+    /// Discard a card from hand (used in cleanup).
+    Discard { object_id: ObjectId },
+
     /// Play a land from hand.
     PlayLand { object_id: ObjectId },
 
@@ -54,6 +57,7 @@ impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Action::PassPriority => write!(f, "Pass"),
+            Action::Discard { object_id } => write!(f, "Discard (obj {})", object_id),
             Action::PlayLand { object_id } => write!(f, "Play land (obj {})", object_id),
             Action::CastSpell { object_id, .. } => write!(f, "Cast spell (obj {})", object_id),
             Action::ActivateManaAbility { object_id, .. } => {
@@ -80,6 +84,18 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
 
     let player = state.priority_player;
     let mut actions = Vec::new();
+
+    let forced_discard = state.phase == Phase::Cleanup
+        && player == state.active_player
+        && state.players[player].hand.len() > 7;
+
+    if forced_discard {
+        let hand = state.players[player].hand.clone();
+        for obj_id in hand {
+            actions.push(Action::Discard { object_id: obj_id });
+        }
+        return actions;
+    }
 
     // Player can always pass priority
     actions.push(Action::PassPriority);
