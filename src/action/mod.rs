@@ -90,8 +90,8 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
         && state.players[player].hand.len() > 7;
 
     if forced_discard {
-        let hand = state.players[player].hand.clone();
-        for obj_id in hand {
+        // Cleanup discard is mandatory; PassPriority is intentionally omitted here.
+        for &obj_id in &state.players[player].hand {
             actions.push(Action::Discard { object_id: obj_id });
         }
         return actions;

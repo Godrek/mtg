@@ -12,6 +12,10 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             if state.phase == Phase::Cleanup
                 && state.players[state.active_player].hand.len() > 7
             {
+                debug_assert!(
+                    false,
+                    "PassPriority during cleanup discard is illegal; choose a Discard action."
+                );
                 return;
             }
             state.consecutive_passes += 1;
@@ -40,6 +44,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             if state.players[player].hand.len() <= 7 {
                 finalize_cleanup(state);
             }
+            // TODO: if discard triggers exist, start another cleanup step (CR 514.3a).
         }
 
         Action::PlayLand { object_id } => {
