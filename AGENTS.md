@@ -40,7 +40,7 @@ All tests must pass with 0 warnings before committing. Run `cargo test` after ev
 
 ### Borrow Checker: Two-Phase Read-Write
 
-The `GameState` owns both the `CardDatabase` (via `card_db: Option<CardDatabase>`) and mutable game data. Calling `state.card_db()` borrows `state` immutably, so you cannot mutate `state` while holding that reference.
+The `GameState` shares the `CardDatabase` via `card_db: Option<Arc<CardDatabase>>` (O(1) clone). Calling `state.card_db()` borrows `state` immutably, so you cannot mutate `state` while holding that reference.
 
 **Always separate reads from writes:**
 

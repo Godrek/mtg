@@ -1,14 +1,30 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fmt;
 
-use crate::card::ObjectId;
+use crate::card::{KeywordAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex, Target};
+
+/// Controls whether combat actions use full enumeration or strategic bucketing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombatAbstraction {
+    /// Enumerate all 2^n attacker subsets and all blocking combinations.
+    /// Exact but exponential — only feasible for small boards.
+    Full,
+    /// Bucket attackers into ~6 strategic postures and blockers into ~5 categories.
+    /// Lossy but reduces the action space from O(2^n) to O(1).
+    /// Falls back to Full when eligible attackers <= 5 (32 subsets).
+    Bucketed,
+}
 
 /// An action a player can take when they have priority.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Action {
     /// Pass priority.
     PassPriority,
+
+    /// Discard a card from hand (used in cleanup).
+    Discard { object_id: ObjectId },
 
     /// Play a land from hand.
     PlayLand { object_id: ObjectId },
@@ -46,6 +62,14 @@ pub enum Action {
         assignment: Vec<(ObjectId, u32)>,
     },
 
+    /// Choose the order to place simultaneous triggered abilities on the stack.
+    /// When a player controls multiple triggers that would go on the stack at once,
+    /// they choose the ordering. First element goes on the stack first (resolves last
+    /// due to LIFO). Each entry is (source_id, ability_index).
+    OrderTriggers {
+        ordering: Vec<(ObjectId, usize)>,
+    },
+
     /// Concede the game.
     Concede,
 }
@@ -54,6 +78,7 @@ impl fmt::Display for Action {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Action::PassPriority => write!(f, "Pass"),
+            Action::Discard { object_id } => write!(f, "Discard (obj {})", object_id),
             Action::PlayLand { object_id } => write!(f, "Play land (obj {})", object_id),
             Action::CastSpell { object_id, .. } => write!(f, "Cast spell (obj {})", object_id),
             Action::ActivateManaAbility { object_id, .. } => {
@@ -69,24 +94,78 @@ impl fmt::Display for Action {
                 write!(f, "Block with {} creatures", blocks.len())
             }
             Action::OrderDamageAssignment { .. } => write!(f, "Assign damage"),
+            Action::OrderTriggers { ordering } => {
+                write!(f, "Order {} triggers", ordering.len())
+            }
             Action::Concede => write!(f, "Concede"),
         }
     }
 }
 
+/// Enumerate legal actions with combat abstraction applied.
+/// Uses strategic bucketing for attacker/blocker combinations to reduce
+/// the action space from O(2^n) to O(1) for MCCFR traversal.
+pub fn legal_actions_abstracted(state: &GameState) -> Vec<Action> {
+    legal_actions_with(state, CombatAbstraction::Bucketed)
+}
+
 /// Enumerate all legal actions for the player who currently has priority.
 pub fn legal_actions(state: &GameState) -> Vec<Action> {
+    legal_actions_with(state, CombatAbstraction::Full)
+}
+
+/// Core action enumeration with configurable combat abstraction level.
+fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<Action> {
     use crate::game::Phase;
 
     let player = state.priority_player;
     let mut actions = Vec::new();
+
+    // Before normal priority actions, check for pending triggers needing ordering.
+    // When a player controls multiple simultaneous triggers, they must choose the
+    // order to place them on the stack. This is a real strategic decision that
+    // MCCFR must be able to observe and optimize over.
+    if !state.pending_triggers.is_empty() {
+        let player_triggers: Vec<&crate::game::PendingTrigger> = state
+            .pending_triggers
+            .iter()
+            .filter(|t| t.controller == player)
+            .collect();
+
+        if player_triggers.len() > 1 {
+            let keys: Vec<(ObjectId, usize)> = player_triggers
+                .iter()
+                .map(|t| (t.source_id, t.ability_index))
+                .collect();
+
+            for perm in generate_permutations(&keys) {
+                actions.push(Action::OrderTriggers { ordering: perm });
+            }
+            actions.push(Action::Concede);
+            return actions;
+        }
+    }
+
+    let forced_discard = state.phase == Phase::Cleanup
+        && player == state.active_player
+        && state.players[player].hand.len() > 7;
+
+    if forced_discard {
+        // Cleanup discard is mandatory; PassPriority is intentionally omitted here.
+        for &obj_id in &state.players[player].hand {
+            actions.push(Action::Discard { object_id: obj_id });
+        }
+        return actions;
+    }
 
     // Player can always pass priority
     actions.push(Action::PassPriority);
 
     // Phase-specific action generation
     match state.phase {
-        Phase::DeclareAttackers if player == state.active_player => {
+        Phase::DeclareAttackers
+            if player == state.active_player && state.combat.attackers.is_empty() =>
+        {
             // Enumerate attacker combinations
             let creatures = state.creatures_controlled_by(player);
             let db = state.card_db();
@@ -99,9 +178,16 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
                 })
                 .collect();
 
-            // Generate all subsets of eligible attackers (including empty = no attack).
-            // For large boards, we limit combinations to avoid exponential blowup.
-            let subsets = generate_subsets(&eligible, 10); // cap at 10 attackers
+            let use_buckets = abstraction == CombatAbstraction::Bucketed
+                && eligible.len() > 5;
+
+            let subsets = if use_buckets {
+                generate_attack_buckets(&eligible, state)
+            } else {
+                // Full enumeration (including empty = no attack).
+                // For large boards without abstraction, cap at 10 attackers.
+                generate_subsets(&eligible, 10)
+            };
             for subset in subsets {
                 actions.push(Action::DeclareAttackers { attackers: subset });
             }
@@ -123,10 +209,14 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
             let attackers = &state.combat.attackers;
             if attackers.is_empty() {
                 // No attackers — just pass
+            } else if abstraction == CombatAbstraction::Bucketed {
+                let blocking_combos =
+                    generate_block_buckets(&eligible_blockers, attackers, state);
+                for combo in blocking_combos {
+                    actions.push(Action::DeclareBlockers { blocks: combo });
+                }
             } else {
-                // Generate blocking combinations.
-                // Each blocker can block at most one attacker (or not block).
-                // For now, enumerate single-blocker assignments and no-block.
+                // Full enumeration of blocking combinations.
                 let blocking_combos =
                     generate_blocking_assignments(&eligible_blockers, attackers, state);
                 for combo in blocking_combos {
@@ -422,6 +512,291 @@ fn generate_subsets(items: &[ObjectId], max_items: usize) -> Vec<Vec<ObjectId>> 
     subsets
 }
 
+/// Generate strategically distinct attacker buckets instead of the full power set.
+///
+/// Buckets:
+/// 1. **None**: don't attack (preserve board)
+/// 2. **Alpha**: attack with all eligible creatures
+/// 3. **Evasion-only**: attack with only evasive creatures (flying/fear/intimidate/menace)
+/// 4. **Best-1**: attack with just the highest-power creature
+/// 5. **Top-half**: attack with the top ceil(n/2) creatures by power
+/// 6. **Bottom-half**: attack with the bottom ceil(n/2) creatures by power
+/// 7. **Safe-attackers**: attack with only vigilance creatures (they don't tap, zero risk)
+///
+/// Produces at most 7 distinct actions (after dedup) instead of 2^n.
+fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<ObjectId>> {
+    let db = state.card_db();
+
+    // Sort eligible by effective power descending, break ties by object ID for stability.
+    let mut by_power: Vec<(ObjectId, i32)> = eligible
+        .iter()
+        .map(|&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            (id, inst.effective_power(def))
+        })
+        .collect();
+    by_power.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    let sorted_ids: Vec<ObjectId> = by_power.iter().map(|&(id, _)| id).collect();
+    let n = sorted_ids.len();
+
+    // Collect candidate buckets, then deduplicate.
+    let mut seen: HashSet<Vec<ObjectId>> = HashSet::new();
+    let mut buckets: Vec<Vec<ObjectId>> = Vec::with_capacity(8);
+
+    let add_bucket = |mut bucket: Vec<ObjectId>, seen: &mut HashSet<Vec<ObjectId>>, buckets: &mut Vec<Vec<ObjectId>>| {
+        bucket.sort();
+        if seen.insert(bucket.clone()) {
+            buckets.push(bucket);
+        }
+    };
+
+    // 1. None (empty attack)
+    add_bucket(vec![], &mut seen, &mut buckets);
+
+    // 2. Alpha (all eligible)
+    add_bucket(eligible.to_vec(), &mut seen, &mut buckets);
+
+    // 3. Evasion-only: creatures with flying, fear, intimidate, or menace
+    let evasive: Vec<ObjectId> = eligible
+        .iter()
+        .filter(|&&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            inst.has_keyword(def, KeywordAbility::Flying)
+                || inst.has_keyword(def, KeywordAbility::Fear)
+                || inst.has_keyword(def, KeywordAbility::Intimidate)
+                || inst.has_keyword(def, KeywordAbility::Menace)
+        })
+        .copied()
+        .collect();
+    if !evasive.is_empty() {
+        add_bucket(evasive, &mut seen, &mut buckets);
+    }
+
+    // 4. Best-1 (highest power creature)
+    if n >= 1 {
+        add_bucket(vec![sorted_ids[0]], &mut seen, &mut buckets);
+    }
+
+    // 5. Top-half by power (upper ceil(n/2))
+    let half = (n + 1) / 2;
+    if half > 0 && half < n {
+        add_bucket(sorted_ids[..half].to_vec(), &mut seen, &mut buckets);
+    }
+
+    // 6. Bottom-half by power (lower ceil(n/2))
+    let bottom_start = n - half;
+    if bottom_start < n && half < n {
+        add_bucket(sorted_ids[bottom_start..].to_vec(), &mut seen, &mut buckets);
+    }
+
+    // 7. Safe-attackers: vigilance creatures don't tap to attack, so attacking
+    //    with them carries no defensive cost. Strategically distinct posture.
+    let vigilant: Vec<ObjectId> = eligible
+        .iter()
+        .filter(|&&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            inst.has_keyword(def, KeywordAbility::Vigilance)
+        })
+        .copied()
+        .collect();
+    if !vigilant.is_empty() {
+        add_bucket(vigilant, &mut seen, &mut buckets);
+    }
+
+    buckets
+}
+
+/// Generate strategically distinct blocking buckets instead of full enumeration.
+///
+/// Buckets:
+/// 1. **No blocks**: take all damage, preserve creatures
+/// 2. **Chump-all**: assign the smallest available blocker to each attacker (biggest first)
+/// 3. **Favorable-only**: block where our creature kills theirs AND survives (biggest blocker first)
+/// 4. **Block-all**: assign one blocker to each attacker we can (greedy by attacker power)
+/// 5. **Trade-down**: block to trade, even if we lose our creature, when their creature dies
+fn generate_block_buckets(
+    blockers: &[ObjectId],
+    attackers: &[ObjectId],
+    state: &GameState,
+) -> Vec<Vec<(ObjectId, ObjectId)>> {
+    let db = state.card_db();
+
+    if blockers.is_empty() || attackers.is_empty() {
+        return vec![vec![]];
+    }
+
+    // Pre-compute legality, power, and toughness.
+    let can_block_matrix: Vec<Vec<bool>> = blockers
+        .iter()
+        .map(|&b| {
+            attackers.iter().map(|&a| can_block(state, b, a)).collect()
+        })
+        .collect();
+
+    struct CreatureStats {
+        power: i32,
+        toughness: i32,
+    }
+
+    let attacker_stats: Vec<CreatureStats> = attackers
+        .iter()
+        .map(|&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            CreatureStats {
+                power: inst.effective_power(def),
+                toughness: inst.effective_toughness(def),
+            }
+        })
+        .collect();
+
+    let blocker_stats: Vec<CreatureStats> = blockers
+        .iter()
+        .map(|&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            CreatureStats {
+                power: inst.effective_power(def),
+                toughness: inst.effective_toughness(def),
+            }
+        })
+        .collect();
+
+    // Attackers sorted by power descending (indices into the attackers slice).
+    let mut attacker_order: Vec<usize> = (0..attackers.len()).collect();
+    attacker_order.sort_by(|&a, &b| attacker_stats[b].power.cmp(&attacker_stats[a].power));
+
+    // Blockers sorted by power ascending (smallest first, for chump selection).
+    let mut blocker_by_power_asc: Vec<usize> = (0..blockers.len()).collect();
+    blocker_by_power_asc.sort_by(|&a, &b| blocker_stats[a].power.cmp(&blocker_stats[b].power));
+
+    // Blockers sorted by power descending (biggest first, for favorable trades).
+    let mut blocker_by_power_desc: Vec<usize> = (0..blockers.len()).collect();
+    blocker_by_power_desc.sort_by(|&a, &b| blocker_stats[b].power.cmp(&blocker_stats[a].power));
+
+    let mut seen: HashSet<Vec<(ObjectId, ObjectId)>> = HashSet::new();
+    let mut results: Vec<Vec<(ObjectId, ObjectId)>> = Vec::with_capacity(6);
+
+    let add_assignment = |mut assignment: Vec<(ObjectId, ObjectId)>, seen: &mut HashSet<Vec<(ObjectId, ObjectId)>>, results: &mut Vec<Vec<(ObjectId, ObjectId)>>| {
+        assignment.sort();
+        if seen.insert(assignment.clone()) {
+            results.push(assignment);
+        }
+    };
+
+    // 1. No blocks
+    add_assignment(vec![], &mut seen, &mut results);
+
+    // 2. Chump-all: assign the smallest available blocker to each attacker,
+    //    biggest attackers first. Prevents maximum total damage.
+    {
+        let mut assignment = Vec::new();
+        let mut used_blockers: HashSet<usize> = HashSet::new();
+        for &ai in &attacker_order {
+            for &bi in &blocker_by_power_asc {
+                if !used_blockers.contains(&bi) && can_block_matrix[bi][ai] {
+                    assignment.push((blockers[bi], attackers[ai]));
+                    used_blockers.insert(bi);
+                    break;
+                }
+            }
+        }
+        if !assignment.is_empty() {
+            add_assignment(assignment, &mut seen, &mut results);
+        }
+    }
+
+    // 3. Favorable-only: block where our creature kills theirs AND survives.
+    //    Iterates biggest-blocker-first so the most capable blockers get matched
+    //    to attackers they can profitably handle, rather than wasting small
+    //    blockers on big attackers where they can't achieve favorable trades.
+    {
+        let mut assignment = Vec::new();
+        let mut used_blockers: HashSet<usize> = HashSet::new();
+        for &ai in &attacker_order {
+            for &bi in &blocker_by_power_desc {
+                if used_blockers.contains(&bi) || !can_block_matrix[bi][ai] {
+                    continue;
+                }
+                let our_survives = attacker_stats[ai].power < blocker_stats[bi].toughness;
+                let theirs_dies = blocker_stats[bi].power >= attacker_stats[ai].toughness;
+                if our_survives && theirs_dies {
+                    assignment.push((blockers[bi], attackers[ai]));
+                    used_blockers.insert(bi);
+                    break;
+                }
+            }
+        }
+        if !assignment.is_empty() {
+            add_assignment(assignment, &mut seen, &mut results);
+        }
+    }
+
+    // 4. Block-all: greedily assign one blocker to each attacker, biggest attackers first
+    {
+        let mut assignment = Vec::new();
+        let mut used_blockers: HashSet<usize> = HashSet::new();
+        for &ai in &attacker_order {
+            // Prefer the best blocker that can kill this attacker
+            let mut best_bi: Option<usize> = None;
+            for (bi, _) in blockers.iter().enumerate() {
+                if used_blockers.contains(&bi) || !can_block_matrix[bi][ai] {
+                    continue;
+                }
+                let kills = blocker_stats[bi].power >= attacker_stats[ai].toughness;
+                let survives = attacker_stats[ai].power < blocker_stats[bi].toughness;
+                match best_bi {
+                    None => best_bi = Some(bi),
+                    Some(prev) => {
+                        let prev_kills = blocker_stats[prev].power >= attacker_stats[ai].toughness;
+                        let prev_survives = attacker_stats[ai].power < blocker_stats[prev].toughness;
+                        // Prefer: kills+survives > kills > survives > any
+                        let score = |k: bool, s: bool| (k as u8) * 2 + (s as u8);
+                        if score(kills, survives) > score(prev_kills, prev_survives) {
+                            best_bi = Some(bi);
+                        }
+                    }
+                }
+            }
+            if let Some(bi) = best_bi {
+                assignment.push((blockers[bi], attackers[ai]));
+                used_blockers.insert(bi);
+            }
+        }
+        if !assignment.is_empty() {
+            add_assignment(assignment, &mut seen, &mut results);
+        }
+    }
+
+    // 5. Trade-down: block where our creature kills theirs, even if ours dies too
+    {
+        let mut assignment = Vec::new();
+        let mut used_blockers: HashSet<usize> = HashSet::new();
+        for &ai in &attacker_order {
+            for &bi in &blocker_by_power_asc {
+                if used_blockers.contains(&bi) || !can_block_matrix[bi][ai] {
+                    continue;
+                }
+                let theirs_dies = blocker_stats[bi].power >= attacker_stats[ai].toughness;
+                if theirs_dies {
+                    assignment.push((blockers[bi], attackers[ai]));
+                    used_blockers.insert(bi);
+                    break;
+                }
+            }
+        }
+        if !assignment.is_empty() {
+            add_assignment(assignment, &mut seen, &mut results);
+        }
+    }
+
+    results
+}
+
 /// Check if a specific blocker can legally block a specific attacker.
 fn can_block(
     state: &GameState,
@@ -602,5 +977,46 @@ fn combinations_helper(
         current.push(items[i]);
         combinations_helper(items, k, i + 1, current, result);
         current.pop();
+    }
+}
+
+/// Generate all permutations of the given items.
+/// Caps at 6 items (720 permutations) to avoid combinatorial explosion;
+/// beyond that, returns only the original order (FIFO fallback).
+fn generate_permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    if items.len() > 6 {
+        // Too many permutations; fall back to single FIFO ordering
+        return vec![items.to_vec()];
+    }
+
+    let mut result = Vec::new();
+    let mut current = Vec::with_capacity(items.len());
+    let mut used = vec![false; items.len()];
+    permute_helper(items, &mut current, &mut used, &mut result);
+    result
+}
+
+fn permute_helper<T: Clone>(
+    items: &[T],
+    current: &mut Vec<T>,
+    used: &mut Vec<bool>,
+    result: &mut Vec<Vec<T>>,
+) {
+    if current.len() == items.len() {
+        result.push(current.clone());
+        return;
+    }
+    for i in 0..items.len() {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        current.push(items[i].clone());
+        permute_helper(items, current, used, result);
+        current.pop();
+        used[i] = false;
     }
 }
