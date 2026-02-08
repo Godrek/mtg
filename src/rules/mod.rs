@@ -9,8 +9,42 @@ use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, Sta
 pub fn apply_action(state: &mut GameState, action: &Action) {
     match action {
         Action::PassPriority => {
+            if state.phase == Phase::Cleanup
+                && state.players[state.active_player].hand.len() > 7
+            {
+                debug_assert!(
+                    false,
+                    "PassPriority during cleanup discard is illegal; choose a Discard action."
+                );
+                return;
+            }
             state.consecutive_passes += 1;
             handle_priority_pass(state);
+        }
+
+        Action::Discard { object_id } => {
+            if state.phase != Phase::Cleanup {
+                return;
+            }
+            if state.priority_player != state.active_player {
+                return;
+            }
+            let player = state.active_player;
+            if !state.players[player].hand.contains(object_id) {
+                return;
+            }
+            if state.players[player].hand.len() <= 7 {
+                return;
+            }
+
+            state.move_object(*object_id, ZoneType::Hand, ZoneType::Graveyard);
+            state.consecutive_passes = 0;
+            state.priority_player = player;
+
+            if state.players[player].hand.len() <= 7 {
+                finalize_cleanup(state);
+            }
+            // TODO: if discard triggers exist, start another cleanup step (CR 514.3a).
         }
 
         Action::PlayLand { object_id } => {
@@ -867,19 +901,24 @@ fn execute_phase_entry(state: &mut GameState) {
             // Discard down to max hand size (7)
             let hand_size = state.players[active].hand.len();
             if hand_size > 7 {
-                let to_discard = hand_size - 7;
-                discard_random(state, active, to_discard);
+                state.priority_player = active;
+                state.consecutive_passes = 0;
+                return;
             }
-            // Remove EoT effects
-            for &obj_id in &state.battlefield.clone() {
-                if let Some(inst) = state.objects.get_mut(&obj_id) {
-                    inst.cleanup_eot();
-                }
-            }
-            // Advance to next turn (no priority in cleanup normally)
-            advance_phase(state);
+            finalize_cleanup(state);
         }
     }
+}
+
+fn finalize_cleanup(state: &mut GameState) {
+    // Remove EoT effects
+    for &obj_id in &state.battlefield.clone() {
+        if let Some(inst) = state.objects.get_mut(&obj_id) {
+            inst.cleanup_eot();
+        }
+    }
+    // Advance to next turn (no priority in cleanup normally)
+    advance_phase(state);
 }
 
 /// Move to the next turn.

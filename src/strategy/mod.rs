@@ -123,6 +123,13 @@ impl Strategy for GreedyStrategy {
             }
         }
 
+        // Priority 5: Cleanup discard if forced
+        for action in &actions {
+            if let Action::Discard { .. } = action {
+                return action.clone();
+            }
+        }
+
         // Default: pass priority
         Action::PassPriority
     }
