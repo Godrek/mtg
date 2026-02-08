@@ -376,6 +376,9 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
+        // Apply ETB replacement effects (CR 614): enters tapped, enters with counters, etc.
+        state.apply_etb_replacements(obj_id);
+
         // Refresh continuous effects when a permanent enters the battlefield.
         // This picks up any static abilities on the new permanent.
         state.refresh_continuous_effects();
@@ -429,30 +432,36 @@ fn resolve_effect(
             };
 
             for target in &effective_targets {
+                // Apply replacement effects to damage (CR 614)
+                let actual_damage = state.deal_damage_with_replacement(*amount, target);
+                if actual_damage == 0 {
+                    continue;
+                }
+
                 match target {
                     Target::Player(p) => {
                         let old_life = state.players[*p].life;
-                        state.players[*p].life -= *amount as i32;
+                        state.players[*p].life -= actual_damage as i32;
                         state.emit_event(GameEvent::LifeChanged {
                             player: *p,
                             old: old_life,
                             new: state.players[*p].life,
                         });
                         state.emit_event(GameEvent::DamageDealt {
-                            source: 0, // source tracking deferred to Phase 2A
+                            source: 0,
                             target: target.clone(),
-                            amount: *amount,
+                            amount: actual_damage,
                             is_combat: false,
                         });
                     }
                     Target::Object(id) => {
                         if let Some(inst) = state.objects.get_mut(id) {
-                            inst.damage_marked += amount;
+                            inst.damage_marked += actual_damage;
                         }
                         state.emit_event(GameEvent::DamageDealt {
                             source: 0,
                             target: target.clone(),
-                            amount: *amount,
+                            amount: actual_damage,
                             is_combat: false,
                         });
                     }
@@ -885,12 +894,19 @@ pub fn check_state_based_actions(state: &mut GameState) {
             };
 
             for &obj_id in &to_die {
-                state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
+                // Check death replacement effects (CR 614)
+                let dest_zone = state.death_replacement_zone(obj_id);
+                if dest_zone == ZoneType::Battlefield {
+                    // Replacement prevented the death — creature stays
+                    continue;
+                }
+                state.move_object(obj_id, ZoneType::Battlefield, dest_zone);
                 any_action = true;
             }
             if !to_die.is_empty() {
                 // Refresh continuous effects after permanents leave the battlefield
                 state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
             }
             died_this_round.extend(to_die);
 

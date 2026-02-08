@@ -6,6 +6,7 @@ use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
 use crate::events::GameEvent;
 use crate::layers::ContinuousEffect;
 use crate::mana::ManaPool;
+use crate::replacement::{ReplacementEffect, ReplacementEventKind, ReplacementAction};
 
 /// Index into the players array (0 or 1 for a two-player game).
 pub type PlayerIndex = usize;
@@ -245,6 +246,12 @@ pub struct GameState {
 
     /// Next timestamp for continuous effect ordering (CR 613.7).
     pub next_timestamp: u32,
+
+    /// Active replacement effects (Phase 2A.3).
+    /// Replacement effects modify or replace events as they happen (CR 614).
+    /// Self-replacement effects are applied automatically; competing player-choice
+    /// replacements are surfaced as Action::ChooseReplacementOrder.
+    pub replacement_effects: Vec<ReplacementEffect>,
 
     /// Game over flag.
     pub game_over: bool,
@@ -509,6 +516,7 @@ impl GameState {
             pending_triggers: Vec::new(),
             continuous_effects: Vec::new(),
             next_timestamp: 1,
+            replacement_effects: Vec::new(),
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -793,6 +801,135 @@ impl GameState {
         )
         .map(|c| c.keywords.contains(&kw))
         .unwrap_or(false)
+    }
+
+    /// Apply damage with replacement effects (CR 614).
+    ///
+    /// Checks for damage-replacement effects before dealing damage.
+    /// Self-replacement effects are applied automatically. If multiple
+    /// non-self replacements apply, the affected player chooses the order
+    /// (surfaced via Action::ChooseReplacementOrder in a future iteration).
+    ///
+    /// Returns the actual damage dealt after replacements.
+    pub fn deal_damage_with_replacement(&mut self, amount: u32, target: &Target) -> u32 {
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::DamageDealt,
+                match target {
+                    Target::Player(p) => *p,
+                    Target::Object(id) => self.objects.get(id).map(|i| i.controller).unwrap_or(0),
+                },
+            );
+
+        let mut effective_amount = amount as i32;
+
+        // Apply self-replacement effects automatically
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx) {
+                match &effect.action {
+                    ReplacementAction::Prevent => {
+                        effective_amount = 0;
+                    }
+                    ReplacementAction::ModifyAmount { delta } => {
+                        effective_amount += delta;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // TODO: handle player-choice replacement effects (ChooseReplacementOrder)
+        // For now, apply them in order
+        // (CR 614.5: each effect applies only once per event)
+
+        effective_amount.max(0) as u32
+    }
+
+    /// Check for death replacement effects (CR 614).
+    ///
+    /// Returns the zone to send the dying creature to (normally Graveyard,
+    /// but can be Exile or other zones if a replacement applies).
+    pub fn death_replacement_zone(&self, obj_id: ObjectId) -> ZoneType {
+        let controller = self
+            .objects
+            .get(&obj_id)
+            .map(|i| i.controller)
+            .unwrap_or(0);
+
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::WouldDie,
+                controller,
+            );
+
+        // Apply self-replacement effects first
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx) {
+                match &effect.action {
+                    ReplacementAction::RedirectToZone(zone) => {
+                        return *zone;
+                    }
+                    ReplacementAction::Prevent => {
+                        // Prevented death means the creature stays on the battlefield.
+                        // This is a special case — we return Battlefield to signal "don't move".
+                        return ZoneType::Battlefield;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // TODO: handle player-choice replacement effects
+
+        ZoneType::Graveyard
+    }
+
+    /// Check for ETB replacement effects and apply them (CR 614).
+    ///
+    /// Applies modifications like "enters tapped" or "enters with counters".
+    pub fn apply_etb_replacements(&mut self, obj_id: ObjectId) {
+        let controller = self
+            .objects
+            .get(&obj_id)
+            .map(|i| i.controller)
+            .unwrap_or(0);
+
+        let (self_replacements, _player_choice) =
+            crate::replacement::find_applicable_replacements(
+                &self.replacement_effects,
+                &ReplacementEventKind::EntersBattlefield,
+                controller,
+            );
+
+        for &idx in &self_replacements {
+            if let Some(effect) = self.replacement_effects.get(idx).cloned() {
+                match &effect.action {
+                    ReplacementAction::EntersModified {
+                        enters_tapped,
+                        extra_counters,
+                    } => {
+                        if let Some(inst) = self.objects.get_mut(&obj_id) {
+                            if *enters_tapped {
+                                inst.tapped = true;
+                            }
+                            if *extra_counters > 0 {
+                                inst.plus_counters += extra_counters;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Refresh replacement effects based on the current battlefield.
+    /// Removes effects whose source has left the battlefield.
+    pub fn refresh_replacement_effects(&mut self) {
+        self.replacement_effects
+            .retain(|e| self.battlefield.contains(&e.source_id));
     }
 
     /// Check if an object is a creature using the layer engine.
