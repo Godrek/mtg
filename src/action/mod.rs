@@ -72,6 +72,15 @@ pub enum Action {
         ordering: Vec<(ObjectId, usize)>,
     },
 
+    /// Choose the order in which replacement effects apply to an event (CR 614).
+    /// When multiple replacement effects could modify the same event, the affected
+    /// player chooses the order. Each entry is (source_id, effect_index).
+    /// The first element is applied first; subsequent effects apply to the
+    /// already-modified event.
+    ChooseReplacementOrder {
+        ordering: Vec<(ObjectId, usize)>,
+    },
+
     /// Concede the game.
     Concede,
 }
@@ -98,6 +107,9 @@ impl fmt::Display for Action {
             Action::OrderDamageAssignment { .. } => write!(f, "Assign damage"),
             Action::OrderTriggers { ordering } => {
                 write!(f, "Order {} triggers", ordering.len())
+            }
+            Action::ChooseReplacementOrder { ordering } => {
+                write!(f, "Order {} replacement effects", ordering.len())
             }
             Action::Concede => write!(f, "Concede"),
         }

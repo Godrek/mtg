@@ -3,6 +3,7 @@ use rand::Rng;
 
 use crate::action::Action;
 use crate::card::{CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TriggerCondition, ZoneType};
+use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, StackSource, Target};
 
 /// Apply an action to the game state, advancing it.
@@ -84,6 +85,16 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             });
             // Remove from hand (but don't put in a zone yet — it's on the stack)
             state.players[player].hand.retain(|&id| id != obj_id);
+
+            state.emit_event(GameEvent::SpellCast {
+                object: obj_id,
+                controller: player,
+            });
+            state.emit_event(GameEvent::ZoneChange {
+                object: obj_id,
+                from: Zone::Hand,
+                to: Zone::Stack,
+            });
 
             state.consecutive_passes = 0;
         }
@@ -276,6 +287,20 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             // decision, not a normal game action.
         }
 
+        Action::ChooseReplacementOrder { ordering } => {
+            // Store the chosen replacement order for the current pending replacement.
+            // The replacement engine will apply effects in the chosen order when
+            // the event is processed. For now, clear the pending replacement and
+            // record the choice.
+            //
+            // Phase 2A will wire this into the actual replacement application logic.
+            // Currently this action variant exists to establish the interface contract
+            // between the rules engine and MCCFR — the solver needs to know that
+            // replacement ordering is a player decision.
+            let _ = ordering;
+            state.consecutive_passes = 0;
+        }
+
         Action::Concede => {
             let player = state.priority_player;
             state.players[player].has_lost = true;
@@ -378,29 +403,75 @@ fn resolve_effect(
     targets: &[Target],
 ) {
     match effect {
-        Effect::DealDamage { amount, .. } => {
-            for target in targets {
+        Effect::DealDamage { amount, target: target_spec } => {
+            // For NoTarget effects (e.g., "deals N damage to each player"),
+            // auto-generate targets for all players.
+            let effective_targets: Vec<Target> = if targets.is_empty() {
+                match target_spec {
+                    crate::card::TargetSpec::NoTarget => {
+                        // "Each player" — deal damage to all players
+                        (0..state.players.len())
+                            .map(|i| Target::Player(i))
+                            .collect()
+                    }
+                    _ => vec![],
+                }
+            } else {
+                targets.to_vec()
+            };
+
+            for target in &effective_targets {
                 match target {
                     Target::Player(p) => {
+                        let old_life = state.players[*p].life;
                         state.players[*p].life -= *amount as i32;
+                        state.emit_event(GameEvent::LifeChanged {
+                            player: *p,
+                            old: old_life,
+                            new: state.players[*p].life,
+                        });
+                        state.emit_event(GameEvent::DamageDealt {
+                            source: 0, // source tracking deferred to Phase 2A
+                            target: target.clone(),
+                            amount: *amount,
+                            is_combat: false,
+                        });
                     }
                     Target::Object(id) => {
                         if let Some(inst) = state.objects.get_mut(id) {
                             inst.damage_marked += amount;
                         }
+                        state.emit_event(GameEvent::DamageDealt {
+                            source: 0,
+                            target: target.clone(),
+                            amount: *amount,
+                            is_combat: false,
+                        });
                     }
                 }
             }
         }
 
         Effect::GainLife { amount } => {
+            let old_life = state.players[controller].life;
             state.players[controller].life += *amount as i32;
+            state.emit_event(GameEvent::LifeChanged {
+                player: controller,
+                old: old_life,
+                new: state.players[controller].life,
+            });
         }
 
         Effect::LoseLife { amount, .. } => {
             for target in targets {
                 if let Target::Player(p) = target {
+                    let old_life = state.players[*p].life;
                     state.players[*p].life -= *amount as i32;
+                    state.emit_event(GameEvent::LifeChanged {
+                        player: *p,
+                        old: old_life,
+                        new: state.players[*p].life,
+                    });
                 }
             }
         }
@@ -666,6 +737,10 @@ fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
         controller: trigger.controller,
         targets: trigger.targets.clone(),
     });
+    state.emit_event(GameEvent::AbilityTriggered {
+        source: trigger.source_id,
+        ability_index: trigger.ability_index,
+    });
 }
 
 /// Check triggers for a specific game event and flush them to the stack.
@@ -722,85 +797,131 @@ fn resolve_triggered_ability(
     }
 }
 
-/// Check and apply state-based actions.
+/// Check and apply state-based actions, implementing the CR 704.3 loop.
+///
+/// The loop structure interleaves SBA checks with trigger checking:
+///
+/// ```text
+/// loop {
+///     perform_all_SBAs()         // inner loop until no more SBAs apply
+///     check_and_queue_triggers() // queue triggers for events that happened
+///     if no_SBAs_performed && no_triggers_queued { break }
+///     put_triggers_on_stack()    // may pause for OrderTriggers
+/// }
+/// // only now grant priority
+/// ```
+///
+/// This correctly handles cascading scenarios where SBA-caused deaths
+/// trigger abilities, whose resolution (after players pass priority)
+/// may cause further SBAs. The outer loop ensures that the SBA check
+/// runs again after triggers are placed on the stack.
+///
+/// If `flush_triggers` pauses (because a player has >1 simultaneous
+/// trigger and must choose ordering), the function returns. The game
+/// loop will present `Action::OrderTriggers`, and after the player
+/// orders, the next call to `check_state_based_actions` will resume
+/// the outer loop.
 pub fn check_state_based_actions(state: &mut GameState) {
-    let mut all_died: Vec<ObjectId> = Vec::new();
-
+    // Outer CR 704.3 loop: interleave SBA checks with trigger checks
     loop {
-        let mut any_action = false;
+        // --- Inner SBA loop: perform all SBAs until stable ---
+        let mut died_this_round: Vec<ObjectId> = Vec::new();
+        let mut any_sba = false;
 
-        // Check player life totals
-        for i in 0..state.players.len() {
-            if state.players[i].life <= 0 && !state.players[i].has_lost {
-                state.players[i].has_lost = true;
+        loop {
+            let mut any_action = false;
+
+            // CR 704.5a: Player with 0 or less life loses
+            for i in 0..state.players.len() {
+                if state.players[i].life <= 0 && !state.players[i].has_lost {
+                    state.players[i].has_lost = true;
+                    any_action = true;
+                }
+            }
+
+            // CR 704.5f/g: Creature with toughness <= 0 or lethal damage
+            let to_die: Vec<ObjectId> = {
+                let db = state.card_db();
+                state
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&id| {
+                        let inst = &state.objects[&id];
+                        if let Some(def) = db.get(inst.card_def_id) {
+                            if def.is_creature() {
+                                let toughness = inst.effective_toughness(def);
+                                if toughness <= 0 {
+                                    return true;
+                                }
+                                if inst.damage_marked as i32 >= toughness {
+                                    return true;
+                                }
+                            }
+                        }
+                        false
+                    })
+                    .collect()
+            };
+
+            for &obj_id in &to_die {
+                state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
                 any_action = true;
+            }
+            died_this_round.extend(to_die);
+
+            // Check for game end
+            let losers: Vec<usize> = (0..state.players.len())
+                .filter(|&i| state.players[i].has_lost)
+                .collect();
+
+            if losers.len() >= state.players.len() - 1 {
+                state.game_over = true;
+                state.winner = (0..state.players.len())
+                    .find(|&i| !state.players[i].has_lost);
+            }
+
+            if !any_action {
+                break;
+            }
+            any_sba = true;
+        }
+
+        // --- Queue triggers for SBA events ---
+        // Batch-check all death triggers before a single flush so the controller
+        // gets a combined ordering decision for simultaneous death triggers.
+        let triggers_before = state.pending_triggers.len();
+        for &obj_id in &died_this_round {
+            // Check the dying creature's own "when ~ dies" triggers
+            check_triggers(state, TriggerCondition::Dies, Some(obj_id));
+            // Check battlefield permanents that watch for creature deaths
+            check_triggers(state, TriggerCondition::Dies, None);
+        }
+        let triggers_queued = state.pending_triggers.len() > triggers_before;
+
+        // --- CR 704.3 exit condition ---
+        // If no SBAs were performed AND no triggers were queued, the loop
+        // is stable. Exit and grant priority.
+        if !any_sba && !triggers_queued {
+            break;
+        }
+
+        // --- Flush triggers to stack ---
+        // If flush pauses (player has >1 trigger needing ordering), return
+        // immediately. The game loop will present OrderTriggers, and after
+        // the player orders, check_state_based_actions will be called again
+        // to continue the outer loop.
+        if !state.pending_triggers.is_empty() {
+            let flushed = flush_triggers(state);
+            if !flushed {
+                // Paused for OrderTriggers — return to game loop
+                return;
             }
         }
 
-        // Check creature toughness <= 0 or lethal damage
-        let to_die: Vec<ObjectId> = {
-            let db = state.card_db();
-            state
-                .battlefield
-                .iter()
-                .copied()
-                .filter(|&id| {
-                    let inst = &state.objects[&id];
-                    if let Some(def) = db.get(inst.card_def_id) {
-                        if def.is_creature() {
-                            let toughness = inst.effective_toughness(def);
-                            if toughness <= 0 {
-                                return true;
-                            }
-                            if inst.damage_marked as i32 >= toughness {
-                                return true;
-                            }
-                        }
-                    }
-                    false
-                })
-                .collect()
-        };
-
-        for &obj_id in &to_die {
-            state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
-            any_action = true;
-        }
-        all_died.extend(to_die);
-
-        // Check for game end
-        let losers: Vec<usize> = (0..state.players.len())
-            .filter(|&i| state.players[i].has_lost)
-            .collect();
-
-        if losers.len() >= state.players.len() - 1 {
-            state.game_over = true;
-            // Find the winner (the player who hasn't lost)
-            state.winner = (0..state.players.len())
-                .find(|&i| !state.players[i].has_lost);
-        }
-
-        // Check library empty (lose when trying to draw, not SBA — but we simplify)
-
-        if !any_action {
-            break;
-        }
-    }
-
-    // Fire dies triggers after all SBA are resolved.
-    // Batch-check all death triggers before a single flush so the controller
-    // gets a combined ordering decision for simultaneous death triggers.
-    for &obj_id in &all_died {
-        // Check the dying creature's own "when ~ dies" triggers
-        check_triggers(state, TriggerCondition::Dies, Some(obj_id));
-        // Check battlefield permanents that watch for creature deaths
-        check_triggers(state, TriggerCondition::Dies, None);
-    }
-    if !all_died.is_empty() {
-        // If flush pauses (player has >1 trigger), pending_triggers will
-        // remain populated and legal_actions() will offer OrderTriggers
-        // on the next game loop iteration.
-        let _ = flush_triggers(state);
+        // Continue outer loop: re-check SBAs after triggers were placed
+        // on the stack (in case the act of putting triggers on the stack
+        // caused new state changes).
     }
 }
 
@@ -959,6 +1080,11 @@ fn next_turn(state: &mut GameState) {
     state.phase = Phase::TURN_ORDER[0]; // Untap
     state.consecutive_passes = 0;
 
+    state.emit_event(GameEvent::TurnStarted {
+        active_player: state.active_player,
+        turn_number: state.turn_number,
+    });
+
     // Drain mana pools
     for p in &mut state.players {
         p.mana_pool.drain();
@@ -977,6 +1103,15 @@ pub fn draw_cards(state: &mut GameState, player: PlayerIndex, count: usize) {
         }
         let card_id = state.players[player].library.remove(0);
         state.players[player].hand.push(card_id);
+        state.emit_event(GameEvent::CardDrawn {
+            player,
+            object: card_id,
+        });
+        state.emit_event(GameEvent::ZoneChange {
+            object: card_id,
+            from: Zone::Library,
+            to: Zone::Hand,
+        });
     }
 }
 
@@ -1174,12 +1309,36 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
             if let Some(inst) = state.objects.get_mut(&obj_id) {
                 inst.damage_marked += event.amount;
             }
+            state.emit_event(GameEvent::DamageDealt {
+                source: 0, // source tracking deferred
+                target: Target::Object(obj_id),
+                amount: event.amount,
+                is_combat: true,
+            });
         }
         if let Some(player) = event.target_player {
+            let old_life = state.players[player].life;
             state.players[player].life -= event.amount as i32;
+            state.emit_event(GameEvent::DamageDealt {
+                source: 0,
+                target: Target::Player(player),
+                amount: event.amount,
+                is_combat: true,
+            });
+            state.emit_event(GameEvent::LifeChanged {
+                player,
+                old: old_life,
+                new: state.players[player].life,
+            });
         }
         if let Some(lifelink_player) = event.lifelink_for {
+            let old_life = state.players[lifelink_player].life;
             state.players[lifelink_player].life += event.amount as i32;
+            state.emit_event(GameEvent::LifeChanged {
+                player: lifelink_player,
+                old: old_life,
+                new: state.players[lifelink_player].life,
+            });
         }
     }
 }

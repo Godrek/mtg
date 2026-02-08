@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
+use crate::events::GameEvent;
 use crate::mana::ManaPool;
 
 /// Index into the players array (0 or 1 for a two-player game).
@@ -238,6 +239,22 @@ pub struct GameState {
 
     /// Winner (if game is over). None = draw.
     pub winner: Option<PlayerIndex>,
+
+    /// Transient event accumulator (Phase 1A.2).
+    ///
+    /// Events emitted during `apply_action()` and rule processing are
+    /// collected here. External code (event bus, test harness) can drain
+    /// this vec after each action to process events.
+    ///
+    /// This field is:
+    /// - **NOT serialized** (`serde(skip)`) — events are transient
+    /// - **NOT part of the canonical game state** — two states with
+    ///   different pending_events but identical canonical fields represent
+    ///   the same game position
+    /// - **Cheap to clone** — should be empty between actions; any events
+    ///   present at clone time are copied but this is O(0) in practice
+    #[serde(skip)]
+    pub pending_events: Vec<GameEvent>,
 }
 
 /// A trigger that has been queued but not yet placed on the stack.
@@ -480,6 +497,7 @@ impl GameState {
             pending_triggers: Vec::new(),
             game_over: false,
             winner: None,
+            pending_events: Vec::new(),
         }
     }
 
@@ -528,9 +546,16 @@ impl GameState {
     pub fn move_object(
         &mut self,
         obj_id: ObjectId,
-        _from: ZoneType,
+        from: ZoneType,
         to: ZoneType,
     ) {
+        // Emit zone change event
+        self.emit_event(GameEvent::ZoneChange {
+            object: obj_id,
+            from: crate::events::Zone::from(from),
+            to: crate::events::Zone::from(to),
+        });
+
         // Remove from all zones (brute force but correct)
         let owner = self.objects[&obj_id].owner;
         let controller = self.objects[&obj_id].controller;
@@ -629,6 +654,18 @@ impl GameState {
     /// The opponent of the given player (two-player only).
     pub fn opponent(&self, player: PlayerIndex) -> PlayerIndex {
         1 - player
+    }
+
+    /// Emit a game event to the transient event accumulator.
+    /// Events are collected during rule processing and can be drained
+    /// by external code (event bus, tests) after each action.
+    pub fn emit_event(&mut self, event: GameEvent) {
+        self.pending_events.push(event);
+    }
+
+    /// Drain all pending events, returning them for processing.
+    pub fn drain_events(&mut self) -> Vec<GameEvent> {
+        std::mem::take(&mut self.pending_events)
     }
 
     /// Check if a player has lost.

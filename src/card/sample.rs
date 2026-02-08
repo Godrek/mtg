@@ -35,6 +35,11 @@ pub mod ids {
     pub const ELVISH_VISIONARY: u64 = 120;
     pub const BLADE_SPLICER: u64 = 121;
     pub const SIEGE_GANG_COMMANDER: u64 = 122;
+
+    // Phase 1A test cards
+    /// A creature with "When ~ dies, deal 2 damage to each player."
+    /// Used to test SBA recurrence loop (CR 704.3).
+    pub const FIERY_CONCLUSION_ELEMENTAL: u64 = 200;
 }
 
 pub fn build_sample_db() -> CardDatabase {
@@ -607,6 +612,39 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         enters_tapped: false,
         oracle_text: "When Siege-Gang Commander enters the battlefield, create three 1/1 red Goblin creature tokens.".into(),
+    });
+
+    // =====================================================================
+    // Phase 1A Test Cards
+    // =====================================================================
+
+    // Fiery Conclusion Elemental: 2R 2/2 Elemental
+    // "When ~ dies, deal 2 damage to each player."
+    // Used to test the SBA recurrence loop (CR 704.3 acceptance criteria).
+    db.insert(CardDef {
+        id: ids::FIERY_CONCLUSION_ELEMENTAL,
+        name: "Fiery Conclusion Elemental".into(),
+        mana_cost: Some(ManaCost::new(2, 1, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![],
+        subtypes: vec![Subtype("Elemental".into())],
+        keywords: vec![],
+        power: Some(2),
+        toughness: Some(2),
+        mana_abilities: vec![],
+        spell_effect: None,
+        activated_abilities: vec![],
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::Dies,
+            effect: Effect::DealDamage {
+                amount: 2,
+                target: TargetSpec::NoTarget,
+            },
+            description: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
+        }],
+        starting_loyalty: None,
+        enters_tapped: false,
+        oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
     });
 
     db
