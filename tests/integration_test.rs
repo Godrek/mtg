@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use mtg_gto::action::{legal_actions, Action};
+use rand::seq::SliceRandom;
+
+use mtg_gto::action::{legal_actions, legal_actions_abstracted, Action};
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
 use mtg_gto::game::GameState;
@@ -640,4 +642,372 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
 
     // Trigger resolved — player drew a card
     assert_eq!(state.stack.len(), 0, "Stack should be empty after ETB resolution");
+}
+
+// ======================================================================
+// Combat abstraction tests
+// ======================================================================
+
+/// Helper: set up a game state with specific creatures on the battlefield,
+/// in the DeclareAttackers phase, ready for player 0 to declare attackers.
+fn setup_combat_state(
+    attacker_card_ids: &[u64],
+    blocker_card_ids: &[u64],
+) -> GameState {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Libraries so nobody loses from decking
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Player 0's creatures (attackers)
+    for &card_id in attacker_card_ids {
+        let id = state.create_card_in_zone(card_id, 0, ZoneType::Battlefield);
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = false;
+            inst.summoning_sick = false;
+        }
+    }
+
+    // Player 1's creatures (potential blockers)
+    for &card_id in blocker_card_ids {
+        let id = state.create_card_in_zone(card_id, 1, ZoneType::Battlefield);
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = false;
+            inst.summoning_sick = false;
+        }
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::DeclareAttackers;
+    state.turn_number = 3;
+
+    state
+}
+
+#[test]
+fn test_attack_abstraction_small_board_uses_full_enumeration() {
+    // With <= 5 eligible attackers, abstraction falls back to full enumeration.
+    // 4 creatures => 2^4 = 16 subsets.
+    let state = setup_combat_state(
+        &[
+            sample::ids::GRIZZLY_BEARS,
+            sample::ids::GREY_OGRE,
+            sample::ids::SAVANNAH_LIONS,
+            sample::ids::GOBLIN_GUIDE,
+        ],
+        &[],
+    );
+
+    let full_actions = legal_actions(&state);
+    let abstracted_actions = legal_actions_abstracted(&state);
+
+    let full_attacks: Vec<&Action> = full_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
+        .collect();
+    let abstracted_attacks: Vec<&Action> = abstracted_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
+        .collect();
+
+    // 2^4 = 16 attack subsets
+    assert_eq!(full_attacks.len(), 16, "Full should have 2^4 = 16 subsets");
+    // Bucketed should also have 16 since <= 5 eligible triggers fallback
+    assert_eq!(
+        abstracted_attacks.len(),
+        full_attacks.len(),
+        "Bucketed should equal full for <= 5 eligible attackers"
+    );
+}
+
+#[test]
+fn test_attack_abstraction_large_board_reduces_actions() {
+    // With 8 creatures, full enumeration gives 2^8 = 256 subsets.
+    // Bucketed should give at most 6.
+    let state = setup_combat_state(
+        &[
+            sample::ids::SERRA_ANGEL,       // 4/4 flying vigilance
+            sample::ids::SHIVAN_DRAGON,     // 5/5 flying
+            sample::ids::GRIZZLY_BEARS,     // 2/2
+            sample::ids::GREY_OGRE,         // 2/2
+            sample::ids::GOBLIN_GUIDE,      // 2/2
+            sample::ids::SAVANNAH_LIONS,    // 2/1
+            sample::ids::KALONIAN_TUSKER,   // 3/3
+            sample::ids::LEATHERBACK_BALOTH, // 4/5
+        ],
+        &[],
+    );
+
+    let full_actions = legal_actions(&state);
+    let abstracted_actions = legal_actions_abstracted(&state);
+
+    let full_attacks: Vec<&Action> = full_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
+        .collect();
+    let abstracted_attacks: Vec<&Action> = abstracted_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
+        .collect();
+
+    assert_eq!(full_attacks.len(), 256, "Full should have 2^8 = 256 subsets");
+    assert!(
+        abstracted_attacks.len() <= 7,
+        "Bucketed should have at most 7 buckets, got {}",
+        abstracted_attacks.len()
+    );
+    assert!(
+        abstracted_attacks.len() >= 3,
+        "Bucketed should have at least 3 buckets (none, alpha, +others), got {}",
+        abstracted_attacks.len()
+    );
+}
+
+#[test]
+fn test_attack_abstraction_always_includes_none_and_alpha() {
+    // None (empty) and Alpha (all) must always be present.
+    let state = setup_combat_state(
+        &[
+            sample::ids::SERRA_ANGEL,
+            sample::ids::SHIVAN_DRAGON,
+            sample::ids::GRIZZLY_BEARS,
+            sample::ids::GREY_OGRE,
+            sample::ids::GOBLIN_GUIDE,
+            sample::ids::SAVANNAH_LIONS,
+        ],
+        &[],
+    );
+
+    let abstracted_actions = legal_actions_abstracted(&state);
+    let attacks: Vec<&Vec<mtg_gto::card::ObjectId>> = abstracted_actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::DeclareAttackers { attackers } = a {
+                Some(attackers)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Must have an empty attack
+    assert!(
+        attacks.iter().any(|a| a.is_empty()),
+        "Bucketed must always include 'none' (empty attack)"
+    );
+
+    // Must have the alpha strike (all 6 creatures)
+    assert!(
+        attacks.iter().any(|a| a.len() == 6),
+        "Bucketed must always include 'alpha' (all eligible)"
+    );
+}
+
+#[test]
+fn test_attack_abstraction_evasion_bucket() {
+    // Board has 2 flyers + 4 ground creatures => evasion-only bucket should
+    // contain exactly the 2 flyers.
+    let state = setup_combat_state(
+        &[
+            sample::ids::SERRA_ANGEL,       // flying
+            sample::ids::SHIVAN_DRAGON,     // flying
+            sample::ids::GRIZZLY_BEARS,     // ground
+            sample::ids::GREY_OGRE,         // ground
+            sample::ids::GOBLIN_GUIDE,      // ground
+            sample::ids::SAVANNAH_LIONS,    // ground
+        ],
+        &[],
+    );
+
+    let abstracted_actions = legal_actions_abstracted(&state);
+    let attacks: Vec<&Vec<mtg_gto::card::ObjectId>> = abstracted_actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::DeclareAttackers { attackers } = a {
+                Some(attackers)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Should have an attack with exactly 2 creatures (the evasion bucket)
+    assert!(
+        attacks.iter().any(|a| a.len() == 2),
+        "Should have a bucket with exactly 2 creatures (evasion-only). Sizes: {:?}",
+        attacks.iter().map(|a| a.len()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_attack_abstraction_no_evasion_dedup() {
+    // Board with NO evasive creatures — evasion bucket should be skipped
+    // (it would duplicate either none or alpha).
+    let state = setup_combat_state(
+        &[
+            sample::ids::GRIZZLY_BEARS,
+            sample::ids::GREY_OGRE,
+            sample::ids::GOBLIN_GUIDE,
+            sample::ids::SAVANNAH_LIONS,
+            sample::ids::KALONIAN_TUSKER,
+            sample::ids::LEATHERBACK_BALOTH,
+        ],
+        &[],
+    );
+
+    let abstracted_actions = legal_actions_abstracted(&state);
+    let attacks: Vec<&Vec<mtg_gto::card::ObjectId>> = abstracted_actions
+        .iter()
+        .filter_map(|a| {
+            if let Action::DeclareAttackers { attackers } = a {
+                Some(attackers)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // No duplicates
+    let mut sorted: Vec<Vec<mtg_gto::card::ObjectId>> =
+        attacks.iter().map(|a| {
+            let mut v = (*a).clone();
+            v.sort();
+            v
+        }).collect();
+    let before_dedup = sorted.len();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        before_dedup,
+        "All attacker buckets should be unique"
+    );
+}
+
+#[test]
+fn test_block_abstraction_reduces_actions() {
+    // Set up a blocking scenario with abstraction.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Player 0 declared attackers: 4 creatures
+    let mut attacker_ids = Vec::new();
+    for &card_id in &[
+        sample::ids::GRIZZLY_BEARS,
+        sample::ids::GREY_OGRE,
+        sample::ids::KALONIAN_TUSKER,
+        sample::ids::LEATHERBACK_BALOTH,
+    ] {
+        let id = state.create_card_in_zone(card_id, 0, ZoneType::Battlefield);
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = true; // attacking
+            inst.summoning_sick = false;
+        }
+        attacker_ids.push(id);
+    }
+
+    // Player 1 has 5 potential blockers
+    for &card_id in &[
+        sample::ids::GRIZZLY_BEARS,
+        sample::ids::GREY_OGRE,
+        sample::ids::SAVANNAH_LIONS,
+        sample::ids::KALONIAN_TUSKER,
+        sample::ids::LEATHERBACK_BALOTH,
+    ] {
+        let id = state.create_card_in_zone(card_id, 1, ZoneType::Battlefield);
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = false;
+            inst.summoning_sick = false;
+        }
+    }
+
+    state.combat.attackers = attacker_ids;
+    state.active_player = 0;
+    state.priority_player = 1; // defender declares blockers
+    state.phase = mtg_gto::game::Phase::DeclareBlockers;
+    state.turn_number = 3;
+
+    let full_actions = legal_actions(&state);
+    let abstracted_actions = legal_actions_abstracted(&state);
+
+    let full_blocks: Vec<&Action> = full_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareBlockers { .. }))
+        .collect();
+    let abstracted_blocks: Vec<&Action> = abstracted_actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareBlockers { .. }))
+        .collect();
+
+    // Full enumeration should produce many blocking assignments
+    assert!(
+        full_blocks.len() > 10,
+        "Full should have many blocking assignments, got {}",
+        full_blocks.len()
+    );
+
+    // Abstracted should produce at most 5
+    assert!(
+        abstracted_blocks.len() <= 5,
+        "Bucketed should have at most 5 blocking buckets, got {}",
+        abstracted_blocks.len()
+    );
+
+    // Must include "no blocks"
+    assert!(
+        abstracted_blocks.iter().any(|a| {
+            if let Action::DeclareBlockers { blocks } = a {
+                blocks.is_empty()
+            } else {
+                false
+            }
+        }),
+        "Bucketed blocking must include 'no blocks'"
+    );
+}
+
+#[test]
+fn test_abstracted_game_completes() {
+    // A full game using legal_actions_abstracted throughout should still
+    // complete without panics or infinite loops. We use a simple wrapper
+    // strategy that calls legal_actions_abstracted.
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+    let green = sample::green_stompy_deck();
+
+    // Run manually with abstracted actions
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &red, &green);
+
+    let mut rng = rand::thread_rng();
+    let mut turn_count = 0;
+    while !state.game_over && turn_count < 500 {
+        let actions = legal_actions_abstracted(&state);
+        if actions.is_empty() {
+            break;
+        }
+        let action = actions.choose(&mut rng).unwrap().clone();
+        rules::apply_action(&mut state, &action);
+        if state.phase == mtg_gto::game::Phase::Untap {
+            turn_count += 1;
+        }
+    }
+
+    assert!(
+        state.game_over,
+        "Abstracted game should complete within 500 turns"
+    );
 }
