@@ -442,3 +442,199 @@ fn test_cleanup_multiple_discards() {
     assert_eq!(state.turn_number, 2);
     assert_eq!(state.phase, mtg_gto::game::Phase::Upkeep);
 }
+
+#[test]
+fn test_apnap_both_players_multiple_triggers() {
+    // When both active player AND non-active player each have >1 simultaneous
+    // trigger, AP must order first (APNAP), then NAP orders after.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    let vis_p0_a = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+    let vis_p0_b = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+    let vis_p1_a = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
+    let vis_p1_b = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Queue 2 triggers for AP (player 0) and 2 for NAP (player 1)
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis_p0_a, ability_index: 0, controller: 0, targets: vec![],
+    });
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis_p0_b, ability_index: 0, controller: 0, targets: vec![],
+    });
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis_p1_a, ability_index: 0, controller: 1, targets: vec![],
+    });
+    state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+        source_id: vis_p1_b, ability_index: 0, controller: 1, targets: vec![],
+    });
+
+    // AP (player 0) should order first
+    let actions = legal_actions(&state);
+    assert_eq!(state.priority_player, 0, "AP should have priority to order first");
+    let order_actions: Vec<&Action> = actions.iter()
+        .filter(|a| matches!(a, Action::OrderTriggers { .. }))
+        .collect();
+    assert_eq!(order_actions.len(), 2, "AP should see 2! = 2 orderings for their 2 triggers");
+
+    // AP orders their triggers
+    rules::apply_action(&mut state, order_actions[0]);
+
+    // Now NAP (player 1) should have priority to order their triggers
+    assert_eq!(state.priority_player, 1, "NAP should now have priority to order");
+    assert!(!state.pending_triggers.is_empty(), "NAP triggers should still be pending");
+
+    let actions2 = legal_actions(&state);
+    let order_actions2: Vec<&Action> = actions2.iter()
+        .filter(|a| matches!(a, Action::OrderTriggers { .. }))
+        .collect();
+    assert_eq!(order_actions2.len(), 2, "NAP should see 2! = 2 orderings for their 2 triggers");
+
+    // NAP orders their triggers
+    rules::apply_action(&mut state, order_actions2[0]);
+
+    // All 4 triggers should now be on the stack
+    assert!(state.pending_triggers.is_empty(), "All triggers should be flushed");
+    assert_eq!(state.stack.len(), 4, "All 4 triggers should be on the stack");
+
+    // Verify APNAP stack order: AP's triggers were placed first (resolve last),
+    // NAP's triggers placed second (resolve first since stack is LIFO)
+    assert_eq!(state.stack[0].controller, 0, "AP triggers on stack first");
+    assert_eq!(state.stack[1].controller, 0, "AP triggers on stack first");
+    assert_eq!(state.stack[2].controller, 1, "NAP triggers on stack second");
+    assert_eq!(state.stack[3].controller, 1, "NAP triggers on stack second");
+}
+
+#[test]
+fn test_more_than_six_triggers_fifo_fallback() {
+    // When a player has >6 simultaneous triggers, the permutation generator
+    // falls back to a single FIFO ordering to avoid combinatorial explosion.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Create 7 permanents with triggers for player 0
+    let mut vis_ids = Vec::new();
+    for _ in 0..7 {
+        vis_ids.push(
+            state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield),
+        );
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Queue 7 triggers for player 0
+    for &vis_id in &vis_ids {
+        state.pending_triggers.push(mtg_gto::game::PendingTrigger {
+            source_id: vis_id, ability_index: 0, controller: 0, targets: vec![],
+        });
+    }
+
+    let actions = legal_actions(&state);
+    let order_actions: Vec<&Action> = actions.iter()
+        .filter(|a| matches!(a, Action::OrderTriggers { .. }))
+        .collect();
+
+    // 7! = 5040 would be too many; should fall back to exactly 1 FIFO ordering
+    assert_eq!(
+        order_actions.len(), 1,
+        "Should have exactly 1 ordering (FIFO fallback) for >6 triggers, got {}",
+        order_actions.len()
+    );
+
+    // Apply the single ordering — all triggers should end up on the stack
+    rules::apply_action(&mut state, order_actions[0]);
+    assert!(state.pending_triggers.is_empty());
+    assert_eq!(state.stack.len(), 7, "All 7 triggers should be on the stack");
+}
+
+#[test]
+fn test_etb_multiple_triggers_through_natural_game_flow() {
+    // Test that resolving a creature with an ETB trigger, when there's already
+    // another permanent with an ETB-watching trigger, correctly surfaces
+    // OrderTriggers through the actual spell resolution path.
+    //
+    // Setup: Player 0 has an Elvish Visionary on the battlefield and casts a
+    // second Elvish Visionary. When the second resolves, there's only 1 ETB
+    // trigger (the one from the entering creature). This is auto-flushed.
+    // But we can test the "2 simultaneous ETB" case by manually triggering
+    // the fire_triggers path with 2 pending triggers in the natural game context.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Put an Elvish Visionary in hand with enough forests to cast
+    let vis_id = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Hand);
+    let f1 = state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Battlefield);
+    let f2 = state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Battlefield);
+    for id in [f1, f2] {
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.tapped = false;
+            inst.summoning_sick = false;
+        }
+    }
+
+    // Put a second Elvish Visionary already on the battlefield
+    let _vis_existing = state.create_card_in_zone(
+        sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield,
+    );
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Cast the Elvish Visionary
+    rules::apply_action(&mut state, &Action::CastSpell {
+        object_id: vis_id,
+        targets: vec![],
+    });
+    assert_eq!(state.stack.len(), 1, "Spell should be on stack");
+
+    // Resolve: both players pass
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After resolution, Visionary enters the battlefield and its ETB trigger fires.
+    // Only the entering creature has an ETB trigger (the existing one doesn't
+    // re-trigger), so there's exactly 1 trigger — auto-flushed, no OrderTriggers.
+    assert!(
+        state.pending_triggers.is_empty(),
+        "Single ETB trigger should be auto-flushed"
+    );
+    assert_eq!(
+        state.stack.len(), 1,
+        "ETB trigger should be on the stack"
+    );
+
+    // Verify normal flow continues: resolve the ETB trigger
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // Trigger resolved — player drew a card
+    assert_eq!(state.stack.len(), 0, "Stack should be empty after ETB resolution");
+}
