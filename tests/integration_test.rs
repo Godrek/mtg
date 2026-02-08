@@ -219,3 +219,92 @@ fn test_new_sample_cards_in_db() {
         mtg_gto::card::TriggerCondition::EntersBattlefield
     );
 }
+
+#[test]
+fn test_cleanup_requires_discard_action() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..8 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::Cleanup;
+    state.turn_number = 1;
+
+    let actions = mtg_gto::action::legal_actions(&state);
+    assert_eq!(actions.len(), 8);
+    assert!(actions.iter().all(|action| matches!(action, Action::Discard { .. })));
+
+    let discard_action = actions[0].clone();
+    rules::apply_action(&mut state, &discard_action);
+
+    assert_eq!(state.players[0].hand.len(), 7);
+    assert_eq!(state.players[0].graveyard.len(), 1);
+    assert_eq!(state.turn_number, 2);
+    assert_eq!(state.phase, mtg_gto::game::Phase::Upkeep);
+}
+
+#[test]
+fn test_cleanup_allows_pass_at_seven() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    for _ in 0..7 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::Cleanup;
+
+    let actions = mtg_gto::action::legal_actions(&state);
+    assert!(actions.iter().any(|action| matches!(action, Action::PassPriority)));
+    assert!(actions.iter().all(|action| !matches!(action, Action::Discard { .. })));
+}
+
+#[test]
+fn test_cleanup_multiple_discards() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    let mut hand_ids = Vec::new();
+    for _ in 0..10 {
+        hand_ids.push(state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand));
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::Cleanup;
+    state.turn_number = 1;
+
+    let first_discard = hand_ids[3];
+    rules::apply_action(&mut state, &Action::Discard { object_id: first_discard });
+    assert!(!state.players[0].hand.contains(&first_discard));
+    assert!(state.players[0].graveyard.contains(&first_discard));
+    assert_eq!(state.players[0].hand.len(), 9);
+
+    let actions = mtg_gto::action::legal_actions(&state);
+    let discard_action = actions
+        .into_iter()
+        .find(|action| matches!(action, Action::Discard { .. }))
+        .expect("expected another discard action");
+    rules::apply_action(&mut state, &discard_action);
+    assert_eq!(state.players[0].hand.len(), 8);
+
+    let actions = mtg_gto::action::legal_actions(&state);
+    let discard_action = actions
+        .into_iter()
+        .find(|action| matches!(action, Action::Discard { .. }))
+        .expect("expected final discard action");
+    rules::apply_action(&mut state, &discard_action);
+
+    assert_eq!(state.players[0].hand.len(), 7);
+    assert_eq!(state.turn_number, 2);
+    assert_eq!(state.phase, mtg_gto::game::Phase::Upkeep);
+}
