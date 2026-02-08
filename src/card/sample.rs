@@ -64,6 +64,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {R}.".into(),
     });
@@ -83,6 +84,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
     });
@@ -102,6 +104,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {W}.".into(),
     });
@@ -121,6 +124,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {U}.".into(),
     });
@@ -140,6 +144,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {B}.".into(),
     });
@@ -160,6 +165,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
     });
@@ -179,6 +185,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![], // simplified — no "reveal top" trigger
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste".into(),
     });
@@ -198,6 +205,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![], // simplified — no prowess
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste, Prowess".into(),
     });
@@ -217,6 +225,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![], // simplified — no firebreathing
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying. {R}: Shivan Dragon gets +1/+0 until end of turn.".into(),
     });
@@ -237,6 +246,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
     });
@@ -256,6 +266,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
     });
@@ -275,6 +286,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
     });
@@ -294,6 +306,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
     });
@@ -313,6 +326,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
     });
@@ -333,6 +347,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
     });
@@ -352,6 +367,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying, Vigilance".into(),
     });
@@ -375,6 +391,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Lightning Bolt deals 3 damage to any target.".into(),
     });
@@ -397,6 +414,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Shock deals 2 damage to any target.".into(),
     });
@@ -419,6 +437,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Lava Spike deals 3 damage to target player or planeswalker.".into(),
     });
@@ -441,6 +460,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Rift Bolt deals 3 damage to any target.".into(),
     });
@@ -464,6 +484,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target creature gets +3/+3 until end of turn.".into(),
     });
@@ -486,6 +507,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Exile target creature. Its controller gains life equal to its power.".into(),
     });
@@ -507,6 +529,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Counter target spell.".into(),
     });
@@ -533,6 +556,7 @@ pub fn build_sample_db() -> CardDatabase {
             description: "When Elvish Visionary enters the battlefield, draw a card.".into(),
         }],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Elvish Visionary enters the battlefield, draw a card.".into(),
     });
@@ -564,6 +588,7 @@ pub fn build_sample_db() -> CardDatabase {
             description: "When Blade Splicer enters the battlefield, create a 3/3 colorless Phyrexian Golem artifact creature token with first strike.".into(),
         }],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Blade Splicer enters the battlefield, create a 3/3 colorless Phyrexian Golem artifact creature token with first strike.".into(),
     });
@@ -613,6 +638,7 @@ pub fn build_sample_db() -> CardDatabase {
             description: "When Siege-Gang Commander enters the battlefield, create three 1/1 red Goblin creature tokens.".into(),
         }],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Siege-Gang Commander enters the battlefield, create three 1/1 red Goblin creature tokens.".into(),
     });
@@ -646,6 +672,7 @@ pub fn build_sample_db() -> CardDatabase {
             description: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
         }],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
     });
@@ -676,6 +703,7 @@ pub fn build_sample_db() -> CardDatabase {
             description: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
         }],
         starting_loyalty: None,
+        static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
     });

@@ -222,10 +222,10 @@ fn evaluate_blocks(state: &GameState, blocks: &[(ObjectId, ObjectId)]) -> i32 {
             None => continue,
         };
 
-        let attacker_power = attacker_inst.effective_power(attacker_def);
-        let attacker_toughness = attacker_inst.effective_toughness(attacker_def);
-        let blocker_power = blocker_inst.effective_power(blocker_def);
-        let blocker_toughness = blocker_inst.effective_toughness(blocker_def);
+        let attacker_power = state.effective_power(attacker_id);
+        let attacker_toughness = state.effective_toughness(attacker_id);
+        let blocker_power = state.effective_power(blocker_id);
+        let blocker_toughness = state.effective_toughness(blocker_id);
 
         let blocker_dies = attacker_power >= blocker_toughness;
         let attacker_dies = blocker_power >= attacker_toughness;

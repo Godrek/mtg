@@ -3,6 +3,7 @@ pub mod sample;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use crate::layers::StaticAbility;
 use crate::mana::{Color, ManaCost};
 
 /// Unique identifier for a card definition (template).
@@ -195,6 +196,9 @@ pub struct CardDef {
     // Activated and triggered abilities.
     pub activated_abilities: Vec<ActivatedAbility>,
     pub triggered_abilities: Vec<TriggeredAbility>,
+
+    // Static abilities that generate continuous effects on the battlefield.
+    pub static_abilities: Vec<StaticAbility>,
 
     // Loyalty (planeswalkers).
     pub starting_loyalty: Option<u32>,

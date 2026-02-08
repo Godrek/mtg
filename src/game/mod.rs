@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
 use crate::events::GameEvent;
+use crate::layers::ContinuousEffect;
 use crate::mana::ManaPool;
 
 /// Index into the players array (0 or 1 for a two-player game).
@@ -233,6 +234,17 @@ pub struct GameState {
     /// These accumulate during rule processing and are placed on the stack
     /// in APNAP order (active player's triggers first) before priority is given.
     pub pending_triggers: Vec<PendingTrigger>,
+
+    /// Active continuous effects on the battlefield (Phase 2A.1).
+    ///
+    /// Continuous effects from static abilities are regenerated when the
+    /// battlefield changes. Effects from resolved spells (until end of turn,
+    /// permanent) are tracked here explicitly. The layer engine uses this
+    /// list to compute characteristics on demand.
+    pub continuous_effects: Vec<ContinuousEffect>,
+
+    /// Next timestamp for continuous effect ordering (CR 613.7).
+    pub next_timestamp: u32,
 
     /// Game over flag.
     pub game_over: bool,
@@ -495,6 +507,8 @@ impl GameState {
             next_object_id: 1,
             next_stack_id: 1,
             pending_triggers: Vec::new(),
+            continuous_effects: Vec::new(),
+            next_timestamp: 1,
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -672,5 +686,125 @@ impl GameState {
     pub fn check_player_lost(&self, player: PlayerIndex) -> bool {
         self.players[player].life <= 0
             || self.players[player].has_lost
+    }
+
+    /// Allocate a new timestamp for continuous effect ordering.
+    pub fn new_timestamp(&mut self) -> u32 {
+        let ts = self.next_timestamp;
+        self.next_timestamp += 1;
+        ts
+    }
+
+    /// Refresh continuous effects from static abilities on the battlefield.
+    /// This regenerates effects from permanents with static abilities,
+    /// preserving any non-static effects (from spells, until-end-of-turn, etc.).
+    ///
+    /// Uses the two-phase read-write pattern to satisfy the borrow checker:
+    /// Phase 1 collects what needs to be added (read-only), Phase 2 mutates.
+    pub fn refresh_continuous_effects(&mut self) {
+        // Remove effects whose source has left the battlefield
+        let bf = self.battlefield.clone();
+        self.continuous_effects.retain(|e| {
+            match e.duration {
+                crate::layers::Duration::WhileSourceOnBattlefield => {
+                    bf.contains(&e.source_id)
+                }
+                _ => true, // UntilEndOfTurn and Permanent effects persist
+            }
+        });
+
+        // Phase 1: Read — collect new effects to add
+        let existing_static_sources: std::collections::HashSet<ObjectId> = self
+            .continuous_effects
+            .iter()
+            .filter(|e| e.duration == crate::layers::Duration::WhileSourceOnBattlefield)
+            .map(|e| e.source_id)
+            .collect();
+
+        let mut new_effects = Vec::new();
+        let mut ts = self.next_timestamp;
+        {
+            let db = self.card_db();
+            for &obj_id in &self.battlefield {
+                if existing_static_sources.contains(&obj_id) {
+                    continue;
+                }
+                let inst = match self.objects.get(&obj_id) {
+                    Some(i) => i,
+                    None => continue,
+                };
+                let def = match db.get(inst.card_def_id) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                for sa in &def.static_abilities {
+                    let generated = sa.to_continuous_effects(obj_id, inst.controller, ts);
+                    ts += 1;
+                    new_effects.extend(generated);
+                }
+            }
+        }
+
+        // Phase 2: Write — apply collected effects
+        self.next_timestamp = ts;
+        self.continuous_effects.extend(new_effects);
+    }
+
+    /// Remove all UntilEndOfTurn continuous effects (called during cleanup).
+    pub fn cleanup_eot_effects(&mut self) {
+        self.continuous_effects
+            .retain(|e| e.duration != crate::layers::Duration::UntilEndOfTurn);
+    }
+
+    /// Compute the effective power of a creature using the layer engine.
+    pub fn effective_power(&self, obj_id: ObjectId) -> i32 {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.power)
+        .unwrap_or(0)
+    }
+
+    /// Compute the effective toughness of a creature using the layer engine.
+    pub fn effective_toughness(&self, obj_id: ObjectId) -> i32 {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.toughness)
+        .unwrap_or(0)
+    }
+
+    /// Check if an object has a keyword ability using the layer engine.
+    pub fn has_keyword(&self, obj_id: ObjectId, kw: crate::card::KeywordAbility) -> bool {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.keywords.contains(&kw))
+        .unwrap_or(false)
+    }
+
+    /// Check if an object is a creature using the layer engine.
+    pub fn is_creature(&self, obj_id: ObjectId) -> bool {
+        crate::layers::compute_characteristics(
+            obj_id,
+            &self.continuous_effects,
+            &self.objects,
+            &self.battlefield,
+            self.card_db(),
+        )
+        .map(|c| c.card_types.contains(&crate::card::CardType::Creature))
+        .unwrap_or(false)
     }
 }

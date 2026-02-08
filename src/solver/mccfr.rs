@@ -262,25 +262,16 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     let life_diff = my_life - opp_life;
     let normalized = (life_diff / 20.0).clamp(-1.0, 1.0);
 
-    // Board presence bonus
-    let db = state.card_db();
+    // Board presence bonus (using layer engine for accurate power)
     let my_power: i32 = state
         .creatures_controlled_by(player)
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            inst.effective_power(def)
-        })
+        .map(|&id| state.effective_power(id))
         .sum();
     let opp_power: i32 = state
         .creatures_controlled_by(opp)
         .iter()
-        .map(|&id| {
-            let inst = &state.objects[&id];
-            let def = db.get(inst.card_def_id).unwrap();
-            inst.effective_power(def)
-        })
+        .map(|&id| state.effective_power(id))
         .sum();
 
     let board_diff = (my_power - opp_power) as f64 / 10.0;
