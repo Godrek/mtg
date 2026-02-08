@@ -1268,3 +1268,164 @@ fn test_canonical_roundtrip_full_game_all_actions() {
         actions_tested
     );
 }
+
+#[test]
+fn test_canonical_hand_duplicate_disambiguation() {
+    // When a player holds two copies of the same card, canonicalize must
+    // distinguish between them so resolve() returns the exact same ObjectId.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Two Mountains in hand — exact duplicates
+    let m1 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+    let m2 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Canonicalize playing each Mountain separately
+    let action1 = Action::PlayLand { object_id: m1 };
+    let action2 = Action::PlayLand { object_id: m2 };
+
+    let c1 = canonicalize(&action1, &state);
+    let c2 = canonicalize(&action2, &state);
+
+    // Canonical forms must differ (different hand_index)
+    assert_ne!(c1, c2, "Two duplicate cards in hand should produce different canonical actions");
+
+    // Round-trip must recover the exact ObjectId
+    let r1 = resolve(&c1, &state, 0).unwrap();
+    let r2 = resolve(&c2, &state, 0).unwrap();
+    assert_eq!(r1, action1, "Round-trip must return exact ObjectId for first Mountain");
+    assert_eq!(r2, action2, "Round-trip must return exact ObjectId for second Mountain");
+}
+
+#[test]
+fn test_canonical_discard_hand_duplicate_disambiguation() {
+    // Same test for Discard with duplicate cards in hand
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // 8 Mountains in hand (need to discard one in cleanup)
+    let mut mountain_ids = Vec::new();
+    for _ in 0..8 {
+        mountain_ids.push(state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand));
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Cleanup;
+    state.turn_number = 1;
+
+    // Each discard action should have a distinct canonical form
+    let canonical_actions: Vec<_> = mountain_ids
+        .iter()
+        .map(|&id| canonicalize(&Action::Discard { object_id: id }, &state))
+        .collect();
+
+    // All should be unique
+    for i in 0..canonical_actions.len() {
+        for j in (i + 1)..canonical_actions.len() {
+            assert_ne!(
+                canonical_actions[i], canonical_actions[j],
+                "Discard actions for different copies must have different canonical forms"
+            );
+        }
+    }
+
+    // Each round-trips to the exact same ObjectId
+    for &id in &mountain_ids {
+        let action = Action::Discard { object_id: id };
+        let canonical = canonicalize(&action, &state);
+        let resolved = resolve(&canonical, &state, 0).unwrap();
+        assert_eq!(resolved, action);
+    }
+}
+
+#[test]
+fn test_player_view_objects_excludes_opponent_hand() {
+    // PlayerView.objects must NOT contain the opponent's hand contents.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Player 1 has secret cards in hand
+    let opp_bolt = state.create_card_in_zone(sample::ids::LIGHTNING_BOLT, 1, ZoneType::Hand);
+    let opp_angel = state.create_card_in_zone(sample::ids::SERRA_ANGEL, 1, ZoneType::Hand);
+
+    // Player 0 has a card in hand (should be visible to themselves)
+    let my_bear = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Hand);
+
+    // A shared battlefield creature
+    let bf_creature = state.create_card_in_zone(sample::ids::GREY_OGRE, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+
+    // Player 0's view should contain their own hand card
+    assert!(
+        view0.objects.contains_key(&my_bear),
+        "Player's own hand cards should be in visible objects"
+    );
+
+    // Player 0's view should contain battlefield creatures
+    assert!(
+        view0.objects.contains_key(&bf_creature),
+        "Battlefield creatures should be in visible objects"
+    );
+
+    // Player 0's view should NOT contain opponent's hand
+    assert!(
+        !view0.objects.contains_key(&opp_bolt),
+        "Opponent's hand cards must NOT be in visible objects"
+    );
+    assert!(
+        !view0.objects.contains_key(&opp_angel),
+        "Opponent's hand cards must NOT be in visible objects"
+    );
+
+    // Player 1's view should see their own hand but not player 0's
+    let view1 = state.visible_state(1);
+    assert!(view1.objects.contains_key(&opp_bolt));
+    assert!(view1.objects.contains_key(&opp_angel));
+    assert!(!view1.objects.contains_key(&my_bear));
+}
+
+#[test]
+fn test_player_view_objects_excludes_libraries() {
+    // PlayerView.objects must NOT contain any library contents.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let lib0_card = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+    let lib1_card = state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+
+    // A battlefield card for comparison
+    let bf_card = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
+
+    state.phase = Phase::PreCombatMain;
+
+    let view0 = state.visible_state(0);
+
+    assert!(view0.objects.contains_key(&bf_card), "Battlefield should be visible");
+    assert!(!view0.objects.contains_key(&lib0_card), "Own library contents must be hidden");
+    assert!(!view0.objects.contains_key(&lib1_card), "Opponent library contents must be hidden");
+}

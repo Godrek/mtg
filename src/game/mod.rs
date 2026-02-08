@@ -341,9 +341,12 @@ pub struct PlayerView<'a> {
     /// Remaining land plays this turn for the viewing player.
     pub my_land_plays_remaining: u32,
 
-    // --- Object lookup (shared, read-only) ---
-    /// All card instances in the game, keyed by ObjectId.
-    pub objects: &'a HashMap<ObjectId, CardInstance>,
+    // --- Object lookup (filtered, read-only) ---
+    /// Card instances visible to the viewing player, keyed by ObjectId.
+    /// Includes objects on the battlefield, stack, both graveyards, both exile
+    /// zones, the viewing player's hand, and pending trigger sources.
+    /// Excludes the opponent's hand contents and both libraries (hidden zones).
+    pub objects: HashMap<ObjectId, &'a CardInstance>,
     /// Card definitions database (shared, immutable).
     pub card_db: &'a CardDatabase,
 }
@@ -351,8 +354,77 @@ pub struct PlayerView<'a> {
 impl GameState {
     /// Build a `PlayerView` for the given player, exposing only information
     /// that player is entitled to see under the MTG rules.
+    ///
+    /// The `objects` map is filtered to only include card instances in visible
+    /// zones: battlefield, stack, both graveyards, both exile zones, the viewing
+    /// player's hand, pending trigger sources, and combat participants.
+    /// Opponent hand contents and both libraries are excluded.
     pub fn visible_state(&self, player: PlayerIndex) -> PlayerView<'_> {
         let opp = self.opponent(player);
+
+        // Collect ObjectIds from all visible zones into the filtered objects map.
+        let mut visible = HashMap::new();
+
+        // Battlefield — public
+        for &id in &self.battlefield {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        // Stack — spells/abilities are public
+        for entry in &self.stack {
+            if let StackSource::Spell(id) = entry.source {
+                if let Some(inst) = self.objects.get(&id) {
+                    visible.insert(id, inst);
+                }
+            }
+        }
+        // Both graveyards — public
+        for &id in &self.players[player].graveyard {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        for &id in &self.players[opp].graveyard {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        // Both exile zones — public
+        for &id in &self.players[player].exile {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        for &id in &self.players[opp].exile {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        // Viewing player's hand — private to this player
+        for &id in &self.players[player].hand {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        // Pending trigger sources — visible (they reference battlefield permanents)
+        for trigger in &self.pending_triggers {
+            if let Some(inst) = self.objects.get(&trigger.source_id) {
+                visible.insert(trigger.source_id, inst);
+            }
+        }
+        // Combat participants — attackers and blockers
+        for &id in &self.combat.attackers {
+            if let Some(inst) = self.objects.get(&id) {
+                visible.insert(id, inst);
+            }
+        }
+        for (&blocker, _) in &self.combat.blockers {
+            if let Some(inst) = self.objects.get(&blocker) {
+                visible.insert(blocker, inst);
+            }
+        }
+
         PlayerView {
             phase: self.phase,
             active_player: self.active_player,
@@ -377,7 +449,7 @@ impl GameState {
             my_mana_pool: &self.players[player].mana_pool,
             my_land_plays_remaining: self.players[player].land_plays_remaining,
 
-            objects: &self.objects,
+            objects: visible,
             card_db: self.card_db(),
         }
     }
