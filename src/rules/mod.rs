@@ -723,7 +723,11 @@ fn resolve_effect(
         Effect::SacrificeCreatures { count, .. } => {
             for target in targets {
                 if let Target::Player(p) = target {
-                    let creatures = state.creatures_controlled_by(*p);
+                    let mut creatures = state.creatures_controlled_by(*p);
+                    // Sort by effective power ascending so the weakest are
+                    // sacrificed first — a reasonable heuristic standing in
+                    // for actual player choice until we surface a UI action.
+                    creatures.sort_by_key(|&id| state.effective_power(id));
                     for &id in creatures.iter().take(*count as usize) {
                         state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
                     }
@@ -733,8 +737,9 @@ fn resolve_effect(
         }
 
         Effect::PreventCombatDamage => {
-            // Simplified: we don't model this as a replacement effect yet.
-            // In practice, this would set a flag checked during combat damage.
+            // Not yet implemented — no cards in the current pool use this effect.
+            // When added, this should set a flag on GameState that is checked
+            // during resolve_combat_damage() to skip damage assignment.
         }
 
         Effect::Multiple(effects) => {

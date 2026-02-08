@@ -346,27 +346,23 @@ fn can_potentially_pay(
             None => continue,
         };
         // Assume best-case: each land contributes its first ability
-        for ma in &def.mana_abilities {
+        if let Some(ma) = def.mana_abilities.first() {
             match ma {
                 ManaAbility::TapForColor(color) => {
                     pool.add_color(*color, 1);
-                    break; // one mana per land
                 }
                 ManaAbility::TapForColorless => {
                     pool.colorless += 1;
-                    break;
                 }
                 ManaAbility::TapForAny => {
                     // Optimistically add to whichever color is most needed
                     // For simplicity, add colorless (covers generic)
                     pool.colorless += 1;
-                    break;
                 }
                 ManaAbility::TapForChoice(colors) => {
                     if let Some(&color) = colors.first() {
                         pool.add_color(color, 1);
                     }
-                    break;
                 }
             }
         }
@@ -398,7 +394,6 @@ fn enumerate_targets_for_spell(
         /// Hexproof: can't be targeted by opponents. Shroud: can't be targeted by anyone.
         fn can_target_permanent(
             state: &GameState,
-            _db: &crate::game::CardDatabase,
             obj_id: crate::card::ObjectId,
             caster: PlayerIndex,
         ) -> bool {
@@ -418,7 +413,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| d.is_creature())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -434,7 +429,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| d.is_creature())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -458,7 +453,7 @@ fn enumerate_targets_for_spell(
                 for &id in &state.battlefield {
                     let inst = &state.objects[&id];
                     if db.get(inst.card_def_id).map_or(false, |d| !d.is_land())
-                        && can_target_permanent(state, db, id, caster)
+                        && can_target_permanent(state, id, caster)
                     {
                         targets.push(Target::Object(id));
                     }
@@ -471,7 +466,7 @@ fn enumerate_targets_for_spell(
             }
             TargetSpec::AnyPermanent => {
                 for &id in &state.battlefield {
-                    if can_target_permanent(state, db, id, caster) {
+                    if can_target_permanent(state, id, caster) {
                         targets.push(Target::Object(id));
                     }
                 }
@@ -482,7 +477,7 @@ fn enumerate_targets_for_spell(
                     if let Some(d) = db.get(inst.card_def_id) {
                         if (d.is_creature()
                             || d.card_types.contains(&crate::card::CardType::Planeswalker))
-                            && can_target_permanent(state, db, id, caster)
+                            && can_target_permanent(state, id, caster)
                         {
                             targets.push(Target::Object(id));
                         }

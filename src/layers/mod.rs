@@ -228,11 +228,12 @@ pub fn compute_characteristics(
     let mut toughness = def.toughness.unwrap_or(0);
     let mut controller = inst.controller;
     let mut abilities_removed = false;
+    let mut counters_applied = false;
 
     // Collect effects that apply to this object, sorted by (layer, timestamp)
     let mut applicable: Vec<&ContinuousEffect> = effects
         .iter()
-        .filter(|e| effect_applies_to(e, obj_id, inst, objects, battlefield))
+        .filter(|e| effect_applies_to(e, obj_id, inst, objects, battlefield, card_db))
         .collect();
 
     applicable.sort_by(|a, b| {
@@ -291,17 +292,10 @@ pub fn compute_characteristics(
 
             // --- Layer 6: Ability ---
             LayerModification::AddKeyword(kw) => {
-                if !abilities_removed {
-                    // If abilities haven't been removed, just add
-                    if !keywords.contains(kw) {
-                        keywords.push(*kw);
-                    }
-                } else {
-                    // After RemoveAllAbilities, new grants still apply
-                    // (later timestamp in same layer)
-                    if !keywords.contains(kw) {
-                        keywords.push(*kw);
-                    }
+                // Grants apply regardless of whether abilities were removed
+                // (a later-timestamp grant overrides an earlier RemoveAllAbilities)
+                if !keywords.contains(kw) {
+                    keywords.push(*kw);
                 }
             }
             LayerModification::RemoveKeyword(kw) => {
@@ -331,15 +325,23 @@ pub fn compute_characteristics(
             }
 
             // --- Layer 7e: Switch P/T ---
+            // Layer 7d (counters) is applied just before we reach 7e effects.
             LayerModification::SwitchPT => {
+                if !counters_applied {
+                    power += inst.plus_counters - inst.minus_counters;
+                    toughness += inst.plus_counters - inst.minus_counters;
+                    counters_applied = true;
+                }
                 std::mem::swap(&mut power, &mut toughness);
             }
         }
     }
 
-    // Layer 7d: Apply counters (always applied in layer 7d, after modifications)
-    power += inst.plus_counters - inst.minus_counters;
-    toughness += inst.plus_counters - inst.minus_counters;
+    // Layer 7d: Apply counters if not already applied (no SwitchPT was present)
+    if !counters_applied {
+        power += inst.plus_counters - inst.minus_counters;
+        toughness += inst.plus_counters - inst.minus_counters;
+    }
 
     Some(ComputedCharacteristics {
         card_types,
@@ -360,6 +362,7 @@ fn effect_applies_to(
     inst: &crate::card::CardInstance,
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
     battlefield: &[ObjectId],
+    card_db: &crate::game::CardDatabase,
 ) -> bool {
     // Check that the source is still valid for WhileSourceOnBattlefield effects
     if effect.duration == Duration::WhileSourceOnBattlefield
@@ -377,19 +380,20 @@ fn effect_applies_to(
             // could make something a creature, but for simplicity we use
             // the current known types. Full correctness requires a
             // dependency-aware approach (CR 613.8), deferred for now.
-            is_creature_on_battlefield(obj_id, objects, battlefield)
+            is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
         }
         AffectedObjects::CreaturesControlledBy(player) => {
-            inst.controller == *player && is_creature_on_battlefield(obj_id, objects, battlefield)
+            inst.controller == *player
+                && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
         }
         AffectedObjects::OtherCreatures => {
             obj_id != effect.source_id
-                && is_creature_on_battlefield(obj_id, objects, battlefield)
+                && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
         }
         AffectedObjects::OtherCreaturesControlledBy(player) => {
             obj_id != effect.source_id
                 && inst.controller == *player
-                && is_creature_on_battlefield(obj_id, objects, battlefield)
+                && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
         }
         AffectedObjects::AllPermanents => battlefield.contains(&obj_id),
         AffectedObjects::PermanentsControlledBy(player) => {
@@ -399,15 +403,23 @@ fn effect_applies_to(
 }
 
 /// Check if an object is a creature on the battlefield.
-/// Uses a simple check against the objects map — does not account for
-/// type-changing effects (would need full dependency resolution).
+/// Uses the base card type from the card definition — does not account for
+/// type-changing effects (would need full dependency resolution per CR 613.8).
 fn is_creature_on_battlefield(
     obj_id: ObjectId,
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
     battlefield: &[ObjectId],
+    card_db: &crate::game::CardDatabase,
 ) -> bool {
-    battlefield.contains(&obj_id)
-        && objects.get(&obj_id).is_some()
+    if !battlefield.contains(&obj_id) {
+        return false;
+    }
+    match objects.get(&obj_id) {
+        Some(inst) => card_db
+            .get(inst.card_def_id)
+            .map_or(false, |d| d.card_types.contains(&CardType::Creature)),
+        None => false,
+    }
 }
 
 /// A static ability on a card definition that generates continuous effects
