@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use mtg_gto::action::{legal_actions, Action};
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
@@ -30,7 +32,7 @@ fn test_game_setup() {
     let green = sample::green_stompy_deck();
 
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
     mtg_gto::rules::setup_game(&mut state, &red, &green);
 
     // Both players should have 7 cards in hand
@@ -130,7 +132,7 @@ fn test_etb_trigger_elvish_visionary() {
     // Test that Elvish Visionary's ETB trigger draws a card
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     // Give player 0 some forests and an Elvish Visionary in hand
     for _ in 0..3 {
@@ -228,7 +230,7 @@ fn test_order_triggers_surfaced_for_multiple_simultaneous_triggers() {
     // surfaced as Action::OrderTriggers, not silently ordered FIFO.
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     // Give both players library cards so no one loses from empty library
     for _ in 0..20 {
@@ -313,7 +315,7 @@ fn test_single_trigger_auto_flushes_without_ordering() {
     // to the stack without requiring an OrderTriggers action.
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..20 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
@@ -359,7 +361,7 @@ fn test_single_trigger_auto_flushes_without_ordering() {
 fn test_cleanup_requires_discard_action() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..8 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
@@ -387,7 +389,7 @@ fn test_cleanup_requires_discard_action() {
 fn test_cleanup_allows_pass_at_seven() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..7 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Hand);
@@ -406,7 +408,7 @@ fn test_cleanup_allows_pass_at_seven() {
 fn test_cleanup_multiple_discards() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     let mut hand_ids = Vec::new();
     for _ in 0..10 {
@@ -450,7 +452,7 @@ fn test_apnap_both_players_multiple_triggers() {
     // trigger, AP must order first (APNAP), then NAP orders after.
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..20 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
@@ -523,7 +525,7 @@ fn test_more_than_six_triggers_fifo_fallback() {
     // falls back to a single FIFO ordering to avoid combinatorial explosion.
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..20 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
@@ -581,7 +583,7 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
     // the fire_triggers path with 2 pending triggers in the natural game context.
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
-    state.card_db = Some(db);
+    state.card_db = Some(Arc::new(db));
 
     for _ in 0..20 {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
