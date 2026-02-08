@@ -71,7 +71,8 @@ pub fn run_game(
     strategy0: &dyn Strategy,
     strategy1: &dyn Strategy,
 ) -> GameResult {
-    run_game_inner(card_db, deck0, deck1, strategy0, strategy1, false)
+    let db = Arc::new(card_db.clone());
+    run_game_inner(db, deck0, deck1, strategy0, strategy1, false)
 }
 
 /// Run a single game with optional verbose tracing.
@@ -82,11 +83,12 @@ pub fn run_game_verbose(
     strategy0: &dyn Strategy,
     strategy1: &dyn Strategy,
 ) -> GameResult {
-    run_game_inner(card_db, deck0, deck1, strategy0, strategy1, true)
+    let db = Arc::new(card_db.clone());
+    run_game_inner(db, deck0, deck1, strategy0, strategy1, true)
 }
 
 fn run_game_inner(
-    card_db: &CardDatabase,
+    card_db: Arc<CardDatabase>,
     deck0: &[CardId],
     deck1: &[CardId],
     strategy0: &dyn Strategy,
@@ -94,7 +96,7 @@ fn run_game_inner(
     verbose: bool,
 ) -> GameResult {
     let mut state = GameState::new(2);
-    state.card_db = Some(Arc::new(card_db.clone()));
+    state.card_db = Some(card_db);
 
     rules::setup_game(&mut state, deck0, deck1);
 
@@ -163,6 +165,7 @@ pub fn simulate(
     strategy1: &(dyn Strategy + Send + Sync),
     num_games: u64,
 ) -> SimulationResults {
+    let db = Arc::new(card_db.clone());
     let p0_wins = AtomicU64::new(0);
     let p1_wins = AtomicU64::new(0);
     let draws = AtomicU64::new(0);
@@ -170,7 +173,7 @@ pub fn simulate(
     let total_actions = AtomicU64::new(0);
 
     (0..num_games).into_par_iter().for_each(|_| {
-        let result = run_game(card_db, deck0, deck1, strategy0, strategy1);
+        let result = run_game_inner(Arc::clone(&db), deck0, deck1, strategy0, strategy1, false);
 
         match result.winner {
             Some(0) => {
