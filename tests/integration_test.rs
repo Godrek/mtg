@@ -90,14 +90,15 @@ fn test_random_vs_greedy_greedy_wins_more() {
     let greedy = GreedyStrategy;
     let random = RandomStrategy;
 
-    // Greedy as P0 vs Random as P1 should win more often than random
-    let results = simulation::simulate(&db, &red, &green, &greedy, &random, 200);
+    // Greedy as P0 vs Random as P1 should win more often than random.
+    // Use 1000 games to reduce statistical variance and avoid flakiness.
+    let results = simulation::simulate(&db, &red, &green, &greedy, &random, 1000);
     let greedy_wr = results.win_rate(0);
 
     // Greedy should win at least 40% of the time against random
     assert!(
-        greedy_wr > 0.4,
-        "Greedy should beat random more than 40% of the time, got {:.1}%",
+        greedy_wr >= 0.4,
+        "Greedy should beat random at least 40% of the time, got {:.1}%",
         greedy_wr * 100.0
     );
 }
