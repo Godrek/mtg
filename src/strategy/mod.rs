@@ -1,8 +1,11 @@
 use rand::seq::SliceRandom;
+use rand::Rng;
 
-use crate::action::{legal_actions, Action};
+use crate::action::{legal_actions, legal_actions_abstracted, Action};
 use crate::card::ObjectId;
 use crate::game::{GameState, PlayerIndex};
+use crate::info_set::InformationSet;
+use crate::solver::RegretTable;
 
 /// A strategy decides what action to take given a game state.
 /// This is the interface the GTO solver will optimize over.
@@ -137,6 +140,76 @@ impl Strategy for GreedyStrategy {
     fn name(&self) -> &str {
         "Greedy"
     }
+}
+
+/// MCCFR-trained strategy: selects actions according to the average
+/// strategy computed by the MCCFR solver.
+///
+/// After training, the average strategy (not the current strategy) converges
+/// to a Nash equilibrium in two-player zero-sum games. This implementation
+/// looks up the current info set in the regret table and samples an action
+/// from the average strategy distribution.
+///
+/// Falls back to uniform random among legal actions when the info set
+/// hasn't been visited during training.
+pub struct McfrStrategy {
+    /// Trained regret table (read-only during play).
+    policy: RegretTable,
+}
+
+impl McfrStrategy {
+    /// Create a new McfrStrategy from a trained regret table.
+    pub fn new(policy: RegretTable) -> Self {
+        McfrStrategy { policy }
+    }
+}
+
+impl Strategy for McfrStrategy {
+    fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
+        let actions = legal_actions_abstracted(state);
+        if actions.is_empty() {
+            return Action::PassPriority;
+        }
+        if actions.len() == 1 {
+            return actions[0].clone();
+        }
+
+        let view = state.visible_state(player);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = info_set.hash_value();
+
+        let distribution = match self.policy.get(info_hash) {
+            Some(data) if data.cumulative_strategy.len() == actions.len() => {
+                data.average_strategy()
+            }
+            _ => {
+                // Unseen info set — fall back to uniform random
+                let n = actions.len();
+                vec![1.0 / n as f64; n]
+            }
+        };
+
+        let mut rng = rand::thread_rng();
+        let idx = sample_action_index(&distribution, &mut rng);
+        actions[idx].clone()
+    }
+
+    fn name(&self) -> &str {
+        "MCCFR"
+    }
+}
+
+/// Sample an action index from a probability distribution.
+fn sample_action_index(distribution: &[f64], rng: &mut impl Rng) -> usize {
+    let r: f64 = rng.gen();
+    let mut cumulative = 0.0;
+    for (i, &p) in distribution.iter().enumerate() {
+        cumulative += p;
+        if r < cumulative {
+            return i;
+        }
+    }
+    distribution.len().saturating_sub(1)
 }
 
 /// Evaluate a blocking assignment. Positive = good for the defender.

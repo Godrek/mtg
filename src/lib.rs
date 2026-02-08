@@ -6,3 +6,5 @@ pub mod action;
 pub mod rules;
 pub mod strategy;
 pub mod simulation;
+pub mod info_set;
+pub mod solver;

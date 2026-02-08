@@ -612,6 +612,50 @@ pub fn build_sample_db() -> CardDatabase {
     db
 }
 
+/// Build a minimal 15-card mono-red burn deck for MCCFR training.
+///
+/// Phase 1B training scenario: Mountains + Lightning Bolts.
+/// Games end in 3-5 turns. Reachable info sets fit in memory (<100K entries).
+pub fn mini_red_burn() -> Vec<CardId> {
+    let mut deck = Vec::new();
+    // 8 Mountains
+    for _ in 0..8 {
+        deck.push(ids::MOUNTAIN);
+    }
+    // 4 Lightning Bolt
+    for _ in 0..4 {
+        deck.push(ids::LIGHTNING_BOLT);
+    }
+    // 3 Shock (additional burn)
+    for _ in 0..3 {
+        deck.push(ids::SHOCK);
+    }
+    assert_eq!(deck.len(), 15);
+    deck
+}
+
+/// Build a minimal 15-card mono-red creature deck for MCCFR training.
+///
+/// Phase 1B training scenario: Mountains + Grey Ogres.
+/// Simpler creature-based strategy against the burn deck.
+pub fn mini_red_creatures() -> Vec<CardId> {
+    let mut deck = Vec::new();
+    // 8 Mountains
+    for _ in 0..8 {
+        deck.push(ids::MOUNTAIN);
+    }
+    // 4 Grey Ogre (2/2 for 2R)
+    for _ in 0..4 {
+        deck.push(ids::GREY_OGRE);
+    }
+    // 3 Goblin Guide (2/2 haste for R)
+    for _ in 0..3 {
+        deck.push(ids::GOBLIN_GUIDE);
+    }
+    assert_eq!(deck.len(), 15);
+    deck
+}
+
 /// Build a mono-red aggro decklist (burn).
 pub fn red_aggro_deck() -> Vec<CardId> {
     let mut deck = Vec::new();
