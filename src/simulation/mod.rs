@@ -126,6 +126,9 @@ fn run_game_inner(
                     let inst = &state.objects[object_id];
                     format!("Play {}", db.get(inst.card_def_id).map(|d| d.name.as_str()).unwrap_or("?"))
                 }
+                crate::action::Action::OrderTriggers { ordering } => {
+                    format!("Order {} triggers", ordering.len())
+                }
                 other => format!("{}", other),
             };
             eprintln!(
