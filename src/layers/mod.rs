@@ -213,7 +213,7 @@ pub fn compute_characteristics(
     obj_id: ObjectId,
     effects: &[ContinuousEffect],
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
-    battlefield: &[ObjectId],
+    battlefield: &std::collections::HashSet<ObjectId>,
     card_db: &crate::game::CardDatabase,
 ) -> Option<ComputedCharacteristics> {
     let inst = objects.get(&obj_id)?;
@@ -361,7 +361,7 @@ fn effect_applies_to(
     obj_id: ObjectId,
     inst: &crate::card::CardInstance,
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
-    battlefield: &[ObjectId],
+    battlefield: &std::collections::HashSet<ObjectId>,
     card_db: &crate::game::CardDatabase,
 ) -> bool {
     // Check that the source is still valid for WhileSourceOnBattlefield effects
@@ -408,7 +408,7 @@ fn effect_applies_to(
 fn is_creature_on_battlefield(
     obj_id: ObjectId,
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
-    battlefield: &[ObjectId],
+    battlefield: &std::collections::HashSet<ObjectId>,
     card_db: &crate::game::CardDatabase,
 ) -> bool {
     if !battlefield.contains(&obj_id) {
@@ -569,7 +569,7 @@ mod tests {
     use crate::card::{CardDef, CardInstance, CardType, KeywordAbility, Subtype};
     use crate::game::CardDatabase;
     use crate::mana::ManaCost;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     fn make_creature_def(id: u64, name: &str, power: i32, toughness: i32) -> CardDef {
         CardDef {
@@ -601,7 +601,7 @@ mod tests {
         let mut objects = HashMap::new();
         objects.insert(10, CardInstance::new(10, 1, 0));
 
-        let battlefield = vec![10];
+        let battlefield: HashSet<ObjectId> = [10].into_iter().collect();
         let effects = vec![];
 
         let chars = compute_characteristics(10, &effects, &objects, &battlefield, &db).unwrap();
@@ -620,7 +620,7 @@ mod tests {
         objects.insert(10, CardInstance::new(10, 1, 0)); // Bear
         objects.insert(20, CardInstance::new(20, 2, 0)); // Anthem source
 
-        let battlefield = vec![10, 20];
+        let battlefield: HashSet<ObjectId> = [10, 20].into_iter().collect();
 
         let effects = vec![ContinuousEffect {
             source_id: 20,
@@ -648,7 +648,7 @@ mod tests {
         objects.insert(20, CardInstance::new(20, 2, 0));
         objects.insert(30, CardInstance::new(30, 3, 0));
 
-        let battlefield = vec![10, 20, 30];
+        let battlefield: HashSet<ObjectId> = [10, 20, 30].into_iter().collect();
 
         let effects = vec![
             ContinuousEffect {
@@ -689,7 +689,7 @@ mod tests {
         objects.insert(10, CardInstance::new(10, 1, 0));
         objects.insert(99, CardInstance::new(99, 99, 0));
 
-        let battlefield = vec![10, 99];
+        let battlefield: HashSet<ObjectId> = [10, 99].into_iter().collect();
 
         // Humility: all creatures lose all abilities and are 1/1
         let effects = vec![
@@ -730,7 +730,7 @@ mod tests {
         objects.insert(10, CardInstance::new(10, 1, 0));
         objects.insert(99, CardInstance::new(99, 99, 0));
 
-        let battlefield = vec![10, 99];
+        let battlefield: HashSet<ObjectId> = [10, 99].into_iter().collect();
 
         let effects = vec![ContinuousEffect {
             source_id: 99,
@@ -755,7 +755,7 @@ mod tests {
         bear.plus_counters = 2;
         objects.insert(10, bear);
 
-        let battlefield = vec![10];
+        let battlefield: HashSet<ObjectId> = [10].into_iter().collect();
         let effects = vec![];
 
         let chars = compute_characteristics(10, &effects, &objects, &battlefield, &db).unwrap();
@@ -777,7 +777,7 @@ mod tests {
         objects.insert(10, bear);
         objects.insert(99, CardInstance::new(99, 99, 0));
 
-        let battlefield = vec![10, 99];
+        let battlefield: HashSet<ObjectId> = [10, 99].into_iter().collect();
 
         let effects = vec![ContinuousEffect {
             source_id: 99,
@@ -794,6 +794,82 @@ mod tests {
         assert_eq!(chars.toughness, 4);
     }
 
+    /// Verify CR 613 layer 7d/7e interaction: +1/+1 counters are applied
+    /// in layer 7d *before* the SwitchPT effect in layer 7e. A 2/4 creature
+    /// with one +1/+1 counter becomes 3/5, then SwitchPT swaps to 5/3.
+    #[test]
+    fn test_counters_with_switch_pt() {
+        let mut db = CardDatabase::new();
+        // Asymmetric P/T so the swap is observable
+        db.insert(make_creature_def(1, "Wall", 2, 4));
+
+        let mut objects = HashMap::new();
+        let mut wall = CardInstance::new(10, 1, 0);
+        wall.plus_counters = 1; // one +1/+1 counter
+        objects.insert(10, wall);
+
+        let battlefield: HashSet<ObjectId> = [10].into_iter().collect();
+
+        // A SwitchPT effect (e.g., Inside Out)
+        let effects = vec![ContinuousEffect {
+            source_id: 99,
+            controller: 0,
+            timestamp: 1,
+            duration: Duration::UntilEndOfTurn,
+            affected: AffectedObjects::Specific(10),
+            modification: LayerModification::SwitchPT,
+        }];
+
+        let chars = compute_characteristics(10, &effects, &objects, &battlefield, &db).unwrap();
+        // Base 2/4 + counter → 3/5 (layer 7d applied before 7e), then swap → 5/3
+        assert_eq!(chars.power, 5);
+        assert_eq!(chars.toughness, 3);
+    }
+
+    /// Verify counters + anthem + SwitchPT interaction. A 1/3 creature with
+    /// +1/+1 anthem and one +1/+1 counter: base 1/3 → anthem 2/4 (7c) →
+    /// counter 3/5 (7d) → swap 5/3 (7e).
+    #[test]
+    fn test_anthem_counters_switch_pt() {
+        let mut db = CardDatabase::new();
+        db.insert(make_creature_def(1, "Wall", 1, 3));
+        let mut ench = make_creature_def(99, "Anthem", 0, 0);
+        ench.card_types = vec![CardType::Enchantment];
+        db.insert(ench);
+
+        let mut objects = HashMap::new();
+        let mut wall = CardInstance::new(10, 1, 0);
+        wall.plus_counters = 1;
+        objects.insert(10, wall);
+        objects.insert(99, CardInstance::new(99, 99, 0));
+
+        let battlefield: HashSet<ObjectId> = [10, 99].into_iter().collect();
+
+        let effects = vec![
+            ContinuousEffect {
+                source_id: 99,
+                controller: 0,
+                timestamp: 1,
+                duration: Duration::WhileSourceOnBattlefield,
+                affected: AffectedObjects::AllCreatures,
+                modification: LayerModification::ModifyPT(1, 1),
+            },
+            ContinuousEffect {
+                source_id: 99,
+                controller: 0,
+                timestamp: 2,
+                duration: Duration::UntilEndOfTurn,
+                affected: AffectedObjects::Specific(10),
+                modification: LayerModification::SwitchPT,
+            },
+        ];
+
+        let chars = compute_characteristics(10, &effects, &objects, &battlefield, &db).unwrap();
+        // Base 1/3 + anthem +1/+1 = 2/4 (7c) + counter +1/+1 = 3/5 (7d) → swap = 5/3 (7e)
+        assert_eq!(chars.power, 5);
+        assert_eq!(chars.toughness, 3);
+    }
+
     #[test]
     fn test_other_creatures_excludes_source() {
         let mut db = CardDatabase::new();
@@ -804,7 +880,7 @@ mod tests {
         objects.insert(10, CardInstance::new(10, 1, 0)); // Bear
         objects.insert(20, CardInstance::new(20, 2, 0)); // Lord
 
-        let battlefield = vec![10, 20];
+        let battlefield: HashSet<ObjectId> = [10, 20].into_iter().collect();
 
         // "Other creatures you control get +1/+1"
         let effects = vec![ContinuousEffect {
@@ -843,7 +919,7 @@ mod tests {
         objects.insert(98, CardInstance::new(98, 98, 0));
         objects.insert(99, CardInstance::new(99, 99, 0));
 
-        let battlefield = vec![10, 98, 99];
+        let battlefield: HashSet<ObjectId> = [10, 98, 99].into_iter().collect();
 
         // Two SetPT effects: later timestamp wins
         let effects = vec![
@@ -879,7 +955,7 @@ mod tests {
         let mut objects = HashMap::new();
         objects.insert(10, CardInstance::new(10, 1, 0));
 
-        let battlefield = vec![10];
+        let battlefield: HashSet<ObjectId> = [10].into_iter().collect();
 
         // UntilEndOfTurn effect (like Giant Growth)
         let effects = vec![ContinuousEffect {
