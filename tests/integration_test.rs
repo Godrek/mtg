@@ -1,7 +1,10 @@
 use mtg_gto::card::sample;
+use mtg_gto::card::ZoneType;
 use mtg_gto::game::GameState;
+use mtg_gto::rules;
 use mtg_gto::simulation;
 use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
+use mtg_gto::action::Action;
 
 #[test]
 fn test_sample_db_builds() {
@@ -118,5 +121,101 @@ fn test_mirror_match_roughly_equal() {
         "Both players should win some games in a mirror, got P0={:.1}% P1={:.1}%",
         p0_wr * 100.0,
         p1_wr * 100.0
+    );
+}
+
+#[test]
+fn test_etb_trigger_elvish_visionary() {
+    // Test that Elvish Visionary's ETB trigger draws a card
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+
+    // Give player 0 some forests and an Elvish Visionary in hand
+    for _ in 0..3 {
+        state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Library);
+    }
+    // Give both players some library cards to draw from
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
+    }
+
+    // Put Elvish Visionary in hand
+    let vis_id = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Hand);
+    // Put 2 Forests on battlefield (untapped) for mana
+    let f1 = state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Battlefield);
+    let f2 = state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&f1) {
+        inst.tapped = false;
+        inst.summoning_sick = false;
+    }
+    if let Some(inst) = state.objects.get_mut(&f2) {
+        inst.tapped = false;
+        inst.summoning_sick = false;
+    }
+
+    // Set up game state for main phase
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = mtg_gto::game::Phase::PreCombatMain;
+    state.turn_number = 2; // not turn 1 so no special rules
+
+    let hand_before = state.players[0].hand.len();
+
+    // Cast Elvish Visionary
+    rules::apply_action(&mut state, &Action::CastSpell {
+        object_id: vis_id,
+        targets: vec![],
+    });
+
+    // Visionary should be on the stack
+    assert_eq!(state.stack.len(), 1);
+
+    // Both players pass priority to resolve
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After resolution, Visionary is on the battlefield
+    assert!(
+        state.battlefield.contains(&vis_id),
+        "Elvish Visionary should be on the battlefield after resolution"
+    );
+
+    // The ETB trigger should be on the stack now
+    assert_eq!(
+        state.stack.len(), 1,
+        "ETB trigger should be on the stack"
+    );
+
+    // Resolve the ETB trigger (both players pass)
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After ETB resolves, player should have drawn a card
+    // Hand was: hand_before - 1 (cast visionary) + 1 (ETB draw) = hand_before
+    let hand_after = state.players[0].hand.len();
+    assert_eq!(
+        hand_after,
+        hand_before, // -1 for casting, +1 for draw = same
+        "Player should have drawn a card from Elvish Visionary ETB (before={}, after={})",
+        hand_before,
+        hand_after
+    );
+}
+
+#[test]
+fn test_new_sample_cards_in_db() {
+    let db = sample::build_sample_db();
+    assert!(db.get(sample::ids::ELVISH_VISIONARY).is_some());
+    assert!(db.get(sample::ids::BLADE_SPLICER).is_some());
+    assert!(db.get(sample::ids::SIEGE_GANG_COMMANDER).is_some());
+
+    // Check Elvish Visionary has an ETB trigger
+    let ev = db.get(sample::ids::ELVISH_VISIONARY).unwrap();
+    assert_eq!(ev.triggered_abilities.len(), 1);
+    assert_eq!(
+        ev.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::EntersBattlefield
     );
 }

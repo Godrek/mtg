@@ -197,11 +197,25 @@ pub struct GameState {
     /// Next stack ID.
     pub next_stack_id: u64,
 
+    /// Pending triggers waiting to be put on the stack.
+    /// These accumulate during rule processing and are placed on the stack
+    /// in APNAP order (active player's triggers first) before priority is given.
+    pub pending_triggers: Vec<PendingTrigger>,
+
     /// Game over flag.
     pub game_over: bool,
 
     /// Winner (if game is over). None = draw.
     pub winner: Option<PlayerIndex>,
+}
+
+/// A trigger that has been queued but not yet placed on the stack.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTrigger {
+    pub source_id: ObjectId,
+    pub ability_index: usize,
+    pub controller: PlayerIndex,
+    pub targets: Vec<Target>,
 }
 
 /// A simple card database that maps CardId -> CardDef.
@@ -242,6 +256,7 @@ impl GameState {
             combat: CombatState::default(),
             next_object_id: 1,
             next_stack_id: 1,
+            pending_triggers: Vec::new(),
             game_over: false,
             winner: None,
         }
@@ -325,11 +340,16 @@ impl GameState {
             ZoneType::Hand => self.players[owner].hand.push(obj_id),
             ZoneType::Battlefield => {
                 // Reset battlefield state when entering
+                let enters_tapped = self.card_db()
+                    .get(self.objects[&obj_id].card_def_id)
+                    .map_or(false, |d| d.enters_tapped);
                 if let Some(inst) = self.objects.get_mut(&obj_id) {
-                    inst.tapped = false;
+                    inst.tapped = enters_tapped;
                     inst.summoning_sick = true;
                     inst.damage_marked = 0;
-                    inst.controller = owner;
+                    inst.temp_power_mod = 0;
+                    inst.temp_toughness_mod = 0;
+                    inst.temp_keywords.clear();
                 }
                 self.battlefield.push(obj_id);
             }

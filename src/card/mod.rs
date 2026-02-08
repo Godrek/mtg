@@ -197,6 +197,9 @@ pub struct CardDef {
     // Loyalty (planeswalkers).
     pub starting_loyalty: Option<u32>,
 
+    // Whether this permanent enters the battlefield tapped.
+    pub enters_tapped: bool,
+
     // Original oracle text for reference.
     pub oracle_text: String,
 }

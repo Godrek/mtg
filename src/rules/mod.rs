@@ -2,8 +2,8 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 
 use crate::action::Action;
-use crate::card::{CardType, Effect, KeywordAbility, ManaAbility, ObjectId, ZoneType};
-use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource, Target};
+use crate::card::{CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TriggerCondition, ZoneType};
+use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, StackSource, Target};
 
 /// Apply an action to the game state, advancing it.
 pub fn apply_action(state: &mut GameState, action: &Action) {
@@ -165,6 +165,10 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 state.phase = Phase::EndOfCombat;
                 state.priority_player = state.active_player;
             } else {
+                // Fire attack triggers for each attacker
+                for &attacker_id in attackers {
+                    fire_triggers(state, TriggerCondition::Attacks, Some(attacker_id));
+                }
                 // Advance to declare blockers
                 state.phase = Phase::DeclareBlockers;
                 state.priority_player = state.opponent(state.active_player);
@@ -285,12 +289,8 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
-        // Check for ETB triggered abilities
-        for trigger in &def.triggered_abilities {
-            if trigger.trigger == crate::card::TriggerCondition::EntersBattlefield {
-                resolve_effect(state, &trigger.effect, controller, targets);
-            }
-        }
+        // Queue ETB triggered abilities (they go on the stack, not resolve immediately)
+        fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
     } else {
         if let Some(ref effect) = def.spell_effect {
             resolve_effect(state, effect, controller, targets);
@@ -358,8 +358,16 @@ fn resolve_effect(
                 })
                 .collect();
 
-            for id in destroyable {
+            for &id in &destroyable {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+            }
+            // Fire dies triggers for destroyed creatures
+            for &id in &destroyable {
+                check_triggers(state, TriggerCondition::Dies, Some(id));
+                check_triggers(state, TriggerCondition::Dies, None);
+            }
+            if !destroyable.is_empty() {
+                flush_triggers(state);
             }
         }
 
@@ -383,9 +391,17 @@ fn resolve_effect(
                             inst.temp_power_mod += power;
                             inst.temp_toughness_mod += toughness;
                         } else {
-                            // Permanent buff via counters (simplified)
-                            inst.plus_counters += power;
-                            inst.plus_counters += toughness;
+                            // Permanent buff via +1/+1 counters (simplified: treats any permanent buff as counters)
+                            // In MTG, +1/+1 counters give both +1/+1, so we use min(power, toughness) counters
+                            // plus temp mods for any asymmetric remainder
+                            let counters = (*power).min(*toughness);
+                            inst.plus_counters += counters;
+                            // Any asymmetric remainder goes as a static modifier
+                            // (simplified — real MTG doesn't have this, but handles it per-card)
+                            if *power != *toughness {
+                                inst.temp_power_mod += power - counters;
+                                inst.temp_toughness_mod += toughness - counters;
+                            }
                         }
                     }
                 }
@@ -407,10 +423,27 @@ fn resolve_effect(
         }
 
         Effect::Counter { .. } => {
-            // Counter the top spell on the stack (simplified)
-            if let Some(countered) = state.stack.pop() {
-                if let StackSource::Spell(obj_id) = countered.source {
-                    state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
+            // Find the targeted spell on the stack and counter it
+            let target_obj_id = targets.iter().find_map(|t| {
+                if let Target::Object(id) = t { Some(*id) } else { None }
+            });
+
+            if let Some(target_id) = target_obj_id {
+                // Find and remove the targeted spell from the stack
+                if let Some(idx) = state.stack.iter().position(|entry| {
+                    matches!(&entry.source, StackSource::Spell(id) if *id == target_id)
+                }) {
+                    let countered = state.stack.remove(idx);
+                    if let StackSource::Spell(obj_id) = countered.source {
+                        state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
+                    }
+                }
+            } else {
+                // Fallback: counter top spell on stack if no target specified
+                if let Some(countered) = state.stack.pop() {
+                    if let StackSource::Spell(obj_id) = countered.source {
+                        state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
+                    }
                 }
             }
         }
@@ -426,6 +459,108 @@ fn resolve_effect(
         }
     }
 }
+
+// ========================================================================
+// Trigger System
+// ========================================================================
+
+/// Check all permanents on the battlefield for triggered abilities matching
+/// the given condition, and queue any that trigger.
+fn check_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) {
+    let triggers: Vec<PendingTrigger> = {
+        let db = state.card_db();
+        let mut found = Vec::new();
+
+        // Determine which objects to check
+        let objects_to_check: Vec<(ObjectId, usize)> = match source_hint {
+            // If a specific source is given (e.g., ETB on a specific permanent), only check it
+            Some(id) => {
+                if let Some(inst) = state.objects.get(&id) {
+                    vec![(id, inst.controller)]
+                } else {
+                    vec![]
+                }
+            }
+            // Otherwise check all permanents on the battlefield
+            None => state
+                .battlefield
+                .iter()
+                .map(|&id| (id, state.objects[&id].controller))
+                .collect(),
+        };
+
+        for (obj_id, controller) in objects_to_check {
+            let inst = &state.objects[&obj_id];
+            let def = match db.get(inst.card_def_id) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            for (i, trigger) in def.triggered_abilities.iter().enumerate() {
+                if trigger.trigger == condition {
+                    found.push(PendingTrigger {
+                        source_id: obj_id,
+                        ability_index: i,
+                        controller,
+                        targets: vec![], // targets chosen when put on stack (simplified: auto-target)
+                    });
+                }
+            }
+        }
+        found
+    };
+
+    state.pending_triggers.extend(triggers);
+}
+
+/// Flush all pending triggers onto the stack in APNAP order
+/// (Active Player, Non-Active Player). Within each player's triggers,
+/// they go on the stack in the order the controller chooses (simplified: FIFO).
+fn flush_triggers(state: &mut GameState) {
+    if state.pending_triggers.is_empty() {
+        return;
+    }
+
+    let active = state.active_player;
+    let triggers = std::mem::take(&mut state.pending_triggers);
+
+    // Sort: active player's triggers first (they go on the stack first = resolve last)
+    let mut ap_triggers: Vec<PendingTrigger> = Vec::new();
+    let mut nap_triggers: Vec<PendingTrigger> = Vec::new();
+
+    for t in triggers {
+        if t.controller == active {
+            ap_triggers.push(t);
+        } else {
+            nap_triggers.push(t);
+        }
+    }
+
+    // APNAP: active player's triggers go on stack first, then non-active player's
+    // (non-active player's resolve first since stack is LIFO)
+    for trigger in ap_triggers.into_iter().chain(nap_triggers.into_iter()) {
+        let stack_id = state.new_stack_id();
+        state.stack.push(StackEntry {
+            id: stack_id,
+            source: StackSource::TriggeredAbility {
+                source_id: trigger.source_id,
+                ability_index: trigger.ability_index,
+            },
+            controller: trigger.controller,
+            targets: trigger.targets,
+        });
+    }
+}
+
+/// Check triggers for a specific game event and flush them to the stack.
+pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) {
+    check_triggers(state, condition, source_hint);
+    flush_triggers(state);
+}
+
+// ========================================================================
+// Ability resolution
+// ========================================================================
 
 /// Resolve an activated ability.
 fn resolve_activated_ability(
@@ -470,6 +605,8 @@ fn resolve_triggered_ability(
 
 /// Check and apply state-based actions.
 pub fn check_state_based_actions(state: &mut GameState) {
+    let mut all_died: Vec<ObjectId> = Vec::new();
+
     loop {
         let mut any_action = false;
 
@@ -506,10 +643,11 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 .collect()
         };
 
-        for obj_id in to_die {
+        for &obj_id in &to_die {
             state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
             any_action = true;
         }
+        all_died.extend(to_die);
 
         // Check for game end
         let losers: Vec<usize> = (0..state.players.len())
@@ -528,6 +666,17 @@ pub fn check_state_based_actions(state: &mut GameState) {
         if !any_action {
             break;
         }
+    }
+
+    // Fire dies triggers after all SBA are resolved
+    for &obj_id in &all_died {
+        // Check the dying creature's own "when ~ dies" triggers
+        check_triggers(state, TriggerCondition::Dies, Some(obj_id));
+        // Check battlefield permanents that watch for creature deaths
+        check_triggers(state, TriggerCondition::Dies, None);
+    }
+    if !all_died.is_empty() {
+        flush_triggers(state);
     }
 }
 
@@ -590,8 +739,8 @@ fn execute_phase_entry(state: &mut GameState) {
 
         Phase::Upkeep => {
             state.priority_player = active;
-            // Check for beginning-of-upkeep triggers
-            // TODO: trigger system
+            // Fire beginning-of-upkeep triggers
+            fire_triggers(state, TriggerCondition::BeginningOfUpkeep, None);
         }
 
         Phase::PreCombatMain | Phase::PostCombatMain => {
@@ -638,7 +787,8 @@ fn execute_phase_entry(state: &mut GameState) {
 
         Phase::EndStep => {
             state.priority_player = active;
-            // TODO: end-of-turn triggers
+            // Fire end-of-turn triggers
+            fire_triggers(state, TriggerCondition::EndOfTurn, None);
         }
 
         Phase::Cleanup => {
