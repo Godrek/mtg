@@ -46,6 +46,14 @@ pub enum Action {
         assignment: Vec<(ObjectId, u32)>,
     },
 
+    /// Choose the order to place simultaneous triggered abilities on the stack.
+    /// When a player controls multiple triggers that would go on the stack at once,
+    /// they choose the ordering. First element goes on the stack first (resolves last
+    /// due to LIFO). Each entry is (source_id, ability_index).
+    OrderTriggers {
+        ordering: Vec<(ObjectId, usize)>,
+    },
+
     /// Concede the game.
     Concede,
 }
@@ -69,6 +77,9 @@ impl fmt::Display for Action {
                 write!(f, "Block with {} creatures", blocks.len())
             }
             Action::OrderDamageAssignment { .. } => write!(f, "Assign damage"),
+            Action::OrderTriggers { ordering } => {
+                write!(f, "Order {} triggers", ordering.len())
+            }
             Action::Concede => write!(f, "Concede"),
         }
     }
@@ -81,12 +92,39 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
     let player = state.priority_player;
     let mut actions = Vec::new();
 
+    // Before normal priority actions, check for pending triggers needing ordering.
+    // When a player controls multiple simultaneous triggers, they must choose the
+    // order to place them on the stack. This is a real strategic decision that
+    // MCCFR must be able to observe and optimize over.
+    if !state.pending_triggers.is_empty() {
+        let player_triggers: Vec<&crate::game::PendingTrigger> = state
+            .pending_triggers
+            .iter()
+            .filter(|t| t.controller == player)
+            .collect();
+
+        if player_triggers.len() > 1 {
+            let keys: Vec<(ObjectId, usize)> = player_triggers
+                .iter()
+                .map(|t| (t.source_id, t.ability_index))
+                .collect();
+
+            for perm in generate_permutations(&keys) {
+                actions.push(Action::OrderTriggers { ordering: perm });
+            }
+            actions.push(Action::Concede);
+            return actions;
+        }
+    }
+
     // Player can always pass priority
     actions.push(Action::PassPriority);
 
     // Phase-specific action generation
     match state.phase {
-        Phase::DeclareAttackers if player == state.active_player => {
+        Phase::DeclareAttackers
+            if player == state.active_player && state.combat.attackers.is_empty() =>
+        {
             // Enumerate attacker combinations
             let creatures = state.creatures_controlled_by(player);
             let db = state.card_db();
@@ -602,5 +640,46 @@ fn combinations_helper(
         current.push(items[i]);
         combinations_helper(items, k, i + 1, current, result);
         current.pop();
+    }
+}
+
+/// Generate all permutations of the given items.
+/// Caps at 6 items (720 permutations) to avoid combinatorial explosion;
+/// beyond that, returns only the original order (FIFO fallback).
+fn generate_permutations<T: Clone>(items: &[T]) -> Vec<Vec<T>> {
+    if items.len() <= 1 {
+        return vec![items.to_vec()];
+    }
+    if items.len() > 6 {
+        // Too many permutations; fall back to single FIFO ordering
+        return vec![items.to_vec()];
+    }
+
+    let mut result = Vec::new();
+    let mut current = Vec::with_capacity(items.len());
+    let mut used = vec![false; items.len()];
+    permute_helper(items, &mut current, &mut used, &mut result);
+    result
+}
+
+fn permute_helper<T: Clone>(
+    items: &[T],
+    current: &mut Vec<T>,
+    used: &mut Vec<bool>,
+    result: &mut Vec<Vec<T>>,
+) {
+    if current.len() == items.len() {
+        result.push(current.clone());
+        return;
+    }
+    for i in 0..items.len() {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        current.push(items[i].clone());
+        permute_helper(items, current, used, result);
+        current.pop();
+        used[i] = false;
     }
 }
