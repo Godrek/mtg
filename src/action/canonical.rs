@@ -46,10 +46,14 @@ pub enum CanonicalAction {
 
     PlayLand {
         card_id: CardId,
+        /// Disambiguation: which instance of this card in hand (sorted by ObjectId).
+        hand_index: usize,
     },
 
     CastSpell {
         card_id: CardId,
+        /// Disambiguation: which instance of this card in hand (sorted by ObjectId).
+        hand_index: usize,
         targets: Vec<CanonicalTarget>,
     },
 
@@ -79,6 +83,8 @@ pub enum CanonicalAction {
 
     Discard {
         card_id: CardId,
+        /// Disambiguation: which instance of this card in hand (sorted by ObjectId).
+        hand_index: usize,
     },
 
     OrderTriggers {
@@ -105,18 +111,23 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::Concede => CanonicalAction::Concede,
 
         Action::PlayLand { object_id } => {
-            let card_id = state.objects[object_id].card_def_id;
-            CanonicalAction::PlayLand { card_id }
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let hand_index = hand_instance_index(state, inst.owner, *object_id);
+            CanonicalAction::PlayLand { card_id, hand_index }
         }
 
         Action::CastSpell { object_id, targets } => {
-            let card_id = state.objects[object_id].card_def_id;
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let hand_index = hand_instance_index(state, inst.owner, *object_id);
             let canonical_targets: Vec<CanonicalTarget> = targets
                 .iter()
                 .map(|t| canonicalize_target(t, state))
                 .collect();
             CanonicalAction::CastSpell {
                 card_id,
+                hand_index,
                 targets: canonical_targets,
             }
         }
@@ -186,8 +197,10 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         }
 
         Action::Discard { object_id } => {
-            let card_id = state.objects[object_id].card_def_id;
-            CanonicalAction::Discard { card_id }
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let hand_index = hand_instance_index(state, inst.owner, *object_id);
+            CanonicalAction::Discard { card_id, hand_index }
         }
 
         Action::OrderTriggers { ordering } => {
@@ -237,13 +250,13 @@ pub fn resolve(
         CanonicalAction::PassPriority => Some(Action::PassPriority),
         CanonicalAction::Concede => Some(Action::Concede),
 
-        CanonicalAction::PlayLand { card_id } => {
-            let obj_id = find_in_hand(state, player, *card_id)?;
+        CanonicalAction::PlayLand { card_id, hand_index } => {
+            let obj_id = find_in_hand_by_index(state, player, *card_id, *hand_index)?;
             Some(Action::PlayLand { object_id: obj_id })
         }
 
-        CanonicalAction::CastSpell { card_id, targets } => {
-            let obj_id = find_in_hand(state, player, *card_id)?;
+        CanonicalAction::CastSpell { card_id, hand_index, targets } => {
+            let obj_id = find_in_hand_by_index(state, player, *card_id, *hand_index)?;
             let concrete_targets: Vec<Target> = targets
                 .iter()
                 .filter_map(|t| resolve_target(t, state))
@@ -311,8 +324,8 @@ pub fn resolve(
             Some(Action::DeclareBlockers { blocks })
         }
 
-        CanonicalAction::Discard { card_id } => {
-            let obj_id = find_in_hand(state, player, *card_id)?;
+        CanonicalAction::Discard { card_id, hand_index } => {
+            let obj_id = find_in_hand_by_index(state, player, *card_id, *hand_index)?;
             Some(Action::Discard { object_id: obj_id })
         }
 
@@ -427,13 +440,35 @@ fn battlefield_instance_index(state: &GameState, obj_id: ObjectId) -> usize {
     siblings.iter().position(|&id| id == obj_id).unwrap_or(0)
 }
 
-/// Find the first card in a player's hand matching `card_id`.
-fn find_in_hand(state: &GameState, player: PlayerIndex, card_id: CardId) -> Option<ObjectId> {
-    state.players[player]
+/// Compute the instance index of `obj_id` among cards in the player's hand
+/// sharing the same `card_def_id`. Ordered by ObjectId for determinism.
+fn hand_instance_index(state: &GameState, player: PlayerIndex, obj_id: ObjectId) -> usize {
+    let card_id = state.objects[&obj_id].card_def_id;
+    let mut siblings: Vec<ObjectId> = state.players[player]
         .hand
         .iter()
-        .find(|&&obj_id| state.objects[&obj_id].card_def_id == card_id)
         .copied()
+        .filter(|&id| state.objects[&id].card_def_id == card_id)
+        .collect();
+    siblings.sort();
+    siblings.iter().position(|&id| id == obj_id).unwrap_or(0)
+}
+
+/// Find the N-th instance (by ObjectId order) of `card_id` in a player's hand.
+fn find_in_hand_by_index(
+    state: &GameState,
+    player: PlayerIndex,
+    card_id: CardId,
+    instance_index: usize,
+) -> Option<ObjectId> {
+    let mut matches: Vec<ObjectId> = state.players[player]
+        .hand
+        .iter()
+        .copied()
+        .filter(|&id| state.objects[&id].card_def_id == card_id)
+        .collect();
+    matches.sort();
+    matches.get(instance_index).copied()
 }
 
 /// Find the N-th instance (by ObjectId order) of `card_id` on the battlefield.
