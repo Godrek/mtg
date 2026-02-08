@@ -205,7 +205,7 @@ a black box through `Strategy` + `legal_actions()` + `apply_action()`.
 - [x] `effects::common` library: 18 Effect variants (DealDamage, GainLife, DrawCards, DestroyTarget, ExileTarget, BounceTo, Debuff, DiscardCards, MillCards, SacrificeCreatures, etc.)
 - [x] `abilities::common`: TriggeredAbility (10 conditions), ActivatedAbility, StaticAbility (6 variants)
 - [x] `targets::common`: TargetSpec with 11 variants (AnyCreature, AnyPlayer, CreatureOrPlayer, etc.)
-- [ ] ~~`DynamicValue` trait for runtime-computed values~~ — deferred; effects use static values, no cards currently need runtime computation
+- [x] ~~`DynamicValue` trait for runtime-computed values~~ — descoped from Phase 2A; deferred to Phase 3A if cards require runtime computation
 - [x] Card definitions become declarative compositions of building blocks — all 111 cards are pure data structs
 
 ### 2A.3 — Wire Replacement Effect Application (PR #17)
@@ -291,7 +291,7 @@ a black box through `Strategy` + `legal_actions()` + `apply_action()`.
 
 ## Phase 3: Integration & Quality
 
-**Depends on**: Both Phase 2 tracks complete.
+**Depends on**: Both Phase 2 tracks complete (satisfied).
 
 ### 3A — Rules Engine Polish
 
@@ -300,6 +300,14 @@ a black box through `Strategy` + `legal_actions()` + `apply_action()`.
 - [ ] Turn structure extras (extra turns, skip steps)
 - [ ] Zone-change counters on all objects
 - [ ] `GameStateSnapshot` struct for optimized copy/restore
+
+#### Carried from Phase 2A (minor gaps)
+
+- [ ] Token creation: `CreateToken` effect is currently a no-op (Blade Splicer, Siege-Gang Commander fire triggers but produce no tokens)
+- [ ] ETB watcher triggers: "Whenever a creature enters" (Soul Warden pattern) — only self-ETB ("when THIS enters") is supported
+- [ ] Player-choice replacement ordering: stubbed (applies in encounter order); wire `Action::ChooseReplacementOrder` into engine
+- [ ] Dark Ritual `Effect::Unimplemented`: needs a mana-generation effect type
+- [ ] `DynamicValue` trait for runtime-computed values (e.g., \*/\* where \* = cards in hand) — add if new cards need it
 
 ### 3B — MCCFR Polish
 
