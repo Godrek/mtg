@@ -18,8 +18,9 @@
 //!
 //!   player = to_act(state)
 //!   actions = legal_actions_abstracted(state)
+//!   canonical = actions.map(|a| canonicalize(a, state))
 //!   info_set = InformationSet::from_view(state.visible_state(player))
-//!   strategy = regret_match(info_set)
+//!   strategy = regret_match(info_set, canonical)
 //!
 //!   if player == traverser:
 //!     // Explore ALL actions
@@ -28,7 +29,7 @@
 //!       util[a] = traverse(child, traverser)
 //!     node_util = sum(strategy[a] * util[a])
 //!     for each action a:
-//!       regret[a] += util[a] - node_util
+//!       regret[canonical[a]] += util[a] - node_util
 //!     return node_util
 //!   else:
 //!     // Sample ONE action from opponent's strategy
@@ -40,22 +41,25 @@
 //! # Key Design Decisions
 //!
 //! - Uses `legal_actions_abstracted()` (bucketed combat) to bound branching factor
+//! - Uses `canonicalize()` to map concrete actions to stable identifiers for
+//!   regret table keying — actions are identified by card identity, not ObjectId
 //! - Skips CFR nodes with only one legal action (trivial pass-through)
 //! - Depth-limited: returns heuristic evaluation after `max_depth` plies
-//! - Chance nodes (e.g., drawing from shuffled library) are sampled
+//! - Only increments depth at multi-action decision nodes, not forced passes
 
 use rand::Rng;
 
+use crate::action::canonical::canonicalize;
 use crate::action::{legal_actions_abstracted, Action};
 use crate::game::{GameState, PlayerIndex};
 use crate::info_set::InformationSet;
 use crate::rules;
-use crate::solver::RegretTable;
+use crate::solver::{sample_from_distribution, RegretTable};
 
 /// Configuration for MCCFR training.
 #[derive(Debug, Clone)]
 pub struct McfrConfig {
-    /// Maximum depth (plies) before falling back to heuristic evaluation.
+    /// Maximum depth (decision points) before falling back to heuristic evaluation.
     /// 0 = unlimited (full game tree).
     pub max_depth: u32,
     /// Maximum actions before declaring a draw (prevents infinite loops).
@@ -113,17 +117,15 @@ fn traverse(
         return terminal_utility(&state, traverser);
     }
 
-    // Depth limit or action limit: use heuristic evaluation
-    if (config.max_depth > 0 && depth >= config.max_depth)
-        || actions_taken >= config.max_actions
-    {
+    // Action limit: use heuristic evaluation
+    if actions_taken >= config.max_actions {
         return heuristic_utility(&state, traverser);
     }
 
     let player = state.priority_player;
     let actions = legal_actions_abstracted(&state);
 
-    // No actions available — pass priority
+    // No actions available — pass priority (not a decision node)
     if actions.is_empty() {
         let mut next_state = state;
         rules::apply_action(&mut next_state, &Action::PassPriority);
@@ -132,7 +134,7 @@ fn traverse(
             traverser,
             regret_tables,
             config,
-            depth + 1,
+            depth, // don't increment depth for forced pass
             actions_taken + 1,
             rng,
         );
@@ -147,30 +149,37 @@ fn traverse(
             traverser,
             regret_tables,
             config,
-            depth + 1,
+            depth, // don't increment depth for forced action
             actions_taken + 1,
             rng,
         );
     }
 
+    // Depth limit at multi-action decision nodes
+    if config.max_depth > 0 && depth >= config.max_depth {
+        return heuristic_utility(&state, traverser);
+    }
+
+    // Canonicalize all legal actions for stable regret table keying
+    let canonical_actions: Vec<_> = actions
+        .iter()
+        .map(|a| canonicalize(a, &state))
+        .collect();
+
     // Compute information set for the acting player
     let view = state.visible_state(player);
     let info_set = InformationSet::from_view(&view, state.card_db());
     let info_hash = info_set.hash_value();
-    let num_actions = actions.len();
 
     // Get or create regret table entry and compute current strategy
     let strategy = {
-        let entry = regret_tables[player].get_or_create(info_hash, num_actions);
-        // Handle size mismatch (can happen if action space changed)
-        if entry.cumulative_regret.len() != num_actions {
-            *entry = crate::solver::InfoSetData::new(num_actions);
-        }
-        entry.current_strategy()
+        let entry = regret_tables[player].get_or_create(info_hash);
+        entry.current_strategy(&canonical_actions)
     };
 
     if player == traverser {
         // Traverser node: explore ALL actions, compute counterfactual regret
+        let num_actions = actions.len();
         let mut action_utilities = vec![0.0f64; num_actions];
 
         for (i, action) in actions.iter().enumerate() {
@@ -194,17 +203,14 @@ fn traverse(
             .map(|(&s, &u)| s * u)
             .sum();
 
-        // Update cumulative regret for each action
-        let entry = regret_tables[player].get_or_create(info_hash, num_actions);
-        for i in 0..num_actions {
-            entry.cumulative_regret[i] += action_utilities[i] - node_utility;
+        // Update cumulative regret and strategy for each action via canonical key
+        let entry = regret_tables[player].get_or_create(info_hash);
+        for (i, ca) in canonical_actions.iter().enumerate() {
+            let action_entry = entry.get_or_create_action(ca);
+            action_entry.cumulative_regret += action_utilities[i] - node_utility;
+            action_entry.cumulative_strategy += strategy[i];
         }
         entry.visit_count += 1;
-
-        // Update cumulative strategy (for average strategy computation)
-        for i in 0..num_actions {
-            entry.cumulative_strategy[i] += strategy[i];
-        }
 
         node_utility
     } else {
@@ -212,10 +218,10 @@ fn traverse(
         let action_idx = sample_from_distribution(&strategy, rng);
         let action = &actions[action_idx];
 
-        // Update opponent's cumulative strategy
-        let entry = regret_tables[player].get_or_create(info_hash, num_actions);
-        for i in 0..num_actions {
-            entry.cumulative_strategy[i] += strategy[i];
+        // Update opponent's cumulative strategy via canonical keys
+        let entry = regret_tables[player].get_or_create(info_hash);
+        for (i, ca) in canonical_actions.iter().enumerate() {
+            entry.get_or_create_action(ca).cumulative_strategy += strategy[i];
         }
         entry.visit_count += 1;
 
@@ -283,20 +289,6 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     (normalized * 0.7 + board_normalized * 0.3).clamp(-1.0, 1.0)
 }
 
-/// Sample an action index from a probability distribution.
-fn sample_from_distribution(distribution: &[f64], rng: &mut impl Rng) -> usize {
-    let r: f64 = rng.gen();
-    let mut cumulative = 0.0;
-    for (i, &p) in distribution.iter().enumerate() {
-        cumulative += p;
-        if r < cumulative {
-            return i;
-        }
-    }
-    // Fallback to last action (rounding errors)
-    distribution.len().saturating_sub(1)
-}
-
 /// Training loop: run many MCCFR iterations and return the trained regret tables.
 ///
 /// This is the high-level training function for the minimal scenario.
@@ -332,9 +324,9 @@ pub fn approximate_exploitability(regret_tables: &[RegretTable; 2]) -> f64 {
                 continue;
             }
             let avg_regret: f64 = data
-                .cumulative_regret
-                .iter()
-                .map(|&r| r.max(0.0))
+                .action_data
+                .values()
+                .map(|e| e.cumulative_regret.max(0.0))
                 .sum::<f64>()
                 / data.visit_count as f64;
             total_regret += avg_regret;
@@ -352,25 +344,6 @@ pub fn approximate_exploitability(regret_tables: &[RegretTable; 2]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_sample_from_distribution() {
-        // Deterministic check: when r=0, should return first action
-        // We can't control rand in unit test, so test edge cases
-        let dist = vec![0.5, 0.3, 0.2];
-        // Sample many times and verify distribution is valid
-        let mut rng = rand::thread_rng();
-        let mut counts = vec![0u32; 3];
-        for _ in 0..1000 {
-            let idx = sample_from_distribution(&dist, &mut rng);
-            assert!(idx < 3);
-            counts[idx] += 1;
-        }
-        // All actions should be sampled at least once
-        for &c in &counts {
-            assert!(c > 0, "All actions should be sampled");
-        }
-    }
 
     #[test]
     fn test_terminal_utility() {

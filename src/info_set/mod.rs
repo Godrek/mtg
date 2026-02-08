@@ -60,10 +60,15 @@ pub struct InformationSet {
     /// Opponent's graveyard as sorted CardIds.
     pub opp_graveyard: Vec<u64>,
 
+    /// Our exile zone as sorted CardIds.
+    pub my_exile: Vec<u64>,
+    /// Opponent's exile zone as sorted CardIds.
+    pub opp_exile: Vec<u64>,
+
     /// Remaining land plays this turn.
     pub my_land_plays_remaining: u32,
-    /// Available mana (simplified: total colored + colorless).
-    pub my_mana_available: u32,
+    /// Available mana per color (W, U, B, R, G, colorless).
+    pub my_mana: [u32; 6],
 }
 
 /// Observable information about a permanent on the battlefield.
@@ -141,9 +146,31 @@ impl InformationSet {
             .collect();
         opp_graveyard.sort();
 
-        // Mana: simplified total
+        // Exile zones: sorted CardIds (public information)
+        let mut my_exile: Vec<u64> = view
+            .my_exile
+            .iter()
+            .filter_map(|&id| view.objects.get(&id).map(|inst| inst.card_def_id))
+            .collect();
+        my_exile.sort();
+
+        let mut opp_exile: Vec<u64> = view
+            .opp_exile
+            .iter()
+            .filter_map(|&id| view.objects.get(&id).map(|inst| inst.card_def_id))
+            .collect();
+        opp_exile.sort();
+
+        // Mana: per-color breakdown
         let mana = &view.my_mana_pool;
-        let mana_total = mana.white + mana.blue + mana.black + mana.red + mana.green + mana.colorless;
+        let my_mana = [
+            mana.white,
+            mana.blue,
+            mana.black,
+            mana.red,
+            mana.green,
+            mana.colorless,
+        ];
 
         InformationSet {
             phase,
@@ -159,8 +186,10 @@ impl InformationSet {
             stack_entries,
             my_graveyard,
             opp_graveyard,
+            my_exile,
+            opp_exile,
             my_land_plays_remaining: view.my_land_plays_remaining,
-            my_mana_available: mana_total,
+            my_mana,
         }
     }
 
@@ -183,8 +212,10 @@ impl InformationSet {
         self.stack_entries.hash(&mut hasher);
         self.my_graveyard.hash(&mut hasher);
         self.opp_graveyard.hash(&mut hasher);
+        self.my_exile.hash(&mut hasher);
+        self.opp_exile.hash(&mut hasher);
         self.my_land_plays_remaining.hash(&mut hasher);
-        self.my_mana_available.hash(&mut hasher);
+        self.my_mana.hash(&mut hasher);
         hasher.finish()
     }
 }

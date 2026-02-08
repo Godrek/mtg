@@ -9,7 +9,8 @@
 //!
 //! # Architecture
 //!
-//! - `RegretTable` — stores cumulative regret and cumulative strategy per info set
+//! - `RegretTable` — stores cumulative regret and cumulative strategy per info set,
+//!   keyed by `(info_set_hash, CanonicalAction)` for stable action identification
 //! - `McfrStrategy` — implements `Strategy` trait using a trained regret table
 //! - `mccfr` submodule — external sampling MCCFR traversal
 
@@ -19,55 +20,68 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-/// Per-action data stored for each information set.
+use crate::action::canonical::CanonicalAction;
+
+/// Per-action regret and strategy accumulation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionEntry {
+    pub cumulative_regret: f64,
+    pub cumulative_strategy: f64,
+}
+
+/// Per-information-set data stored in the regret table.
 ///
-/// Cumulative regret drives the current strategy via regret matching.
-/// Cumulative strategy tracks the average strategy across iterations
-/// (which converges to Nash equilibrium).
+/// Actions are keyed by `CanonicalAction` (stable identifiers independent of
+/// ObjectId assignment) rather than positional index. This ensures that the
+/// same action at the same information set always maps to the same regret/
+/// strategy slot, even if `legal_actions_abstracted()` returns actions in a
+/// different order across visits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InfoSetData {
-    /// Cumulative counterfactual regret for each action.
-    /// Indexed by position in the canonical action list.
-    pub cumulative_regret: Vec<f64>,
-    /// Cumulative strategy weight for each action (for computing average strategy).
-    pub cumulative_strategy: Vec<f64>,
+    /// Per-action regret and strategy data, keyed by canonical action.
+    pub action_data: HashMap<CanonicalAction, ActionEntry>,
     /// Number of times this info set has been visited.
     pub visit_count: u64,
 }
 
 impl InfoSetData {
-    /// Create a new entry with `num_actions` slots.
-    pub fn new(num_actions: usize) -> Self {
+    /// Create a new empty entry.
+    pub fn new() -> Self {
         InfoSetData {
-            cumulative_regret: vec![0.0; num_actions],
-            cumulative_strategy: vec![0.0; num_actions],
+            action_data: HashMap::new(),
             visit_count: 0,
         }
     }
 
-    /// Compute the current strategy via regret matching.
+    /// Compute the current strategy via regret matching over the given actions.
     ///
     /// Actions with positive cumulative regret get probability proportional
     /// to their regret. If all regrets are non-positive, play uniformly.
-    pub fn current_strategy(&self) -> Vec<f64> {
-        let n = self.cumulative_regret.len();
+    /// Returns probabilities in the same order as the input `actions` slice.
+    pub fn current_strategy(&self, actions: &[CanonicalAction]) -> Vec<f64> {
+        let n = actions.len();
         if n == 0 {
             return vec![];
         }
 
-        let positive_sum: f64 = self
-            .cumulative_regret
+        let regrets: Vec<f64> = actions
             .iter()
-            .filter(|&&r| r > 0.0)
-            .sum();
+            .map(|a| {
+                self.action_data
+                    .get(a)
+                    .map(|d| d.cumulative_regret)
+                    .unwrap_or(0.0)
+            })
+            .collect();
+
+        let positive_sum: f64 = regrets.iter().filter(|&&r| r > 0.0).sum();
 
         if positive_sum > 0.0 {
-            self.cumulative_regret
+            regrets
                 .iter()
                 .map(|&r| if r > 0.0 { r / positive_sum } else { 0.0 })
                 .collect()
         } else {
-            // Uniform distribution when no action has positive regret
             let uniform = 1.0 / n as f64;
             vec![uniform; n]
         }
@@ -77,22 +91,44 @@ impl InfoSetData {
     ///
     /// This is what should be used for play after training, not the
     /// current strategy (which oscillates during training).
-    pub fn average_strategy(&self) -> Vec<f64> {
-        let n = self.cumulative_strategy.len();
+    /// Returns probabilities in the same order as the input `actions` slice.
+    pub fn average_strategy(&self, actions: &[CanonicalAction]) -> Vec<f64> {
+        let n = actions.len();
         if n == 0 {
             return vec![];
         }
 
-        let total: f64 = self.cumulative_strategy.iter().sum();
+        let strats: Vec<f64> = actions
+            .iter()
+            .map(|a| {
+                self.action_data
+                    .get(a)
+                    .map(|d| d.cumulative_strategy)
+                    .unwrap_or(0.0)
+            })
+            .collect();
+
+        let total: f64 = strats.iter().sum();
         if total > 0.0 {
-            self.cumulative_strategy
-                .iter()
-                .map(|&s| s / total)
-                .collect()
+            strats.iter().map(|&s| s / total).collect()
         } else {
             let uniform = 1.0 / n as f64;
             vec![uniform; n]
         }
+    }
+
+    /// Get or create the entry for a canonical action.
+    pub fn get_or_create_action(&mut self, action: &CanonicalAction) -> &mut ActionEntry {
+        self.action_data.entry(action.clone()).or_insert(ActionEntry {
+            cumulative_regret: 0.0,
+            cumulative_strategy: 0.0,
+        })
+    }
+}
+
+impl Default for InfoSetData {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -101,7 +137,8 @@ impl InfoSetData {
 /// This is the core data structure of MCCFR. Each entry corresponds to
 /// a unique information set (observable game state from one player's
 /// perspective) and stores the cumulative regret and strategy weights
-/// for each available action at that info set.
+/// for each available action at that info set. Actions are identified
+/// by `CanonicalAction` for stability across different game instances.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegretTable {
     /// Map from information set hash to per-action data.
@@ -117,15 +154,10 @@ impl RegretTable {
     }
 
     /// Get or create the entry for an information set.
-    ///
-    /// If the info set hasn't been seen before, creates a new entry
-    /// with `num_actions` slots. If it exists but has a different
-    /// number of actions (shouldn't happen in practice), the existing
-    /// entry is returned as-is.
-    pub fn get_or_create(&mut self, info_set_hash: u64, num_actions: usize) -> &mut InfoSetData {
+    pub fn get_or_create(&mut self, info_set_hash: u64) -> &mut InfoSetData {
         self.data
             .entry(info_set_hash)
-            .or_insert_with(|| InfoSetData::new(num_actions))
+            .or_insert_with(InfoSetData::new)
     }
 
     /// Get the entry for an information set, if it exists.
@@ -161,14 +193,35 @@ impl Default for RegretTable {
     }
 }
 
+/// Sample an action index from a probability distribution.
+///
+/// Shared utility used by both the MCCFR traversal and McfrStrategy.
+pub fn sample_from_distribution(distribution: &[f64], rng: &mut impl rand::Rng) -> usize {
+    let r: f64 = rng.gen();
+    let mut cumulative = 0.0;
+    for (i, &p) in distribution.iter().enumerate() {
+        cumulative += p;
+        if r < cumulative {
+            return i;
+        }
+    }
+    // Fallback to last action (rounding errors)
+    distribution.len().saturating_sub(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_info_set_data_current_strategy_uniform() {
-        let data = InfoSetData::new(3);
-        let strategy = data.current_strategy();
+        let data = InfoSetData::new();
+        let actions = vec![
+            CanonicalAction::PassPriority,
+            CanonicalAction::Concede,
+            CanonicalAction::PlayLand { card_id: 1, hand_index: 0 },
+        ];
+        let strategy = data.current_strategy(&actions);
         assert_eq!(strategy.len(), 3);
         for &p in &strategy {
             assert!((p - 1.0 / 3.0).abs() < 1e-10);
@@ -177,9 +230,15 @@ mod tests {
 
     #[test]
     fn test_info_set_data_current_strategy_regret_matching() {
-        let mut data = InfoSetData::new(3);
-        data.cumulative_regret = vec![10.0, 0.0, -5.0];
-        let strategy = data.current_strategy();
+        let mut data = InfoSetData::new();
+        let a0 = CanonicalAction::PassPriority;
+        let a1 = CanonicalAction::Concede;
+        let a2 = CanonicalAction::PlayLand { card_id: 1, hand_index: 0 };
+        data.get_or_create_action(&a0).cumulative_regret = 10.0;
+        data.get_or_create_action(&a1).cumulative_regret = 0.0;
+        data.get_or_create_action(&a2).cumulative_regret = -5.0;
+
+        let strategy = data.current_strategy(&[a0, a1, a2]);
         assert!((strategy[0] - 1.0).abs() < 1e-10); // only positive regret
         assert!((strategy[1]).abs() < 1e-10);
         assert!((strategy[2]).abs() < 1e-10);
@@ -187,9 +246,15 @@ mod tests {
 
     #[test]
     fn test_info_set_data_current_strategy_multiple_positive() {
-        let mut data = InfoSetData::new(3);
-        data.cumulative_regret = vec![6.0, 4.0, -2.0];
-        let strategy = data.current_strategy();
+        let mut data = InfoSetData::new();
+        let a0 = CanonicalAction::PassPriority;
+        let a1 = CanonicalAction::Concede;
+        let a2 = CanonicalAction::PlayLand { card_id: 1, hand_index: 0 };
+        data.get_or_create_action(&a0).cumulative_regret = 6.0;
+        data.get_or_create_action(&a1).cumulative_regret = 4.0;
+        data.get_or_create_action(&a2).cumulative_regret = -2.0;
+
+        let strategy = data.current_strategy(&[a0, a1, a2]);
         assert!((strategy[0] - 0.6).abs() < 1e-10);
         assert!((strategy[1] - 0.4).abs() < 1e-10);
         assert!((strategy[2]).abs() < 1e-10);
@@ -197,9 +262,15 @@ mod tests {
 
     #[test]
     fn test_info_set_data_average_strategy() {
-        let mut data = InfoSetData::new(3);
-        data.cumulative_strategy = vec![100.0, 200.0, 300.0];
-        let avg = data.average_strategy();
+        let mut data = InfoSetData::new();
+        let a0 = CanonicalAction::PassPriority;
+        let a1 = CanonicalAction::Concede;
+        let a2 = CanonicalAction::PlayLand { card_id: 1, hand_index: 0 };
+        data.get_or_create_action(&a0).cumulative_strategy = 100.0;
+        data.get_or_create_action(&a1).cumulative_strategy = 200.0;
+        data.get_or_create_action(&a2).cumulative_strategy = 300.0;
+
+        let avg = data.average_strategy(&[a0, a1, a2]);
         assert!((avg[0] - 1.0 / 6.0).abs() < 1e-10);
         assert!((avg[1] - 2.0 / 6.0).abs() < 1e-10);
         assert!((avg[2] - 3.0 / 6.0).abs() < 1e-10);
@@ -208,23 +279,36 @@ mod tests {
     #[test]
     fn test_regret_table_get_or_create() {
         let mut table = RegretTable::new();
+        let a0 = CanonicalAction::PassPriority;
         {
-            let data = table.get_or_create(42, 3);
-            data.cumulative_regret[0] = 5.0;
+            let data = table.get_or_create(42);
+            data.get_or_create_action(&a0).cumulative_regret = 5.0;
             data.visit_count = 1;
         }
         assert_eq!(table.num_info_sets(), 1);
         assert!(table.get(42).is_some());
-        assert_eq!(table.get(42).unwrap().cumulative_regret[0], 5.0);
+        assert_eq!(
+            table.get(42).unwrap().action_data[&a0].cumulative_regret,
+            5.0
+        );
     }
 
     #[test]
     fn test_regret_table_serialization_roundtrip() {
         let mut table = RegretTable::new();
+        let actions = vec![
+            CanonicalAction::PassPriority,
+            CanonicalAction::Concede,
+            CanonicalAction::PlayLand { card_id: 1, hand_index: 0 },
+            CanonicalAction::CastSpell { card_id: 100, hand_index: 0, targets: vec![] },
+        ];
         {
-            let data = table.get_or_create(100, 4);
-            data.cumulative_regret = vec![1.0, 2.0, 3.0, 4.0];
-            data.cumulative_strategy = vec![10.0, 20.0, 30.0, 40.0];
+            let data = table.get_or_create(100);
+            for (i, a) in actions.iter().enumerate() {
+                let entry = data.get_or_create_action(a);
+                entry.cumulative_regret = (i + 1) as f64;
+                entry.cumulative_strategy = ((i + 1) * 10) as f64;
+            }
             data.visit_count = 50;
         }
 
@@ -233,17 +317,17 @@ mod tests {
 
         assert_eq!(restored.num_info_sets(), 1);
         let data = restored.get(100).unwrap();
-        assert_eq!(data.cumulative_regret, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(data.cumulative_strategy, vec![10.0, 20.0, 30.0, 40.0]);
+        assert_eq!(data.action_data[&CanonicalAction::PassPriority].cumulative_regret, 1.0);
+        assert_eq!(data.action_data[&CanonicalAction::Concede].cumulative_strategy, 20.0);
         assert_eq!(data.visit_count, 50);
     }
 
     #[test]
     fn test_regret_table_prune() {
         let mut table = RegretTable::new();
-        table.get_or_create(1, 2).visit_count = 100;
-        table.get_or_create(2, 2).visit_count = 1;
-        table.get_or_create(3, 2).visit_count = 50;
+        table.get_or_create(1).visit_count = 100;
+        table.get_or_create(2).visit_count = 1;
+        table.get_or_create(3).visit_count = 50;
 
         assert_eq!(table.num_info_sets(), 3);
         table.prune(10);
@@ -251,5 +335,20 @@ mod tests {
         assert!(table.get(1).is_some());
         assert!(table.get(2).is_none());
         assert!(table.get(3).is_some());
+    }
+
+    #[test]
+    fn test_sample_from_distribution() {
+        let dist = vec![0.5, 0.3, 0.2];
+        let mut rng = rand::thread_rng();
+        let mut counts = vec![0u32; 3];
+        for _ in 0..1000 {
+            let idx = sample_from_distribution(&dist, &mut rng);
+            assert!(idx < 3);
+            counts[idx] += 1;
+        }
+        for &c in &counts {
+            assert!(c > 0, "All actions should be sampled");
+        }
     }
 }

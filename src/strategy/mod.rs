@@ -1,11 +1,11 @@
 use rand::seq::SliceRandom;
-use rand::Rng;
 
+use crate::action::canonical::canonicalize;
 use crate::action::{legal_actions, legal_actions_abstracted, Action};
 use crate::card::ObjectId;
 use crate::game::{GameState, PlayerIndex};
 use crate::info_set::InformationSet;
-use crate::solver::RegretTable;
+use crate::solver::{sample_from_distribution, RegretTable};
 
 /// A strategy decides what action to take given a game state.
 /// This is the interface the GTO solver will optimize over.
@@ -147,8 +147,8 @@ impl Strategy for GreedyStrategy {
 ///
 /// After training, the average strategy (not the current strategy) converges
 /// to a Nash equilibrium in two-player zero-sum games. This implementation
-/// looks up the current info set in the regret table and samples an action
-/// from the average strategy distribution.
+/// looks up the current info set in the regret table, canonicalizes the
+/// available actions, and samples from the average strategy distribution.
 ///
 /// Falls back to uniform random among legal actions when the info set
 /// hasn't been visited during training.
@@ -174,15 +174,19 @@ impl Strategy for McfrStrategy {
             return actions[0].clone();
         }
 
+        // Canonicalize actions for stable regret table lookup
+        let canonical_actions: Vec<_> = actions
+            .iter()
+            .map(|a| canonicalize(a, state))
+            .collect();
+
         let view = state.visible_state(player);
         let info_set = InformationSet::from_view(&view, state.card_db());
         let info_hash = info_set.hash_value();
 
         let distribution = match self.policy.get(info_hash) {
-            Some(data) if data.cumulative_strategy.len() == actions.len() => {
-                data.average_strategy()
-            }
-            _ => {
+            Some(data) => data.average_strategy(&canonical_actions),
+            None => {
                 // Unseen info set — fall back to uniform random
                 let n = actions.len();
                 vec![1.0 / n as f64; n]
@@ -190,26 +194,13 @@ impl Strategy for McfrStrategy {
         };
 
         let mut rng = rand::thread_rng();
-        let idx = sample_action_index(&distribution, &mut rng);
+        let idx = sample_from_distribution(&distribution, &mut rng);
         actions[idx].clone()
     }
 
     fn name(&self) -> &str {
         "MCCFR"
     }
-}
-
-/// Sample an action index from a probability distribution.
-fn sample_action_index(distribution: &[f64], rng: &mut impl Rng) -> usize {
-    let r: f64 = rng.gen();
-    let mut cumulative = 0.0;
-    for (i, &p) in distribution.iter().enumerate() {
-        cumulative += p;
-        if r < cumulative {
-            return i;
-        }
-    }
-    distribution.len().saturating_sub(1)
 }
 
 /// Evaluate a blocking assignment. Positive = good for the defender.
