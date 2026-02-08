@@ -758,13 +758,13 @@ fn test_attack_abstraction_large_board_reduces_actions() {
 
     assert_eq!(full_attacks.len(), 256, "Full should have 2^8 = 256 subsets");
     assert!(
-        abstracted_attacks.len() <= 6,
-        "Bucketed should have at most 6 buckets, got {}",
+        abstracted_attacks.len() <= 7,
+        "Bucketed should have at most 7 buckets, got {}",
         abstracted_attacks.len()
     );
     assert!(
         abstracted_attacks.len() >= 3,
-        "Bucketed should have at least 3 buckets (none, alpha, evasion), got {}",
+        "Bucketed should have at least 3 buckets (none, alpha, +others), got {}",
         abstracted_attacks.len()
     );
 }

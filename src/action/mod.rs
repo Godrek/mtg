@@ -521,8 +521,9 @@ fn generate_subsets(items: &[ObjectId], max_items: usize) -> Vec<Vec<ObjectId>> 
 /// 4. **Best-1**: attack with just the highest-power creature
 /// 5. **Top-half**: attack with the top ceil(n/2) creatures by power
 /// 6. **Bottom-half**: attack with the bottom ceil(n/2) creatures by power
+/// 7. **Safe-attackers**: attack with only vigilance creatures (they don't tap, zero risk)
 ///
-/// Produces at most 6 distinct actions (after dedup) instead of 2^n.
+/// Produces at most 7 distinct actions (after dedup) instead of 2^n.
 fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<ObjectId>> {
     let db = state.card_db();
 
@@ -591,6 +592,21 @@ fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<
         add_bucket(sorted_ids[bottom_start..].to_vec(), &mut seen, &mut buckets);
     }
 
+    // 7. Safe-attackers: vigilance creatures don't tap to attack, so attacking
+    //    with them carries no defensive cost. Strategically distinct posture.
+    let vigilant: Vec<ObjectId> = eligible
+        .iter()
+        .filter(|&&id| {
+            let inst = &state.objects[&id];
+            let def = db.get(inst.card_def_id).unwrap();
+            inst.has_keyword(def, KeywordAbility::Vigilance)
+        })
+        .copied()
+        .collect();
+    if !vigilant.is_empty() {
+        add_bucket(vigilant, &mut seen, &mut buckets);
+    }
+
     buckets
 }
 
@@ -598,8 +614,8 @@ fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<
 ///
 /// Buckets:
 /// 1. **No blocks**: take all damage, preserve creatures
-/// 2. **Chump-biggest**: assign the smallest blocker to the highest-power attacker
-/// 3. **Favorable-only**: block only where our creature kills theirs and survives
+/// 2. **Chump-all**: assign the smallest available blocker to each attacker (biggest first)
+/// 3. **Favorable-only**: block where our creature kills theirs AND survives (biggest blocker first)
 /// 4. **Block-all**: assign one blocker to each attacker we can (greedy by attacker power)
 /// 5. **Trade-down**: block to trade, even if we lose our creature, when their creature dies
 fn generate_block_buckets(
@@ -658,6 +674,10 @@ fn generate_block_buckets(
     let mut blocker_by_power_asc: Vec<usize> = (0..blockers.len()).collect();
     blocker_by_power_asc.sort_by(|&a, &b| blocker_stats[a].power.cmp(&blocker_stats[b].power));
 
+    // Blockers sorted by power descending (biggest first, for favorable trades).
+    let mut blocker_by_power_desc: Vec<usize> = (0..blockers.len()).collect();
+    blocker_by_power_desc.sort_by(|&a, &b| blocker_stats[b].power.cmp(&blocker_stats[a].power));
+
     let mut seen: HashSet<Vec<(ObjectId, ObjectId)>> = HashSet::new();
     let mut results: Vec<Vec<(ObjectId, ObjectId)>> = Vec::with_capacity(6);
 
@@ -671,15 +691,12 @@ fn generate_block_buckets(
     // 1. No blocks
     add_assignment(vec![], &mut seen, &mut results);
 
-    // 2. Chump-biggest: assign the smallest available blocker to the biggest attacker
+    // 2. Chump-all: assign the smallest available blocker to each attacker,
+    //    biggest attackers first. Prevents maximum total damage.
     {
         let mut assignment = Vec::new();
         let mut used_blockers: HashSet<usize> = HashSet::new();
-        // Only chump the single biggest attacker
         for &ai in &attacker_order {
-            if assignment.len() >= 1 {
-                break;
-            }
             for &bi in &blocker_by_power_asc {
                 if !used_blockers.contains(&bi) && can_block_matrix[bi][ai] {
                     assignment.push((blockers[bi], attackers[ai]));
@@ -693,12 +710,15 @@ fn generate_block_buckets(
         }
     }
 
-    // 3. Favorable-only: block where our creature kills theirs AND survives
+    // 3. Favorable-only: block where our creature kills theirs AND survives.
+    //    Iterates biggest-blocker-first so the most capable blockers get matched
+    //    to attackers they can profitably handle, rather than wasting small
+    //    blockers on big attackers where they can't achieve favorable trades.
     {
         let mut assignment = Vec::new();
         let mut used_blockers: HashSet<usize> = HashSet::new();
         for &ai in &attacker_order {
-            for &bi in &blocker_by_power_asc {
+            for &bi in &blocker_by_power_desc {
                 if used_blockers.contains(&bi) || !can_block_matrix[bi][ai] {
                     continue;
                 }
