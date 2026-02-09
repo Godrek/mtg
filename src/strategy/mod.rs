@@ -270,6 +270,79 @@ impl Strategy for AbstractedMcfrStrategy {
     }
 }
 
+/// Goldfish strategy: simulates a passive opponent who takes no actions.
+///
+/// In MTG, "goldfishing" means playing solitaire against an opponent who does
+/// nothing — no blocking, no attacking, no spells. This measures the fastest
+/// possible clock (kill turn) for a deck. The goldfish:
+///
+/// - Always passes priority (never casts spells or activates abilities)
+/// - Never attacks
+/// - Never blocks
+/// - Handles mandatory actions minimally (trigger ordering, forced discard)
+///
+/// Because the goldfish makes no meaningful decisions, simulations run faster
+/// and have near-zero branching on the opponent's side, allowing convergence
+/// to the deck's theoretical best-case win speed.
+pub struct GoldfishStrategy;
+
+impl Strategy for GoldfishStrategy {
+    fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
+        let actions = legal_actions(state);
+
+        // Handle mandatory actions that can't be skipped
+
+        // Trigger ordering, replacement ordering, and damage assignment:
+        // pick the first option offered (FIFO / default ordering).
+        for action in &actions {
+            if matches!(
+                action,
+                Action::OrderTriggers { .. }
+                    | Action::ChooseReplacementOrder { .. }
+                    | Action::OrderDamageAssignment { .. }
+            ) {
+                return action.clone();
+            }
+        }
+
+        // Forced discard during cleanup: discard the first card
+        for action in &actions {
+            if let Action::Discard { .. } = action {
+                return action.clone();
+            }
+        }
+
+        // Declare attackers: never attack (pick the empty attacker set)
+        if matches!(state.phase, crate::game::Phase::DeclareAttackers) && player == state.active_player {
+            for action in &actions {
+                if let Action::DeclareAttackers { attackers } = action {
+                    if attackers.is_empty() {
+                        return action.clone();
+                    }
+                }
+            }
+        }
+
+        // Declare blockers: never block (pick the empty block set)
+        if matches!(state.phase, crate::game::Phase::DeclareBlockers) && player != state.active_player {
+            for action in &actions {
+                if let Action::DeclareBlockers { blocks } = action {
+                    if blocks.is_empty() {
+                        return action.clone();
+                    }
+                }
+            }
+        }
+
+        // Default: always pass priority
+        Action::PassPriority
+    }
+
+    fn name(&self) -> &str {
+        "Goldfish"
+    }
+}
+
 /// Evaluate a blocking assignment. Positive = good for the defender.
 fn evaluate_blocks(state: &GameState, blocks: &[(ObjectId, ObjectId)]) -> i32 {
     let db = state.card_db();

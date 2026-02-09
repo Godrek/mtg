@@ -6,7 +6,7 @@ use crate::action::legal_actions;
 use crate::card::CardId;
 use crate::game::{CardDatabase, GameState, PlayerIndex};
 use crate::rules;
-use crate::strategy::Strategy;
+use crate::strategy::{GoldfishStrategy, Strategy};
 
 /// Maximum turns before a game is declared a draw.
 const MAX_TURNS: u32 = 200;
@@ -198,7 +198,7 @@ fn run_game_loop(
         rules::apply_action(state, &action);
         actions_taken += 1;
 
-        if actions_taken % 10 == 0 {
+        if actions_taken.is_multiple_of(10) {
             rules::check_state_based_actions(state);
         }
     }
@@ -309,5 +309,257 @@ pub fn simulate(
         draws: draws.load(Ordering::Relaxed),
         avg_turns: total_turns.load(Ordering::Relaxed) as f64 / total as f64,
         avg_actions: total_actions.load(Ordering::Relaxed) as f64 / total as f64,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Goldfish mode — solitaire simulation against a passive opponent
+// ---------------------------------------------------------------------------
+
+/// Maximum turns before a goldfish game is declared a draw.
+/// Lower than normal since goldfish games should end quickly.
+const GOLDFISH_MAX_TURNS: u32 = 50;
+
+/// Maximum actions per goldfish game (lower bound since opponent does nothing).
+const GOLDFISH_MAX_ACTIONS: u32 = 10_000;
+
+/// Aggregate results from goldfish simulation.
+///
+/// Tracks kill-turn distribution in addition to standard win/loss stats.
+/// Since the opponent takes no actions, the key metric is how quickly
+/// the deck can win — the "goldfish kill turn".
+#[derive(Debug, Clone)]
+pub struct GoldfishResults {
+    pub total_games: u64,
+    /// Games where the pilot (player 0) reduced the goldfish to 0 life.
+    pub wins: u64,
+    /// Games where the pilot (player 0) lost — e.g. self-inflicted life loss,
+    /// decking out, or an effect that causes the pilot to lose. Should be rare
+    /// against a passive opponent, but tracked for completeness.
+    pub losses: u64,
+    /// Games that hit the turn/action limit without either player winning.
+    pub draws: u64,
+    pub avg_kill_turn: f64,
+    pub fastest_kill: u32,
+    pub slowest_kill: u32,
+    pub avg_actions: f64,
+    /// Kill-turn distribution: index = turn number, value = number of wins on that turn.
+    /// Index 0 is unused (games start at turn 1).
+    pub kill_turn_distribution: Vec<u64>,
+}
+
+impl GoldfishResults {
+    pub fn win_rate(&self) -> f64 {
+        self.wins as f64 / self.total_games as f64
+    }
+
+    pub fn display(&self) {
+        println!("=== Goldfish Results ===");
+        println!("Total games: {}", self.total_games);
+        println!("Wins: {} ({:.1}%)", self.wins, self.win_rate() * 100.0);
+        println!("Draws (timeout): {}", self.draws);
+        if self.wins > 0 {
+            println!("Avg kill turn: {:.2}", self.avg_kill_turn);
+            println!("Fastest kill: T{}", self.fastest_kill);
+            println!("Slowest kill: T{}", self.slowest_kill);
+            println!("Avg actions/game: {:.1}", self.avg_actions);
+            println!("Kill turn distribution:");
+            for (turn, &count) in self.kill_turn_distribution.iter().enumerate() {
+                if count > 0 {
+                    let pct = count as f64 / self.wins as f64 * 100.0;
+                    println!("  T{}: {} ({:.1}%)", turn, count, pct);
+                }
+            }
+        }
+    }
+}
+
+/// Run a single goldfish game: player 0 plays the deck under test,
+/// player 1 uses GoldfishStrategy (does nothing).
+///
+/// Uses tighter limits than normal games since the goldfish opponent
+/// adds no complexity.
+pub fn run_goldfish_game(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    strategy: &dyn Strategy,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    // The goldfish opponent uses the same deck (it won't play any cards).
+    run_goldfish_game_inner(db, deck, strategy, false)
+}
+
+/// Run a single goldfish game with verbose tracing.
+pub fn run_goldfish_game_verbose(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    strategy: &dyn Strategy,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    run_goldfish_game_inner(db, deck, strategy, true)
+}
+
+fn run_goldfish_game_inner(
+    card_db: Arc<CardDatabase>,
+    deck: &[CardId],
+    strategy: &dyn Strategy,
+    verbose: bool,
+) -> GameResult {
+    let goldfish = GoldfishStrategy;
+    let mut state = GameState::new(2);
+    state.card_db = Some(card_db);
+
+    // Both players get the same deck — the goldfish won't use its cards.
+    rules::setup_game(&mut state, deck, deck);
+
+    let mut actions_taken: u32 = 0;
+
+    while !state.game_over
+        && state.turn_number <= GOLDFISH_MAX_TURNS
+        && actions_taken < GOLDFISH_MAX_ACTIONS
+    {
+        let player = state.priority_player;
+        let actions = legal_actions(&state);
+
+        if actions.is_empty()
+            || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
+        {
+            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Player 0 uses the provided strategy; player 1 is the goldfish.
+        let active_strategy: &dyn Strategy = if player == 0 { strategy } else { &goldfish };
+        let action = active_strategy.choose_action(&state, player);
+
+        if verbose && actions_taken < 200 {
+            let db = state.card_db();
+            let action_name = match &action {
+                crate::action::Action::CastSpell { object_id, .. } => {
+                    let inst = &state.objects[object_id];
+                    format!(
+                        "Cast {}",
+                        db.get(inst.card_def_id)
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("?")
+                    )
+                }
+                crate::action::Action::PlayLand { object_id } => {
+                    let inst = &state.objects[object_id];
+                    format!(
+                        "Play {}",
+                        db.get(inst.card_def_id)
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("?")
+                    )
+                }
+                crate::action::Action::OrderTriggers { ordering } => {
+                    format!("Order {} triggers", ordering.len())
+                }
+                other => format!("{}", other),
+            };
+            eprintln!(
+                "T{} {:?} P{}: {} (life: {}/{})",
+                state.turn_number,
+                state.phase,
+                player,
+                action_name,
+                state.players[0].life,
+                state.players[1].life,
+            );
+        }
+
+        rules::apply_action(&mut state, &action);
+        actions_taken += 1;
+
+        if actions_taken.is_multiple_of(10) {
+            rules::check_state_based_actions(&mut state);
+        }
+    }
+
+    GameResult {
+        winner: state.winner,
+        turns: state.turn_number,
+        actions_taken,
+        final_life: [state.players[0].life, state.players[1].life],
+    }
+}
+
+/// Run many goldfish games in parallel and aggregate results with kill-turn distribution.
+///
+/// Goldfish simulation measures the fastest possible win speed for a deck by
+/// playing against an opponent who takes no actions (no blocking, no spells).
+/// This produces lower branching complexity and faster convergence than
+/// a full two-player simulation.
+pub fn simulate_goldfish(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    strategy: &(dyn Strategy + Send + Sync),
+    num_games: u64,
+) -> GoldfishResults {
+    let db = Arc::new(card_db.clone());
+    let wins = AtomicU64::new(0);
+    let losses = AtomicU64::new(0);
+    let draws = AtomicU64::new(0);
+    let total_kill_turns = AtomicU64::new(0);
+    let total_actions = AtomicU64::new(0);
+    let fastest = AtomicU64::new(u64::MAX);
+    let slowest = AtomicU64::new(0);
+
+    // Kill-turn distribution buckets (one per turn up to GOLDFISH_MAX_TURNS).
+    let distribution: Vec<AtomicU64> = (0..=GOLDFISH_MAX_TURNS)
+        .map(|_| AtomicU64::new(0))
+        .collect();
+
+    (0..num_games).into_par_iter().for_each(|_| {
+        let result = run_goldfish_game_inner(Arc::clone(&db), deck, strategy, false);
+
+        total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
+
+        match result.winner {
+            Some(0) => {
+                wins.fetch_add(1, Ordering::Relaxed);
+                let turn = result.turns;
+                total_kill_turns.fetch_add(turn as u64, Ordering::Relaxed);
+                if (turn as usize) < distribution.len() {
+                    distribution[turn as usize].fetch_add(1, Ordering::Relaxed);
+                }
+                // Update fastest/slowest atomically
+                fastest.fetch_min(turn as u64, Ordering::Relaxed);
+                slowest.fetch_max(turn as u64, Ordering::Relaxed);
+            }
+            Some(_) => {
+                losses.fetch_add(1, Ordering::Relaxed);
+            }
+            None => {
+                draws.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    });
+
+    let total_wins = wins.load(Ordering::Relaxed);
+    let fast = fastest.load(Ordering::Relaxed);
+    let slow = slowest.load(Ordering::Relaxed);
+
+    let kill_turn_dist: Vec<u64> = distribution
+        .iter()
+        .map(|a| a.load(Ordering::Relaxed))
+        .collect();
+
+    GoldfishResults {
+        total_games: num_games,
+        wins: total_wins,
+        losses: losses.load(Ordering::Relaxed),
+        draws: draws.load(Ordering::Relaxed),
+        avg_kill_turn: if total_wins > 0 {
+            total_kill_turns.load(Ordering::Relaxed) as f64 / total_wins as f64
+        } else {
+            0.0
+        },
+        fastest_kill: if total_wins > 0 { fast as u32 } else { 0 },
+        slowest_kill: if total_wins > 0 { slow as u32 } else { 0 },
+        avg_actions: total_actions.load(Ordering::Relaxed) as f64 / num_games as f64,
+        kill_turn_distribution: kill_turn_dist,
     }
 }
