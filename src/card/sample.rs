@@ -153,6 +153,121 @@ pub mod ids {
     pub const GEIST_OF_SAINT_TRAFT: u64 = 412;
     pub const FLEECEMANE_LION: u64 = 413;
     pub const TIDEHOLLOW_SCULLER: u64 = 414;
+
+    // =====================================================================
+    // Kinnan, Bonder Prodigy Commander Deck
+    // =====================================================================
+
+    // --- Lands ---
+    pub const ANCIENT_TOMB: u64 = 500;
+    pub const BOSEIJU_WHO_ENDURES: u64 = 501;
+    pub const BREEDING_POOL: u64 = 502;
+    pub const COMMAND_TOWER: u64 = 503;
+    pub const FLOODED_STRAND: u64 = 504;
+    pub const GAEAS_CRADLE: u64 = 505;
+    pub const GEMSTONE_CAVERNS: u64 = 506;
+    pub const INVENTORS_FAIR: u64 = 507;
+    pub const MINAMO_SCHOOL: u64 = 508;
+    pub const MISTY_RAINFOREST: u64 = 509;
+    pub const MISTRISE_VILLAGE: u64 = 510;
+    pub const OTAWARA_SOARING_CITY: u64 = 511;
+    pub const SEAT_OF_THE_SYNOD: u64 = 512;
+    pub const SHIFTING_WOODLAND: u64 = 513;
+    pub const SNOW_COVERED_FOREST: u64 = 514;
+    pub const SNOW_COVERED_ISLAND: u64 = 515;
+    pub const TREASURE_VAULT: u64 = 516;
+    pub const TREE_OF_TALES: u64 = 517;
+    pub const TROPICAL_ISLAND: u64 = 518;
+    pub const WATERLOGGED_GROVE: u64 = 519;
+    pub const WINDSWEPT_HEATH: u64 = 520;
+    pub const YAVIMAYA_COAST: u64 = 521;
+
+    // --- Artifacts ---
+    pub const ARCANE_SIGNET: u64 = 550;
+    pub const BASALT_MONOLITH: u64 = 551;
+    pub const CHROME_MOX: u64 = 552;
+    pub const FELLWAR_STONE: u64 = 553;
+    pub const GRIM_MONOLITH: u64 = 554;
+    pub const LOTUS_PETAL: u64 = 555;
+    pub const MANA_VAULT: u64 = 556;
+    pub const MOX_AMBER: u64 = 557;
+    pub const MOX_DIAMOND: u64 = 558;
+    pub const MOX_OPAL: u64 = 559;
+    pub const MOONSILVER_KEY: u64 = 560;
+    pub const SIMIC_SIGNET: u64 = 561;
+    pub const SPRINGLEAF_DRUM: u64 = 562;
+    pub const TALISMAN_OF_CURIOSITY: u64 = 563;
+    pub const AGATHAS_SOUL_CAULDRON: u64 = 580;
+    pub const THE_ONE_RING: u64 = 581;
+    pub const MIRAGE_MIRROR: u64 = 582;
+
+    // --- Creatures ---
+    pub const KINNAN_BONDER_PRODIGY: u64 = 600;
+    pub const BIRDS_OF_PARADISE: u64 = 601;
+    pub const FYNDHORN_ELVES: u64 = 602;
+    pub const DELIGHTED_HALFLING: u64 = 603;
+    pub const BADGERMOLE_CUB: u64 = 604;
+    pub const CLEVER_IMPERSONATOR: u64 = 605;
+    pub const COLOSSAL_SKYTURTLE: u64 = 606;
+    pub const CONSECRATED_SPHINX: u64 = 607;
+    pub const DRIFT_OF_PHANTASMS: u64 = 608;
+    pub const ELVISH_SPIRIT_GUIDE: u64 = 609;
+    pub const ENDURANCE: u64 = 610;
+    pub const ENDURING_VITALITY: u64 = 611;
+    pub const FAERIE_MASTERMIND: u64 = 612;
+    pub const FLESH_DUPLICATE: u64 = 613;
+    pub const HIGH_FAE_TRICKSTER: u64 = 614;
+    pub const HULLBREAKER_HORROR: u64 = 615;
+    pub const MOCKINGBIRD: u64 = 616;
+    pub const NEZAHAL_PRIMAL_TIDE: u64 = 617;
+    pub const NYXBLOOM_ANCIENT: u64 = 618;
+    pub const PHYREXIAN_METAMORPH: u64 = 619;
+    pub const SEEDBORN_MUSE: u64 = 620;
+    pub const THRASIOS_TRITON_HERO: u64 = 621;
+    pub const TIDESPOUT_TYRANT: u64 = 622;
+    pub const TROPHY_MAGE: u64 = 623;
+    pub const WAN_SHI_TONG: u64 = 624;
+    pub const WANDERING_ARCHAIC: u64 = 625;
+
+    // --- Instants ---
+    pub const AN_OFFER_YOU_CANT_REFUSE: u64 = 700;
+    pub const CHORD_OF_CALLING: u64 = 701;
+    pub const CROP_ROTATION: u64 = 702;
+    pub const CYCLONIC_RIFT: u64 = 703;
+    pub const FIERCE_GUARDIANSHIP: u64 = 704;
+    pub const FLUSTERSTORM: u64 = 705;
+    pub const FORCE_OF_NEGATION: u64 = 706;
+    pub const FORCE_OF_WILL: u64 = 707;
+    pub const INTO_THE_FLOOD_MAW: u64 = 708;
+    pub const MENTAL_MISSTEP: u64 = 709;
+    pub const MINDBREAK_TRAP: u64 = 710;
+    pub const MYSTICAL_TUTOR: u64 = 711;
+    pub const NOXIOUS_REVIVAL: u64 = 712;
+    pub const PACT_OF_NEGATION: u64 = 713;
+    pub const SWAN_SONG: u64 = 714;
+    pub const VEIL_OF_SUMMER: u64 = 715;
+    pub const WHIR_OF_INVENTION: u64 = 716;
+    pub const WORLDLY_TUTOR: u64 = 717;
+    pub const MUDDLE_THE_MIXTURE: u64 = 718;
+
+    // --- Sorceries ---
+    pub const FINALE_OF_DEVASTATION: u64 = 750;
+    pub const GREEN_SUNS_ZENITH: u64 = 751;
+    pub const NATURES_RHYTHM: u64 = 752;
+
+    // --- Enchantments ---
+    pub const MYSTIC_REMORA: u64 = 770;
+    pub const RHYSTIC_STUDY: u64 = 771;
+
+    // --- Planeswalkers ---
+    pub const TEZZERET_THE_SEEKER: u64 = 790;
+
+    // --- DFC / Battle cards ---
+    pub const BRIDGEWORKS_BATTLE: u64 = 800;
+    pub const DISCIPLE_OF_FREYALISE: u64 = 801;
+    pub const HYDROELECTRIC_SPECIMEN: u64 = 802;
+    pub const INVASION_OF_IKORIA: u64 = 803;
+    pub const SINK_INTO_STUPOR: u64 = 804;
 }
 
 pub fn build_sample_db() -> CardDatabase {
@@ -2558,7 +2673,7 @@ pub fn build_sample_db() -> CardDatabase {
         keywords: vec![],
         power: None,
         toughness: None,
-        mana_abilities: vec![],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(2)],
         spell_effect: None,
         activated_abilities: vec![],
         triggered_abilities: vec![],
@@ -2825,6 +2940,1158 @@ pub fn build_sample_db() -> CardDatabase {
         ..Default::default()
     });
 
+    // =====================================================================
+    // Kinnan, Bonder Prodigy Commander Deck — Card definitions
+    // =====================================================================
+
+    // ---- Lands ----
+
+    db.insert(CardDef {
+        id: ids::ANCIENT_TOMB,
+        name: "Ancient Tomb".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(2)],
+        oracle_text: "{T}: Add {C}{C}. Ancient Tomb deals 2 damage to you.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::BOSEIJU_WHO_ENDURES,
+        name: "Boseiju, Who Endures".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "{T}: Add {G}. Channel — {1}{G}, Discard Boseiju: Destroy target artifact, enchantment, or nonbasic land an opponent controls.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::BREEDING_POOL,
+        name: "Breeding Pool".into(),
+        card_types: vec![CardType::Land],
+        subtypes: vec![Subtype("Forest".into()), Subtype("Island".into())],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "({T}: Add {G} or {U}.) As Breeding Pool enters, you may pay 2 life. If you don't, it enters tapped.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::COMMAND_TOWER,
+        name: "Command Tower".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color in your commander's color identity.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FLOODED_STRAND,
+        name: "Flooded Strand".into(),
+        card_types: vec![CardType::Land],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
+        }],
+        oracle_text: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::GAEAS_CRADLE,
+        name: "Gaea's Cradle".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "{T}: Add {G} for each creature you control.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::GEMSTONE_CAVERNS,
+        name: "Gemstone Caverns".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "If Gemstone Caverns is in your opening hand and you're not the starting player, you may begin the game with it on the battlefield with a luck counter on it. If you do, exile a card from your hand. {T}: Add {C}. If Gemstone Caverns has a luck counter on it, instead add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::INVENTORS_FAIR,
+        name: "Inventors' Fair".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "At the beginning of your upkeep, if you control three or more artifacts, you gain 1 life. {T}: Add {C}. {4}, {T}, Sacrifice Inventors' Fair: Search your library for an artifact card, reveal it, put it into your hand, then shuffle. Activate only if you control three or more artifacts.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MINAMO_SCHOOL,
+        name: "Minamo, School at Water's Edge".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        oracle_text: "{T}: Add {U}. {U}, {T}: Untap target legendary permanent.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MISTY_RAINFOREST,
+        name: "Misty Rainforest".into(),
+        card_types: vec![CardType::Land],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
+        }],
+        oracle_text: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MISTRISE_VILLAGE,
+        name: "Mistrise Village".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        oracle_text: "Mistrise Village enters tapped unless you control a Mountain or a Forest. {T}: Add {U}. {U}, {T}: The next spell you cast this turn can't be countered.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::OTAWARA_SOARING_CITY,
+        name: "Otawara, Soaring City".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        oracle_text: "{T}: Add {U}. Channel — {3}{U}, Discard Otawara: Return target artifact, creature, or planeswalker to its owner's hand.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SEAT_OF_THE_SYNOD,
+        name: "Seat of the Synod".into(),
+        card_types: vec![CardType::Artifact, CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        oracle_text: "{T}: Add {U}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SHIFTING_WOODLAND,
+        name: "Shifting Woodland".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "Shifting Woodland enters tapped unless you control two or more other lands. {T}: Add {G}. Delirium — {2}{G}{G}: Shifting Woodland becomes a copy of target permanent card in your graveyard until end of turn.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SNOW_COVERED_FOREST,
+        name: "Snow-Covered Forest".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Basic, Supertype::Snow],
+        subtypes: vec![Subtype("Forest".into())],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SNOW_COVERED_ISLAND,
+        name: "Snow-Covered Island".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Basic, Supertype::Snow],
+        subtypes: vec![Subtype("Island".into())],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        oracle_text: "{T}: Add {U}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TREASURE_VAULT,
+        name: "Treasure Vault".into(),
+        card_types: vec![CardType::Artifact, CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {X}{X}, {T}, Sacrifice Treasure Vault: Create X Treasure tokens.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TREE_OF_TALES,
+        name: "Tree of Tales".into(),
+        card_types: vec![CardType::Artifact, CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TROPICAL_ISLAND,
+        name: "Tropical Island".into(),
+        card_types: vec![CardType::Land],
+        subtypes: vec![Subtype("Forest".into()), Subtype("Island".into())],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "({T}: Add {G} or {U}.)".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WATERLOGGED_GROVE,
+        name: "Waterlogged Grove".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "{T}, Pay 1 life: Add {G} or {U}. {1}, {T}, Sacrifice Waterlogged Grove: Draw a card.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WINDSWEPT_HEATH,
+        name: "Windswept Heath".into(),
+        card_types: vec![CardType::Land],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
+        }],
+        oracle_text: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::YAVIMAYA_COAST,
+        name: "Yavimaya Coast".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "{T}: Add {C}. {T}: Add {G} or {U}. Yavimaya Coast deals 1 damage to you.".into(),
+        ..Default::default()
+    });
+
+    // ---- Artifacts ----
+
+    db.insert(CardDef {
+        id: ids::ARCANE_SIGNET,
+        name: "Arcane Signet".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color in your commander's color identity.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::BASALT_MONOLITH,
+        name: "Basalt Monolith".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(3, 0, 0, 0, 0, 0),
+            requires_tap: false,
+            effect: Effect::UntapTarget { target: TargetSpec::Controller },
+            description: "{3}: Untap Basalt Monolith.".into(),
+        }],
+        oracle_text: "Basalt Monolith doesn't untap during your untap step. {T}: Add {C}{C}{C}. {3}: Untap Basalt Monolith.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CHROME_MOX,
+        name: "Chrome Mox".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "Imprint — When Chrome Mox enters, you may exile a nonartifact, nonland card from your hand. {T}: Add one mana of any of the exiled card's colors.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FELLWAR_STONE,
+        name: "Fellwar Stone".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color that a land an opponent controls could produce.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::GRIM_MONOLITH,
+        name: "Grim Monolith".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(4, 0, 0, 0, 0, 0),
+            requires_tap: false,
+            effect: Effect::UntapTarget { target: TargetSpec::Controller },
+            description: "{4}: Untap Grim Monolith.".into(),
+        }],
+        oracle_text: "Grim Monolith doesn't untap during your untap step. {T}: Add {C}{C}{C}. {4}: Untap Grim Monolith.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::LOTUS_PETAL,
+        name: "Lotus Petal".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}, Sacrifice Lotus Petal: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MANA_VAULT,
+        name: "Mana Vault".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(4, 0, 0, 0, 0, 0),
+            requires_tap: false,
+            effect: Effect::UntapTarget { target: TargetSpec::Controller },
+            description: "{4}: Untap Mana Vault.".into(),
+        }],
+        oracle_text: "Mana Vault doesn't untap during your untap step. At the beginning of your upkeep, you may pay {4}. If you don't, Mana Vault deals 1 damage to you. {T}: Add {C}{C}{C}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MOX_AMBER,
+        name: "Mox Amber".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color among legendary creatures and planeswalkers you control.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MOX_DIAMOND,
+        name: "Mox Diamond".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "If Mox Diamond would enter, you may discard a land card instead. If you do, put Mox Diamond onto the battlefield. If you don't, put it into its owner's graveyard. {T}: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MOX_OPAL,
+        name: "Mox Opal".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "Metalcraft — {T}: Add one mana of any color. Activate only if you control three or more artifacts.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MOONSILVER_KEY,
+        name: "Moonsilver Key".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand }),
+        oracle_text: "{1}, {T}, Sacrifice Moonsilver Key: Search your library for an artifact card with a mana ability or a basic land card, reveal it, put it into your hand, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SIMIC_SIGNET,
+        name: "Simic Signet".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "{1}, {T}: Add {G}{U}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SPRINGLEAF_DRUM,
+        name: "Springleaf Drum".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}, Tap an untapped creature you control: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TALISMAN_OF_CURIOSITY,
+        name: "Talisman of Curiosity".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
+        oracle_text: "{T}: Add {C}. {T}: Add {G} or {U}. Talisman of Curiosity deals 1 damage to you.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::AGATHAS_SOUL_CAULDRON,
+        name: "Agatha's Soul Cauldron".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        oracle_text: "You may spend mana as though it were mana of any color to activate abilities of creatures you control. {T}: Exile target card from a graveyard. When a creature card is exiled this way, put a +1/+1 counter on target creature you control. That creature gains all activated abilities of the exiled card.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::THE_ONE_RING,
+        name: "The One Ring".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        keywords: vec![KeywordAbility::Indestructible],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(1, 0, 0, 0, 0, 0),
+            requires_tap: true,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{1}, {T}: Put a burden counter on The One Ring, then draw a card for each burden counter on The One Ring.".into(),
+        }],
+        oracle_text: "Indestructible. When The One Ring enters, if you cast it, you gain protection from everything until your next turn. At the beginning of your upkeep, you lose 1 life for each burden counter on The One Ring. {T}: Put a burden counter on The One Ring, then draw a card for each burden counter on The One Ring.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MIRAGE_MIRROR,
+        name: "Mirage Mirror".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "{2}: Mirage Mirror becomes a copy of target artifact, creature, enchantment, or land until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // ---- Creatures ----
+
+    db.insert(CardDef {
+        id: ids::KINNAN_BONDER_PRODIGY,
+        name: "Kinnan, Bonder Prodigy".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into()), Subtype("Druid".into())],
+        power: Some(2),
+        toughness: Some(2),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(5, 0, 1, 0, 0, 1),
+            requires_tap: false,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom of your library in a random order.".into(),
+        }],
+        oracle_text: "Whenever you tap a nonland permanent for mana, add one mana of any type that permanent produced. {5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom in a random order.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::BIRDS_OF_PARADISE,
+        name: "Birds of Paradise".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Bird".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(0),
+        toughness: Some(1),
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "Flying. {T}: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FYNDHORN_ELVES,
+        name: "Fyndhorn Elves".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elf".into()), Subtype("Druid".into())],
+        power: Some(1),
+        toughness: Some(1),
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::DELIGHTED_HALFLING,
+        name: "Delighted Halfling".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Halfling".into()), Subtype("Citizen".into())],
+        power: Some(1),
+        toughness: Some(2),
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green), ManaAbility::TapForAny],
+        oracle_text: "{T}: Add {G}. {T}: Add one mana of any color. Spend this mana only to cast a legendary spell, and that spell can't be countered.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::BADGERMOLE_CUB,
+        name: "Badgermole Cub".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Badger".into()), Subtype("Mole".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "When this creature enters, earthbend 1. Whenever you tap a creature for mana, add an additional {G}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CLEVER_IMPERSONATOR,
+        name: "Clever Impersonator".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into())],
+        power: Some(0),
+        toughness: Some(0),
+        oracle_text: "You may have Clever Impersonator enter as a copy of any nonland permanent on the battlefield.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::COLOSSAL_SKYTURTLE,
+        name: "Colossal Skyturtle".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 1, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Turtle".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(6),
+        toughness: Some(5),
+        oracle_text: "Flying, ward {2}. Channel — {G}{U}, Discard Colossal Skyturtle: Return target creature to its owner's hand. Channel — {2}{G}, Discard Colossal Skyturtle: Return target permanent card from your graveyard to your hand.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CONSECRATED_SPHINX,
+        name: "Consecrated Sphinx".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Sphinx".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(4),
+        toughness: Some(6),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::OpponentDrawsCard,
+            effect: Effect::DrawCards { count: 2 },
+            description: "Whenever an opponent draws a card, you may draw two cards.".into(),
+        }],
+        oracle_text: "Flying. Whenever an opponent draws a card, you may draw two cards.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::DRIFT_OF_PHANTASMS,
+        name: "Drift of Phantasms".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 3, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Spirit".into())],
+        keywords: vec![KeywordAbility::Flying, KeywordAbility::Defender],
+        power: Some(0),
+        toughness: Some(5),
+        oracle_text: "Flying, defender. Transmute {1}{U}{U}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::ELVISH_SPIRIT_GUIDE,
+        name: "Elvish Spirit Guide".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elf".into()), Subtype("Spirit".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "Exile Elvish Spirit Guide from your hand: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::ENDURANCE,
+        name: "Endurance".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elemental".into()), Subtype("Incarnation".into())],
+        keywords: vec![KeywordAbility::Flash, KeywordAbility::Reach],
+        power: Some(3),
+        toughness: Some(4),
+        oracle_text: "Flash. Reach. When Endurance enters, up to one target player shuffles their graveyard into their library.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::ENDURING_VITALITY,
+        name: "Enduring Vitality".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Enchantment, CardType::Creature],
+        subtypes: vec![Subtype("Elk".into()), Subtype("Glimmer".into())],
+        keywords: vec![KeywordAbility::Vigilance],
+        power: Some(3),
+        toughness: Some(3),
+        oracle_text: "Vigilance. Creatures you control have \"{T}: Add one mana of any color.\" When Enduring Vitality dies, if it was a creature, return it to the battlefield under its owner's control. It's an enchantment.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FAERIE_MASTERMIND,
+        name: "Faerie Mastermind".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Faerie".into()), Subtype("Rogue".into())],
+        keywords: vec![KeywordAbility::Flash, KeywordAbility::Flying],
+        power: Some(2),
+        toughness: Some(1),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::OpponentDrawsCard,
+            effect: Effect::DrawCards { count: 1 },
+            description: "Whenever an opponent draws their second card each turn, you draw a card.".into(),
+        }],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(3, 0, 1, 0, 0, 0),
+            requires_tap: false,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{3}{U}: Each player draws a card.".into(),
+        }],
+        oracle_text: "Flash. Flying. Whenever an opponent draws their second card each turn, you draw a card. {3}{U}: Each player draws a card.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FLESH_DUPLICATE,
+        name: "Flesh Duplicate".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into())],
+        power: Some(0),
+        toughness: Some(0),
+        oracle_text: "You may have Flesh Duplicate enter as a copy of any creature on the battlefield, except it has vanishing 3.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::HIGH_FAE_TRICKSTER,
+        name: "High Fae Trickster".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Faerie".into()), Subtype("Wizard".into())],
+        keywords: vec![KeywordAbility::Flash, KeywordAbility::Flying],
+        power: Some(4),
+        toughness: Some(2),
+        oracle_text: "Flash. Flying. You may cast spells as though they had flash.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::HULLBREAKER_HORROR,
+        name: "Hullbreaker Horror".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Kraken".into()), Subtype("Horror".into())],
+        keywords: vec![KeywordAbility::Flash],
+        power: Some(7),
+        toughness: Some(8),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::YouCastSpell,
+            effect: Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::AnyNonlandPermanent },
+            description: "Whenever you cast a spell, choose up to one: return target nonland permanent to its owner's hand; or counter target spell.".into(),
+        }],
+        oracle_text: "Flash. This spell can't be countered. Whenever you cast a spell, choose up to one — Return target nonland permanent to its owner's hand; or counter target spell.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MOCKINGBIRD,
+        name: "Mockingbird".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Bird".into()), Subtype("Bard".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Flying. You may have Mockingbird enter as a copy of any creature on the battlefield with mana value less than or equal to the amount of mana spent to cast Mockingbird, except it's a Bird in addition to its other types and it has flying.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::NEZAHAL_PRIMAL_TIDE,
+        name: "Nezahal, Primal Tide".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Elder".into()), Subtype("Dinosaur".into())],
+        power: Some(7),
+        toughness: Some(7),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::OpponentCastsNoncreatureSpell,
+            effect: Effect::DrawCards { count: 1 },
+            description: "Whenever an opponent casts a noncreature spell, draw a card.".into(),
+        }],
+        oracle_text: "This spell can't be countered. Whenever an opponent casts a noncreature spell, draw a card. Discard three cards: Exile Nezahal. Return it to the battlefield tapped under its owner's control at the beginning of the next end step.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::NYXBLOOM_ANCIENT,
+        name: "Nyxbloom Ancient".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 3)),
+        card_types: vec![CardType::Creature, CardType::Enchantment],
+        subtypes: vec![Subtype("Elemental".into())],
+        keywords: vec![KeywordAbility::Trample],
+        power: Some(5),
+        toughness: Some(5),
+        oracle_text: "Trample. If you tap a permanent for mana, it produces three times as much of that mana instead.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::PHYREXIAN_METAMORPH,
+        name: "Phyrexian Metamorph".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Phyrexian".into()), Subtype("Shapeshifter".into())],
+        power: Some(0),
+        toughness: Some(0),
+        oracle_text: "({U/P} can be paid with either {U} or 2 life.) You may have Phyrexian Metamorph enter as a copy of any artifact or creature on the battlefield, except it's an artifact in addition to its other types.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SEEDBORN_MUSE,
+        name: "Seedborn Muse".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Spirit".into())],
+        power: Some(2),
+        toughness: Some(4),
+        oracle_text: "Untap all permanents you control during each other player's untap step.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::THRASIOS_TRITON_HERO,
+        name: "Thrasios, Triton Hero".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Merfolk".into()), Subtype("Wizard".into())],
+        power: Some(1),
+        toughness: Some(3),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(4, 0, 0, 0, 0, 0),
+            requires_tap: false,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{4}: Scry 1, then reveal the top card of your library. If it's a land card, put it onto the battlefield tapped. Otherwise, draw a card.".into(),
+        }],
+        oracle_text: "Partner. {4}: Scry 1, then reveal the top card of your library. If it's a land card, put it onto the battlefield tapped. Otherwise, draw a card.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TIDESPOUT_TYRANT,
+        name: "Tidespout Tyrant".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 3, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Djinn".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(5),
+        toughness: Some(5),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::YouCastSpell,
+            effect: Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::AnyPermanent },
+            description: "Whenever you cast a spell, return target permanent to its owner's hand.".into(),
+        }],
+        oracle_text: "Flying. Whenever you cast a spell, return target permanent to its owner's hand.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::TROPHY_MAGE,
+        name: "Trophy Mage".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Wizard".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::EntersBattlefield,
+            effect: Effect::SearchLibrary { destination: ZoneType::Hand },
+            description: "When Trophy Mage enters, you may search your library for an artifact card with mana value 3, reveal it, put it into your hand, then shuffle.".into(),
+        }],
+        oracle_text: "When Trophy Mage enters, you may search your library for an artifact card with mana value 3, reveal it, put it into your hand, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WAN_SHI_TONG,
+        name: "Wan Shi Tong, Librarian".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Bird".into()), Subtype("Spirit".into())],
+        keywords: vec![KeywordAbility::Flash, KeywordAbility::Flying, KeywordAbility::Vigilance],
+        power: Some(1),
+        toughness: Some(1),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::EntersBattlefield,
+            effect: Effect::DrawCards { count: 1 },
+            description: "When Wan Shi Tong enters, put X +1/+1 counters on him. Then draw half X cards, rounded down.".into(),
+        }],
+        oracle_text: "Flash, flying, vigilance. When Wan Shi Tong enters, put X +1/+1 counters on him. Then draw half X cards, rounded down. Whenever an opponent searches their library, put a +1/+1 counter on Wan Shi Tong and draw a card.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WANDERING_ARCHAIC,
+        name: "Wandering Archaic // Explore the Vastlands".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Avatar".into())],
+        power: Some(4),
+        toughness: Some(4),
+        oracle_text: "Whenever an opponent casts an instant or sorcery spell, they may pay {2}. If they don't, you may copy that spell. You may choose new targets for the copy.".into(),
+        ..Default::default()
+    });
+
+    // ---- Instants ----
+
+    db.insert(CardDef {
+        id: ids::AN_OFFER_YOU_CANT_REFUSE,
+        name: "An Offer You Can't Refuse".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target noncreature spell. Its controller creates two Treasure tokens.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CHORD_OF_CALLING,
+        name: "Chord of Calling".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 3)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "Convoke. Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CROP_ROTATION,
+        name: "Crop Rotation".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "As an additional cost to cast this spell, sacrifice a land. Search your library for a land card, put that card onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::CYCLONIC_RIFT,
+        name: "Cyclonic Rift".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::AnyNonlandPermanent }),
+        oracle_text: "Return target nonland permanent you don't control to its owner's hand. Overload {6}{U} (You may cast this spell for its overload cost. If you do, change 'target' to 'each'.)".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FIERCE_GUARDIANSHIP,
+        name: "Fierce Guardianship".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "If you control a commander, you may cast this spell without paying its mana cost. Counter target noncreature spell.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FLUSTERSTORM,
+        name: "Flusterstorm".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target instant or sorcery spell unless its controller pays {1}. Storm.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FORCE_OF_NEGATION,
+        name: "Force of Negation".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "If it's not your turn, you may exile a blue card from your hand rather than pay this spell's mana cost. Counter target noncreature spell. If that spell is countered this way, exile it instead of putting it into its owner's graveyard.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::FORCE_OF_WILL,
+        name: "Force of Will".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "You may pay 1 life and exile a blue card from your hand rather than pay this spell's mana cost. Counter target spell.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::INTO_THE_FLOOD_MAW,
+        name: "Into the Flood Maw".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::AnyCreature }),
+        oracle_text: "Gift a tapped Fish. Return target creature an opponent controls to its owner's hand. If the gift was promised, instead return target nonland permanent an opponent controls to its owner's hand.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MENTAL_MISSTEP,
+        name: "Mental Misstep".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "({U/P} can be paid with either {U} or 2 life.) Counter target spell with mana value 1.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MINDBREAK_TRAP,
+        name: "Mindbreak Trap".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "If an opponent cast three or more spells this turn, you may pay {0} rather than pay this spell's mana cost. Exile any number of target spells.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MYSTICAL_TUTOR,
+        name: "Mystical Tutor".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library }),
+        oracle_text: "Search your library for an instant or sorcery card, reveal it, then shuffle and put that card on top.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::NOXIOUS_REVIVAL,
+        name: "Noxious Revival".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::ReturnToTopOfLibrary { target: TargetSpec::NoTarget }),
+        oracle_text: "({G/P} can be paid with either {G} or 2 life.) Put target card from a graveyard on top of its owner's library.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::PACT_OF_NEGATION,
+        name: "Pact of Negation".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target spell. At the beginning of your next upkeep, pay {3}{U}{U}. If you don't, you lose the game.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::SWAN_SONG,
+        name: "Swan Song".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target enchantment, instant, or sorcery spell. Its controller creates a 2/2 blue Bird creature token with flying.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::VEIL_OF_SUMMER,
+        name: "Veil of Summer".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DrawCards { count: 1 }),
+        oracle_text: "Draw a card if an opponent has cast a blue or black spell this turn. Spells you control can't be countered this turn. You and permanents you control gain hexproof from blue and from black until end of turn.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WHIR_OF_INVENTION,
+        name: "Whir of Invention".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 3, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "Improvise. Search your library for an artifact card with mana value X or less, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::WORLDLY_TUTOR,
+        name: "Worldly Tutor".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library }),
+        oracle_text: "Search your library for a creature card, reveal it, then shuffle and put that card on top.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::MUDDLE_THE_MIXTURE,
+        name: "Muddle the Mixture".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target instant or sorcery spell. Transmute {1}{U}{U}.".into(),
+        ..Default::default()
+    });
+
+    // ---- Sorceries ----
+
+    db.insert(CardDef {
+        id: ids::FINALE_OF_DEVASTATION,
+        name: "Finale of Devastation".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "Search your library and/or graveyard for a creature card with mana value X or less and put it onto the battlefield. If you search your library this way, shuffle. If X is 10 or more, creatures you control get +X/+X and gain haste until end of turn.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::GREEN_SUNS_ZENITH,
+        name: "Green Sun's Zenith".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "Search your library for a green creature card with mana value X or less, put it onto the battlefield, then shuffle. Shuffle Green Sun's Zenith into its owner's library.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::NATURES_RHYTHM,
+        name: "Nature's Rhythm".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        oracle_text: "Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle. Harmonize {X}{G}{G}{G}{G}.".into(),
+        ..Default::default()
+    });
+
+    // ---- Enchantments ----
+
+    db.insert(CardDef {
+        id: ids::MYSTIC_REMORA,
+        name: "Mystic Remora".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::OpponentCastsNoncreatureSpell,
+            effect: Effect::DrawCards { count: 1 },
+            description: "Whenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}.".into(),
+        }],
+        oracle_text: "Cumulative upkeep {1}. Whenever an opponent casts a noncreature spell, you may draw a card unless that player pays {4}.".into(),
+        ..Default::default()
+    });
+
+    db.insert(CardDef {
+        id: ids::RHYSTIC_STUDY,
+        name: "Rhystic Study".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::OpponentCastsSpell,
+            effect: Effect::DrawCards { count: 1 },
+            description: "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.".into(),
+        }],
+        oracle_text: "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.".into(),
+        ..Default::default()
+    });
+
+    // ---- Planeswalkers ----
+
+    db.insert(CardDef {
+        id: ids::TEZZERET_THE_SEEKER,
+        name: "Tezzeret the Seeker".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Planeswalker],
+        subtypes: vec![Subtype("Tezzeret".into())],
+        starting_loyalty: Some(4),
+        oracle_text: "+1: Untap up to two target artifacts. -X: Search your library for an artifact card with mana value X or less, put it onto the battlefield, then shuffle. -5: Artifacts you control become artifact creatures with base power and toughness 5/5 until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // ---- DFC / Battle cards ----
+
+    // Bridgeworks Battle // Tanglespan Bridgeworks (front face: sorcery)
+    db.insert(CardDef {
+        id: ids::BRIDGEWORKS_BATTLE,
+        name: "Bridgeworks Battle // Tanglespan Bridgeworks".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::Multiple(vec![
+            Effect::Buff { power: 2, toughness: 2, until_eot: true },
+        ])),
+        oracle_text: "Target creature you control gets +2/+2 until end of turn. It fights up to one target creature you don't control. // Tanglespan Bridgeworks — Land. As this enters, you may pay 3 life. If you don't, it enters tapped. {T}: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    // Disciple of Freyalise // Garden of Freyalise (front face: creature)
+    db.insert(CardDef {
+        id: ids::DISCIPLE_OF_FREYALISE,
+        name: "Disciple of Freyalise // Garden of Freyalise".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 3)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elf".into()), Subtype("Druid".into())],
+        power: Some(3),
+        toughness: Some(3),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::EntersBattlefield,
+            effect: Effect::DrawCards { count: 1 },
+            description: "When Disciple of Freyalise enters, you may sacrifice another creature. If you do, you gain X life and draw X cards, where X is that creature's power.".into(),
+        }],
+        oracle_text: "When Disciple of Freyalise enters, you may sacrifice another creature. If you do, you gain X life and draw X cards, where X is that creature's power. // Garden of Freyalise — Land. As this enters, you may pay 3 life. If you don't, it enters tapped. {T}: Add {G}.".into(),
+        ..Default::default()
+    });
+
+    // Hydroelectric Specimen // Hydroelectric Laboratory (front face: creature)
+    db.insert(CardDef {
+        id: ids::HYDROELECTRIC_SPECIMEN,
+        name: "Hydroelectric Specimen // Hydroelectric Laboratory".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Weird".into())],
+        keywords: vec![KeywordAbility::Flash],
+        power: Some(1),
+        toughness: Some(4),
+        oracle_text: "Flash. When this creature enters, you may change the target of target instant or sorcery spell with a single target to this creature. // Hydroelectric Laboratory — Land. Enters tapped. {T}: Add {U}.".into(),
+        ..Default::default()
+    });
+
+    // Invasion of Ikoria // Zilortha, Apex of Ikoria (battle front face)
+    db.insert(CardDef {
+        id: ids::INVASION_OF_IKORIA,
+        name: "Invasion of Ikoria // Zilortha, Apex of Ikoria".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand }),
+        oracle_text: "When Invasion of Ikoria enters, search your library for a non-Human creature card with mana value X or less, reveal it, put it into your hand, then shuffle. // Zilortha, Apex of Ikoria — 7/3 Dinosaur. Trample. Each creature you control with power greater than its toughness assigns combat damage equal to its power rather than its toughness.".into(),
+        ..Default::default()
+    });
+
+    // Sink into Stupor // Soporific Springs (front face: instant)
+    db.insert(CardDef {
+        id: ids::SINK_INTO_STUPOR,
+        name: "Sink into Stupor // Soporific Springs".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 1, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::AnyNonlandPermanent }),
+        oracle_text: "Choose one — Target opponent discards two cards; or return target nonland permanent to its owner's hand. // Soporific Springs — Land. Enters tapped. {T}: Add {U} or {B}.".into(),
+        ..Default::default()
+    });
+
     db
 }
 
@@ -3079,6 +4346,137 @@ pub fn thrun_commander_deck() -> (Vec<CardId>, CardId) {
     for _ in 0..(100 - nonland_count) {
         deck.push(ids::FOREST);
     }
+
+    assert_eq!(deck.len(), 100);
+    (deck, commander)
+}
+
+/// Build the Kinnan, Bonder Prodigy Commander deck (100-card singleton).
+///
+/// Returns (deck, commander_id).
+pub fn kinnan_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::KINNAN_BONDER_PRODIGY;
+    let mut deck = Vec::new();
+
+    // Commander
+    deck.push(commander);
+
+    // Lands
+    deck.push(ids::ANCIENT_TOMB);
+    deck.push(ids::BOSEIJU_WHO_ENDURES);
+    deck.push(ids::BREEDING_POOL);
+    deck.push(ids::COMMAND_TOWER);
+    deck.push(ids::FLOODED_STRAND);
+    deck.push(ids::GAEAS_CRADLE);
+    deck.push(ids::GEMSTONE_CAVERNS);
+    deck.push(ids::INVENTORS_FAIR);
+    deck.push(ids::ISLAND);
+    deck.push(ids::MINAMO_SCHOOL);
+    deck.push(ids::MISTY_RAINFOREST);
+    deck.push(ids::MISTRISE_VILLAGE);
+    deck.push(ids::OTAWARA_SOARING_CITY);
+    deck.push(ids::SEAT_OF_THE_SYNOD);
+    deck.push(ids::SHIFTING_WOODLAND);
+    deck.push(ids::SNOW_COVERED_FOREST);
+    deck.push(ids::SNOW_COVERED_ISLAND);
+    deck.push(ids::TREASURE_VAULT);
+    deck.push(ids::TREE_OF_TALES);
+    deck.push(ids::TROPICAL_ISLAND);
+    deck.push(ids::WATERLOGGED_GROVE);
+    deck.push(ids::WINDSWEPT_HEATH);
+    deck.push(ids::YAVIMAYA_COAST);
+    deck.push(ids::FOREST);
+
+    // Mana artifacts
+    deck.push(ids::ARCANE_SIGNET);
+    deck.push(ids::BASALT_MONOLITH);
+    deck.push(ids::CHROME_MOX);
+    deck.push(ids::FELLWAR_STONE);
+    deck.push(ids::GRIM_MONOLITH);
+    deck.push(ids::LOTUS_PETAL);
+    deck.push(ids::MANA_VAULT);
+    deck.push(ids::MOX_AMBER);
+    deck.push(ids::MOX_DIAMOND);
+    deck.push(ids::MOX_OPAL);
+    deck.push(ids::MOONSILVER_KEY);
+    deck.push(ids::SIMIC_SIGNET);
+    deck.push(ids::SOL_RING);
+    deck.push(ids::SPRINGLEAF_DRUM);
+    deck.push(ids::TALISMAN_OF_CURIOSITY);
+
+    // Other artifacts
+    deck.push(ids::AGATHAS_SOUL_CAULDRON);
+    deck.push(ids::THE_ONE_RING);
+    deck.push(ids::MIRAGE_MIRROR);
+
+    // Creatures
+    deck.push(ids::BIRDS_OF_PARADISE);
+    deck.push(ids::FYNDHORN_ELVES);
+    deck.push(ids::LLANOWAR_ELVES);
+    deck.push(ids::ELVISH_MYSTIC);
+    deck.push(ids::DELIGHTED_HALFLING);
+    deck.push(ids::BADGERMOLE_CUB);
+    deck.push(ids::CLEVER_IMPERSONATOR);
+    deck.push(ids::COLOSSAL_SKYTURTLE);
+    deck.push(ids::CONSECRATED_SPHINX);
+    deck.push(ids::DRIFT_OF_PHANTASMS);
+    deck.push(ids::ELVISH_SPIRIT_GUIDE);
+    deck.push(ids::ENDURANCE);
+    deck.push(ids::ENDURING_VITALITY);
+    deck.push(ids::FAERIE_MASTERMIND);
+    deck.push(ids::FLESH_DUPLICATE);
+    deck.push(ids::HIGH_FAE_TRICKSTER);
+    deck.push(ids::HULLBREAKER_HORROR);
+    deck.push(ids::MOCKINGBIRD);
+    deck.push(ids::NEZAHAL_PRIMAL_TIDE);
+    deck.push(ids::NYXBLOOM_ANCIENT);
+    deck.push(ids::PHYREXIAN_METAMORPH);
+    deck.push(ids::SEEDBORN_MUSE);
+    deck.push(ids::THRASIOS_TRITON_HERO);
+    deck.push(ids::TIDESPOUT_TYRANT);
+    deck.push(ids::TROPHY_MAGE);
+    deck.push(ids::WAN_SHI_TONG);
+    deck.push(ids::WANDERING_ARCHAIC);
+
+    // Instants
+    deck.push(ids::AN_OFFER_YOU_CANT_REFUSE);
+    deck.push(ids::CHORD_OF_CALLING);
+    deck.push(ids::CROP_ROTATION);
+    deck.push(ids::CYCLONIC_RIFT);
+    deck.push(ids::FIERCE_GUARDIANSHIP);
+    deck.push(ids::FLUSTERSTORM);
+    deck.push(ids::FORCE_OF_NEGATION);
+    deck.push(ids::FORCE_OF_WILL);
+    deck.push(ids::INTO_THE_FLOOD_MAW);
+    deck.push(ids::MENTAL_MISSTEP);
+    deck.push(ids::MINDBREAK_TRAP);
+    deck.push(ids::MYSTICAL_TUTOR);
+    deck.push(ids::NOXIOUS_REVIVAL);
+    deck.push(ids::PACT_OF_NEGATION);
+    deck.push(ids::SWAN_SONG);
+    deck.push(ids::VEIL_OF_SUMMER);
+    deck.push(ids::WHIR_OF_INVENTION);
+    deck.push(ids::WORLDLY_TUTOR);
+    deck.push(ids::MUDDLE_THE_MIXTURE);
+
+    // Sorceries
+    deck.push(ids::FINALE_OF_DEVASTATION);
+    deck.push(ids::GREEN_SUNS_ZENITH);
+    deck.push(ids::NATURES_RHYTHM);
+
+    // Enchantments
+    deck.push(ids::MYSTIC_REMORA);
+    deck.push(ids::RHYSTIC_STUDY);
+
+    // Planeswalker
+    deck.push(ids::TEZZERET_THE_SEEKER);
+
+    // DFC / Battle cards
+    deck.push(ids::BRIDGEWORKS_BATTLE);
+    deck.push(ids::DISCIPLE_OF_FREYALISE);
+    deck.push(ids::HYDROELECTRIC_SPECIMEN);
+    deck.push(ids::INVASION_OF_IKORIA);
+    deck.push(ids::SINK_INTO_STUPOR);
 
     assert_eq!(deck.len(), 100);
     (deck, commander)

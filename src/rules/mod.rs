@@ -68,6 +68,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let db = state.card_db();
             let inst = &state.objects[&obj_id];
             let def = db.get(inst.card_def_id).unwrap().clone();
+            let is_creature = def.is_creature();
 
             // Pay mana cost
             if let Some(ref cost) = def.mana_cost {
@@ -99,6 +100,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 from: Zone::Hand,
                 to: Zone::Stack,
             });
+
+            // Fire spell-cast triggers (YouCastSpell, OpponentCastsSpell, etc.)
+            fire_spell_cast_triggers(state, player, is_creature);
 
             state.consecutive_passes = 0;
         }
@@ -134,6 +138,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                         if let Some(&color) = colors.first() {
                             state.players[player].mana_pool.add_color(color, 1);
                         }
+                    }
+                    ManaAbility::TapForColorlessAmount(n) => {
+                        state.players[player].mana_pool.colorless += n;
                     }
                 }
             }
@@ -292,6 +299,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let db = state.card_db();
             let inst = &state.objects[&obj_id];
             let def = db.get(inst.card_def_id).unwrap().clone();
+            let is_creature = def.is_creature();
 
             // Pay mana cost with commander tax
             if let Some(ref cost) = def.mana_cost {
@@ -327,6 +335,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 from: Zone::Command,
                 to: Zone::Stack,
             });
+
+            // Fire spell-cast triggers (YouCastSpell, OpponentCastsSpell, etc.)
+            fire_spell_cast_triggers(state, player, is_creature);
 
             state.consecutive_passes = 0;
         }
@@ -827,6 +838,73 @@ fn resolve_effect(
             }
         }
 
+        Effect::SearchLibrary { destination } => {
+            // Simplified tutor: move the top card of the library to the destination.
+            // A real implementation would let the player search and choose, but
+            // for simulation purposes we move the first card.
+            if !state.players[controller].library.is_empty() {
+                let card_obj = state.players[controller].library.remove(0);
+                state.move_object(card_obj, ZoneType::Library, *destination);
+            }
+        }
+
+        Effect::BounceAllNonlandOpponents => {
+            // Bounce all nonland permanents opponents control to their owners' hands.
+            let db = state.card_db();
+            let to_bounce: Vec<ObjectId> = state
+                .battlefield
+                .iter()
+                .copied()
+                .filter(|&id| {
+                    if let Some(inst) = state.objects.get(&id) {
+                        if inst.controller == controller {
+                            return false; // skip own permanents
+                        }
+                        if let Some(def) = db.get(inst.card_def_id) {
+                            return !def.is_land();
+                        }
+                    }
+                    false
+                })
+                .collect();
+            for id in to_bounce {
+                state.move_object(id, ZoneType::Battlefield, ZoneType::Hand);
+            }
+        }
+
+        Effect::ReturnToTopOfLibrary { .. } => {
+            // Put target card from graveyard on top of owner's library.
+            for target in targets {
+                match target {
+                    Target::Object(obj_id) => {
+                        if let Some(inst) = state.objects.get(obj_id) {
+                            let owner = inst.owner;
+                            state.move_object(*obj_id, ZoneType::Graveyard, ZoneType::Library);
+                            // Move to front (top) of library
+                            if let Some(pos) = state.players[owner].library.iter().position(|&id| id == *obj_id) {
+                                let id = state.players[owner].library.remove(pos);
+                                state.players[owner].library.insert(0, id);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Effect::UntapTarget { .. } => {
+            for target in targets {
+                match target {
+                    Target::Object(obj_id) => {
+                        if let Some(inst) = state.objects.get_mut(obj_id) {
+                            inst.tapped = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
@@ -976,6 +1054,84 @@ fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
 pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) -> bool {
     check_triggers(state, condition, source_hint);
     flush_triggers(state)
+}
+
+/// Fire spell-cast triggers for a spell that was just cast.
+/// `caster` is the player who cast the spell. `is_creature` indicates whether
+/// the spell is a creature spell (relevant for OpponentCastsNoncreatureSpell).
+fn fire_spell_cast_triggers(state: &mut GameState, caster: PlayerIndex, is_creature: bool) {
+    let triggers: Vec<PendingTrigger> = {
+        let db = state.card_db();
+        let mut found = Vec::new();
+
+        for &obj_id in &state.battlefield {
+            let inst = &state.objects[&obj_id];
+            let controller = inst.controller;
+            let def = match db.get(inst.card_def_id) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            for (i, trigger) in def.triggered_abilities.iter().enumerate() {
+                let matches = match trigger.trigger {
+                    TriggerCondition::YouCastSpell => controller == caster,
+                    TriggerCondition::OpponentCastsSpell => controller != caster,
+                    TriggerCondition::OpponentCastsNoncreatureSpell => {
+                        controller != caster && !is_creature
+                    }
+                    _ => false,
+                };
+                if matches {
+                    found.push(PendingTrigger {
+                        source_id: obj_id,
+                        ability_index: i,
+                        controller,
+                        targets: vec![],
+                    });
+                }
+            }
+        }
+        found
+    };
+
+    state.pending_triggers.extend(triggers);
+    let _ = flush_triggers(state);
+}
+
+/// Fire card-draw triggers when a player draws a card.
+/// `drawing_player` is the player who drew. This fires `OpponentDrawsCard`
+/// on permanents controlled by each opponent of the drawing player.
+fn fire_card_draw_triggers(state: &mut GameState, drawing_player: PlayerIndex) {
+    let triggers: Vec<PendingTrigger> = {
+        let db = state.card_db();
+        let mut found = Vec::new();
+
+        for &obj_id in &state.battlefield {
+            let inst = &state.objects[&obj_id];
+            let controller = inst.controller;
+            let def = match db.get(inst.card_def_id) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            for (i, trigger) in def.triggered_abilities.iter().enumerate() {
+                if trigger.trigger == TriggerCondition::OpponentDrawsCard
+                    && controller != drawing_player
+                {
+                    found.push(PendingTrigger {
+                        source_id: obj_id,
+                        ability_index: i,
+                        controller,
+                        targets: vec![],
+                    });
+                }
+            }
+        }
+        found
+    };
+
+    state.pending_triggers.extend(triggers);
+    let _ = flush_triggers(state);
 }
 
 // ========================================================================
@@ -1469,6 +1625,9 @@ pub fn draw_cards(state: &mut GameState, player: PlayerIndex, count: usize) {
             from: Zone::Library,
             to: Zone::Hand,
         });
+
+        // Fire OpponentDrawsCard triggers (e.g. Consecrated Sphinx)
+        fire_card_draw_triggers(state, player);
     }
 }
 
@@ -1790,7 +1949,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
 /// A tap decision: which land to tap and what mana it produces.
 enum TapDecision {
     Color(ObjectId, crate::mana::Color),
-    Colorless(ObjectId),
+    Colorless(ObjectId, u32),
 }
 
 /// Auto-tap lands to pay a mana cost.
@@ -1877,23 +2036,31 @@ pub fn auto_tap_lands(
                 };
 
                 if let Some(ma) = def.mana_abilities.first() {
-                    match ma {
+                    let produced = match ma {
                         ManaAbility::TapForColor(c) => {
                             decisions.push(TapDecision::Color(land_id, *c));
+                            1
                         }
-                        ManaAbility::TapForColorless | ManaAbility::TapForAny => {
-                            decisions.push(TapDecision::Colorless(land_id));
+                        ManaAbility::TapForColorless
+                        | ManaAbility::TapForAny => {
+                            decisions.push(TapDecision::Colorless(land_id, 1));
+                            1
+                        }
+                        ManaAbility::TapForColorlessAmount(n) => {
+                            decisions.push(TapDecision::Colorless(land_id, *n));
+                            *n
                         }
                         ManaAbility::TapForChoice(colors) => {
                             if let Some(&c) = colors.first() {
                                 decisions.push(TapDecision::Color(land_id, c));
                             } else {
-                                decisions.push(TapDecision::Colorless(land_id));
+                                decisions.push(TapDecision::Colorless(land_id, 1));
                             }
+                            1
                         }
-                    }
+                    };
                     tapped_set.insert(land_id);
-                    still_need -= 1;
+                    still_need = still_need.saturating_sub(produced);
                 }
             }
         }
@@ -1908,8 +2075,8 @@ pub fn auto_tap_lands(
                     inst.tapped = true;
                 }
             }
-            TapDecision::Colorless(land_id) => {
-                state.players[player].mana_pool.colorless += 1;
+            TapDecision::Colorless(land_id, amount) => {
+                state.players[player].mana_pool.colorless += amount;
                 if let Some(inst) = state.objects.get_mut(&land_id) {
                     inst.tapped = true;
                 }

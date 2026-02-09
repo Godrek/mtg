@@ -435,6 +435,9 @@ fn can_potentially_pay(
                         pool.add_color(color, 1);
                     }
                 }
+                ManaAbility::TapForColorlessAmount(n) => {
+                    pool.colorless += n;
+                }
             }
         }
     }
