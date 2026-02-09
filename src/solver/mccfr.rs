@@ -76,11 +76,15 @@ pub struct McfrConfig {
     pub max_actions: u32,
 }
 
+/// Default maximum actions before declaring a draw in MCCFR training.
+/// Prevents infinite loops while being high enough for realistic games.
+pub const DEFAULT_MAX_ACTIONS: u32 = 10_000;
+
 impl Default for McfrConfig {
     fn default() -> Self {
         McfrConfig {
             max_depth: 0, // unlimited
-            max_actions: 10_000,
+            max_actions: DEFAULT_MAX_ACTIONS,
         }
     }
 }

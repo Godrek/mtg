@@ -1963,13 +1963,14 @@ fn test_sba_recurrence_in_full_game_context() {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
     }
 
-    // Player 0 has Fiery Conclusion Elemental and a Mountain
+    // Player 0 has Fiery Conclusion Elemental and lands.
+    // Cost is {2}{W}, so we need 1 Plains (for W) and 2 Mountains (for generic).
     let elem_hand = state.create_card_in_zone(
         sample::ids::FIERY_CONCLUSION_ELEMENTAL,
         0,
         ZoneType::Hand,
     );
-    let m1 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
+    let m1 = state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Battlefield);
     let m2 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
     let m3 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
     for id in [m1, m2, m3] {
@@ -4266,4 +4267,73 @@ fn test_new_kinnan_deck_cards_in_db() {
     let tezzeret = db.get(sample::ids::TEZZERET_THE_SEEKER).unwrap();
     assert!(tezzeret.card_types.contains(&mtg_gto::card::CardType::Planeswalker));
     assert_eq!(tezzeret.starting_loyalty, Some(4));
+}
+
+#[test]
+fn test_commander_snapshot_restore() {
+    // Test that snapshot/restore preserves commander-specific state:
+    // command_zone, commander_card_id, commander_object_id, commander_tax,
+    // and commander_damage_received.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+
+    let (deck0, cmd0_card) = sample::brimaz_commander_deck();
+    let (deck1, cmd1_card) = sample::thrun_commander_deck();
+    rules::setup_commander_game(&mut state, &deck0, &deck1, cmd0_card, cmd1_card);
+
+    // Verify commander setup: 40 life, command zones populated
+    assert_eq!(state.players[0].life, 40, "Commander starting life should be 40");
+    assert_eq!(state.players[1].life, 40, "Commander starting life should be 40");
+    assert_eq!(state.players[0].command_zone.len(), 1, "Player 0 should have a commander");
+    assert_eq!(state.players[1].command_zone.len(), 1, "Player 1 should have a commander");
+    assert!(state.players[0].commander_object_id.is_some());
+    assert!(state.players[1].commander_object_id.is_some());
+
+    let cmd0_obj = state.players[0].command_zone[0];
+    let cmd1_obj = state.players[1].command_zone[0];
+
+    // Simulate commander tax and damage
+    state.players[0].commander_tax = 2;
+    state.players[1].commander_damage_received[0] = 7;
+
+    // Take snapshot
+    let snap = state.snapshot();
+
+    // Mutate state after snapshot
+    state.players[0].life -= 10;
+    state.players[1].life -= 5;
+    state.players[0].command_zone.clear();
+    state.players[0].commander_tax = 5;
+    state.players[1].commander_damage_received[0] = 21;
+
+    // Verify mutations took effect
+    assert_eq!(state.players[0].life, 30);
+    assert!(state.players[0].command_zone.is_empty());
+    assert_eq!(state.players[0].commander_tax, 5);
+    assert_eq!(state.players[1].commander_damage_received[0], 21);
+
+    // Restore from snapshot
+    state.restore(snap);
+
+    // Verify all commander state was restored
+    assert_eq!(state.players[0].life, 40, "Life should be restored to 40");
+    assert_eq!(state.players[1].life, 40, "Life should be restored to 40");
+    assert_eq!(state.players[0].command_zone.len(), 1, "Command zone should be restored");
+    assert_eq!(state.players[0].command_zone[0], cmd0_obj, "Commander ID should match");
+    assert_eq!(state.players[1].command_zone.len(), 1, "Command zone should be restored");
+    assert_eq!(state.players[1].command_zone[0], cmd1_obj, "Commander ID should match");
+    assert_eq!(state.players[0].commander_tax, 2, "Commander tax should be restored");
+    assert_eq!(
+        state.players[1].commander_damage_received[0], 7,
+        "Commander damage should be restored to pre-snapshot value"
+    );
+    assert_eq!(
+        state.players[0].commander_card_id, Some(cmd0_card),
+        "Commander card ID should be restored"
+    );
+    assert_eq!(
+        state.players[1].commander_card_id, Some(cmd1_card),
+        "Commander card ID should be restored"
+    );
 }

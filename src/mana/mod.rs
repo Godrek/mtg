@@ -43,6 +43,12 @@ pub struct ManaCost {
     pub black: u32,
     pub red: u32,
     pub green: u32,
+    /// Number of {X} symbols in the cost.
+    pub x_count: u32,
+    /// Phyrexian mana symbols — each can be paid with the given color or 2 life.
+    pub phyrexian: Vec<Color>,
+    /// Hybrid mana symbols — each can be paid with either color.
+    pub hybrid: Vec<(Color, Color)>,
 }
 
 impl ManaCost {
@@ -54,6 +60,9 @@ impl ManaCost {
             black: 0,
             red: 0,
             green: 0,
+            x_count: 0,
+            phyrexian: Vec::new(),
+            hybrid: Vec::new(),
         }
     }
 
@@ -65,12 +74,23 @@ impl ManaCost {
             black,
             red,
             green,
+            x_count: 0,
+            phyrexian: Vec::new(),
+            hybrid: Vec::new(),
         }
     }
 
     /// Converted mana cost / mana value.
+    /// X contributes 0 (when not on the stack). Each hybrid and phyrexian symbol contributes 1.
     pub fn cmc(&self) -> u32 {
-        self.generic + self.white + self.blue + self.black + self.red + self.green
+        self.generic
+            + self.white
+            + self.blue
+            + self.black
+            + self.red
+            + self.green
+            + self.phyrexian.len() as u32
+            + self.hybrid.len() as u32
     }
 
     /// Get the amount of a specific color required.
@@ -84,7 +104,7 @@ impl ManaCost {
         }
     }
 
-    /// Parse a mana cost string like "{2}{W}{U}" or "{3}{B}{B}".
+    /// Parse a mana cost string like "{2}{W}{U}", "{3}{B}{B}", "{W/U}", "{R/P}", or "{X}{X}{R}".
     pub fn parse(s: &str) -> Option<ManaCost> {
         let mut cost = ManaCost::zero();
         let mut chars = s.chars().peekable();
@@ -103,7 +123,22 @@ impl ManaCost {
                     "B" => cost.black += 1,
                     "R" => cost.red += 1,
                     "G" => cost.green += 1,
-                    "X" => {} // X costs handled separately
+                    "X" => cost.x_count += 1,
+                    other if other.contains("/P") => {
+                        // Phyrexian mana: {W/P}, {U/P}, {B/P}, {R/P}, {G/P}
+                        let color_char = other.chars().next()?;
+                        let color = parse_color_char(color_char)?;
+                        cost.phyrexian.push(color);
+                    }
+                    other if other.contains('/') => {
+                        // Hybrid mana: {W/U}, {B/R}, etc.
+                        let parts: Vec<&str> = other.split('/').collect();
+                        if parts.len() == 2 {
+                            let a = parse_color_char(parts[0].chars().next()?)?;
+                            let b = parse_color_char(parts[1].chars().next()?)?;
+                            cost.hybrid.push((a, b));
+                        }
+                    }
                     n => {
                         if let Ok(v) = n.parse::<u32>() {
                             cost.generic += v;
@@ -115,30 +150,62 @@ impl ManaCost {
         Some(cost)
     }
 
-    /// Colors present in this mana cost.
+    /// Colors present in this mana cost (including those in hybrid and phyrexian symbols).
     pub fn colors(&self) -> Vec<Color> {
+        let mut seen = std::collections::HashSet::new();
         let mut colors = Vec::new();
-        if self.white > 0 {
-            colors.push(Color::White);
+
+        // Regular colored mana
+        for &(amount, color) in &[
+            (self.white, Color::White),
+            (self.blue, Color::Blue),
+            (self.black, Color::Black),
+            (self.red, Color::Red),
+            (self.green, Color::Green),
+        ] {
+            if amount > 0 && seen.insert(color) {
+                colors.push(color);
+            }
         }
-        if self.blue > 0 {
-            colors.push(Color::Blue);
+
+        // Hybrid mana contributes both colors
+        for &(a, b) in &self.hybrid {
+            if seen.insert(a) {
+                colors.push(a);
+            }
+            if seen.insert(b) {
+                colors.push(b);
+            }
         }
-        if self.black > 0 {
-            colors.push(Color::Black);
+
+        // Phyrexian mana contributes its color
+        for &c in &self.phyrexian {
+            if seen.insert(c) {
+                colors.push(c);
+            }
         }
-        if self.red > 0 {
-            colors.push(Color::Red);
-        }
-        if self.green > 0 {
-            colors.push(Color::Green);
-        }
+
         colors
+    }
+}
+
+/// Parse a single color character ('W', 'U', 'B', 'R', 'G') into a Color.
+fn parse_color_char(c: char) -> Option<Color> {
+    match c {
+        'W' => Some(Color::White),
+        'U' => Some(Color::Blue),
+        'B' => Some(Color::Black),
+        'R' => Some(Color::Red),
+        'G' => Some(Color::Green),
+        _ => None,
     }
 }
 
 impl fmt::Display for ManaCost {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for _ in 0..self.x_count {
+            write!(f, "{{X}}")?;
+        }
         if self.generic > 0 || self.cmc() == 0 {
             write!(f, "{{{}}}", self.generic)?;
         }
@@ -156,6 +223,12 @@ impl fmt::Display for ManaCost {
         }
         for _ in 0..self.green {
             write!(f, "{{G}}")?;
+        }
+        for &(a, b) in &self.hybrid {
+            write!(f, "{{{}/{}}}", a, b)?;
+        }
+        for &c in &self.phyrexian {
+            write!(f, "{{{}/P}}", c)?;
         }
         Ok(())
     }
@@ -333,5 +406,60 @@ mod tests {
         assert_eq!(pool.white, 0); // 1 for colored, 1 for generic
         assert_eq!(pool.blue, 0);
         assert_eq!(pool.red, 1);
+    }
+
+    #[test]
+    fn test_parse_x_cost() {
+        let cost = ManaCost::parse("{X}{X}{R}").unwrap();
+        assert_eq!(cost.x_count, 2);
+        assert_eq!(cost.red, 1);
+        // X contributes 0 to CMC when not on the stack
+        assert_eq!(cost.cmc(), 1);
+    }
+
+    #[test]
+    fn test_parse_hybrid_mana() {
+        let cost = ManaCost::parse("{W/U}{B/R}").unwrap();
+        assert_eq!(cost.hybrid.len(), 2);
+        assert_eq!(cost.hybrid[0], (Color::White, Color::Blue));
+        assert_eq!(cost.hybrid[1], (Color::Black, Color::Red));
+        // Each hybrid symbol contributes 1 to CMC
+        assert_eq!(cost.cmc(), 2);
+    }
+
+    #[test]
+    fn test_parse_phyrexian_mana() {
+        let cost = ManaCost::parse("{W/P}{G/P}").unwrap();
+        assert_eq!(cost.phyrexian.len(), 2);
+        assert_eq!(cost.phyrexian[0], Color::White);
+        assert_eq!(cost.phyrexian[1], Color::Green);
+        // Each phyrexian symbol contributes 1 to CMC
+        assert_eq!(cost.cmc(), 2);
+    }
+
+    #[test]
+    fn test_parse_mixed_cost() {
+        // A complex cost: {X}{2}{W/U}{R/P}{B}
+        let cost = ManaCost::parse("{X}{2}{W/U}{R/P}{B}").unwrap();
+        assert_eq!(cost.x_count, 1);
+        assert_eq!(cost.generic, 2);
+        assert_eq!(cost.hybrid.len(), 1);
+        assert_eq!(cost.hybrid[0], (Color::White, Color::Blue));
+        assert_eq!(cost.phyrexian.len(), 1);
+        assert_eq!(cost.phyrexian[0], Color::Red);
+        assert_eq!(cost.black, 1);
+        // CMC: 2 generic + 1 hybrid + 1 phyrexian + 1 black = 5 (X=0)
+        assert_eq!(cost.cmc(), 5);
+    }
+
+    #[test]
+    fn test_display_roundtrip() {
+        let cost = ManaCost::parse("{X}{3}{W}{W/U}{R/P}").unwrap();
+        let s = cost.to_string();
+        assert!(s.contains("{X}"));
+        assert!(s.contains("{3}"));
+        assert!(s.contains("{W}"));
+        assert!(s.contains("{W/U}"));
+        assert!(s.contains("{R/P}"));
     }
 }
