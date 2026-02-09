@@ -60,10 +60,16 @@ impl Strategy for GreedyStrategy {
         }
 
         // Priority 2: Cast the most expensive spell we can afford
+        // (includes casting commander from command zone)
         let mut best_spell: Option<&Action> = None;
         let mut best_cmc = 0;
         for action in &actions {
-            if let Action::CastSpell { object_id, .. } = action {
+            let obj_id = match action {
+                Action::CastSpell { object_id, .. } => Some(object_id),
+                Action::CastCommander { object_id, .. } => Some(object_id),
+                _ => None,
+            };
+            if let Some(object_id) = obj_id {
                 let inst = &state.objects[object_id];
                 if let Some(def) = db.get(inst.card_def_id) {
                     let cmc = def.cmc();

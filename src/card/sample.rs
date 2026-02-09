@@ -2975,3 +2975,111 @@ pub fn green_stompy_deck() -> Vec<CardId> {
     assert_eq!(deck.len(), 60);
     deck
 }
+
+// ==========================================================================
+// Commander decks (100-card singleton, except basics)
+// ==========================================================================
+
+/// Build a mono-white Commander deck with Brimaz, King of Oreskos as
+/// the commander. Uses all available white cards from the pool plus
+/// colorless artifacts, padded with Plains to reach 100 cards.
+///
+/// Returns (deck, commander_id).
+pub fn brimaz_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::BRIMAZ_KING;
+    let mut deck = Vec::new();
+
+    // Commander (included in the deck list, will be extracted by setup)
+    deck.push(commander);
+
+    // White creatures (1 each, singleton)
+    deck.push(ids::SAVANNAH_LIONS);
+    deck.push(ids::MOTHER_OF_RUNES);
+    deck.push(ids::ELITE_VANGUARD);
+    deck.push(ids::WHITE_KNIGHT);
+    deck.push(ids::LEONIN_SKYHUNTER);
+    deck.push(ids::BANESLAYER_ANGEL);
+    deck.push(ids::SERRA_ANGEL);
+    deck.push(ids::THALIA_GUARDIAN);
+    deck.push(ids::SOLDIER_OF_THE_PANTHEON);
+    deck.push(ids::HERO_OF_BLADEHOLD);
+    deck.push(ids::PRECINCT_CAPTAIN);
+    deck.push(ids::BLADE_SPLICER);
+
+    // White spells
+    deck.push(ids::SWORDS_TO_PLOWSHARES);
+    deck.push(ids::PATH_TO_EXILE);
+    deck.push(ids::WRATH_OF_GOD);
+    deck.push(ids::DAY_OF_JUDGMENT);
+    deck.push(ids::OBLIVION_RING);
+    deck.push(ids::DISENCHANT);
+
+    // White enchantments
+    deck.push(ids::GLORIOUS_ANTHEM);
+    deck.push(ids::HONOR_OF_THE_PURE);
+    deck.push(ids::CRUSADE);
+
+    // Colorless artifacts
+    deck.push(ids::SOL_RING);
+    deck.push(ids::SIGNAL_PEST);
+    deck.push(ids::STEEL_OVERSEER);
+
+    // Fill the rest with Plains to reach 100
+    let nonland_count = deck.len();
+    for _ in 0..(100 - nonland_count) {
+        deck.push(ids::PLAINS);
+    }
+
+    assert_eq!(deck.len(), 100);
+    (deck, commander)
+}
+
+/// Build a mono-green Commander deck with Thrun, the Last Troll as
+/// the commander. Uses all available green cards plus colorless
+/// artifacts, padded with Forests to reach 100 cards.
+///
+/// Returns (deck, commander_id).
+pub fn thrun_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::THRUN_LAST_TROLL;
+    let mut deck = Vec::new();
+
+    // Commander
+    deck.push(commander);
+
+    // Green creatures
+    deck.push(ids::LLANOWAR_ELVES);
+    deck.push(ids::ELVISH_MYSTIC);
+    deck.push(ids::GRIZZLY_BEARS);
+    deck.push(ids::KALONIAN_TUSKER);
+    deck.push(ids::LEATHERBACK_BALOTH);
+    deck.push(ids::ELVISH_VISIONARY);
+    deck.push(ids::TARMOGOYF);
+    deck.push(ids::SCAVENGING_OOZE);
+    deck.push(ids::STRANGLEROOT_GEIST);
+    deck.push(ids::EXPERIMENT_ONE);
+    deck.push(ids::DRYAD_MILITANT);
+    deck.push(ids::RANCOR_BEAST);
+
+    // Green spells
+    deck.push(ids::GIANT_GROWTH);
+    deck.push(ids::RANCOR);
+    deck.push(ids::VINES_OF_VASTWOOD);
+    deck.push(ids::COLLECTED_COMPANY);
+
+    // Green enchantment
+    deck.push(ids::GAEA_ANTHEM);
+
+    // Colorless artifacts
+    deck.push(ids::SOL_RING);
+    deck.push(ids::SIGNAL_PEST);
+    deck.push(ids::STEEL_OVERSEER);
+
+    // Fill the rest with Forests to reach 100
+    let nonland_count = deck.len();
+    for _ in 0..(100 - nonland_count) {
+        deck.push(ids::FOREST);
+    }
+
+    assert_eq!(deck.len(), 100);
+    (deck, commander)
+}
