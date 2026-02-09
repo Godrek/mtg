@@ -1,5 +1,5 @@
 use mtg_gto::card::sample;
-use mtg_gto::simulation::simulate;
+use mtg_gto::simulation::{simulate, simulate_goldfish};
 use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
 
 fn main() {
@@ -31,5 +31,20 @@ fn main() {
 
     println!("Red Aggro (Random) vs Green Stompy (Greedy):");
     let results = simulate(&db, &red_deck, &green_deck, &random, &greedy, 1000);
+    results.display();
+
+    // --- Goldfish mode ---
+    println!("\n==================");
+    println!("Goldfish Mode");
+    println!("==================\n");
+
+    println!("Red Aggro (Greedy) — Goldfish:");
+    let results = simulate_goldfish(&db, &red_deck, &greedy, 1000);
+    results.display();
+
+    println!();
+
+    println!("Green Stompy (Greedy) — Goldfish:");
+    let results = simulate_goldfish(&db, &green_deck, &greedy, 1000);
     results.display();
 }
