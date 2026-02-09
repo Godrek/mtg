@@ -360,15 +360,17 @@ impl InfoSetAbstraction for IdentityAbstraction {
     }
 }
 
-/// Bucketed abstraction for scaling MCCFR to realistic (60-card) decks.
+/// Bucketed abstraction for scaling MCCFR to realistic decks.
 ///
 /// Reduces the information set space by bucketizing continuous values:
-/// - **Life**: {<=0, 1-5, 6-10, 11-15, 16-20, 21+} (6 buckets per player)
+/// - **Life**: 10 buckets covering 0 through 41+ (supports both Standard
+///   20-life and Commander 40-life formats)
 /// - **Board**: permanent count per controller (no power/toughness — that
 ///   requires card_db; see `CardAwareBucketedAbstraction` for richer stats)
 /// - **Hand**: hand size and opponent hand size (no role classification
 ///   without card_db; see `CardAwareBucketedAbstraction`)
 /// - **Turn**: {early 0-3, mid 4-6, late 7+} (3 buckets)
+/// - **Commander**: command zone occupancy and commander tax
 ///
 /// This abstraction operates without a `CardDatabase` reference, making it
 /// suitable for use in contexts where only the `InformationSet` is available.

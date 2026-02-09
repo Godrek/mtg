@@ -158,41 +158,7 @@ fn run_game_loop(
         let action = strategy.choose_action(state, player);
 
         if verbose && actions_taken < 200 {
-            let db = state.card_db();
-            let action_name = match &action {
-                crate::action::Action::CastSpell { object_id, .. }
-                | crate::action::Action::CastCommander { object_id, .. } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Cast {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::PlayLand { object_id } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Play {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::OrderTriggers { ordering } => {
-                    format!("Order {} triggers", ordering.len())
-                }
-                other => format!("{}", other),
-            };
-            eprintln!(
-                "T{} {:?} P{}: {} (life: {}/{})",
-                state.turn_number,
-                state.phase,
-                player,
-                action_name,
-                state.players[0].life,
-                state.players[1].life,
-            );
+            log_action(state, &action, player);
         }
 
         rules::apply_action(state, &action);
@@ -377,17 +343,15 @@ impl GoldfishResults {
 
 /// Run a single goldfish game: player 0 plays the deck under test,
 /// player 1 uses GoldfishStrategy (does nothing).
-///
-/// Uses tighter limits than normal games since the goldfish opponent
-/// adds no complexity.
 pub fn run_goldfish_game(
     card_db: &CardDatabase,
     deck: &[CardId],
     strategy: &dyn Strategy,
 ) -> GameResult {
     let db = Arc::new(card_db.clone());
-    // The goldfish opponent uses the same deck (it won't play any cards).
-    run_goldfish_game_inner(db, deck, strategy, false)
+    init_and_run_goldfish(db, strategy, |state| {
+        rules::setup_game(state, deck, deck);
+    })
 }
 
 /// Run a single goldfish game with verbose tracing.
@@ -397,99 +361,11 @@ pub fn run_goldfish_game_verbose(
     strategy: &dyn Strategy,
 ) -> GameResult {
     let db = Arc::new(card_db.clone());
-    run_goldfish_game_inner(db, deck, strategy, true)
-}
-
-fn run_goldfish_game_inner(
-    card_db: Arc<CardDatabase>,
-    deck: &[CardId],
-    strategy: &dyn Strategy,
-    verbose: bool,
-) -> GameResult {
-    let goldfish = GoldfishStrategy;
     let mut state = GameState::new(2);
-    state.card_db = Some(card_db);
-
-    // Both players get the same deck — the goldfish won't use its cards.
+    state.card_db = Some(db);
     rules::setup_game(&mut state, deck, deck);
-
-    let mut actions_taken: u32 = 0;
-
-    while !state.game_over
-        && state.turn_number <= GOLDFISH_MAX_TURNS
-        && actions_taken < GOLDFISH_MAX_ACTIONS
-    {
-        let player = state.priority_player;
-        let actions = legal_actions(&state);
-
-        if actions.is_empty()
-            || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
-        {
-            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
-            actions_taken += 1;
-            continue;
-        }
-
-        // Player 0 uses the provided strategy; player 1 is the goldfish.
-        let active_strategy: &dyn Strategy = if player == 0 { strategy } else { &goldfish };
-        let action = active_strategy.choose_action(&state, player);
-
-        if verbose && actions_taken < 200 {
-            let db = state.card_db();
-            let action_name = match &action {
-                crate::action::Action::CastSpell { object_id, .. } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Cast {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::PlayLand { object_id } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Play {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::OrderTriggers { ordering } => {
-                    format!("Order {} triggers", ordering.len())
-                }
-                other => format!("{}", other),
-            };
-            eprintln!(
-                "T{} {:?} P{}: {} (life: {}/{})",
-                state.turn_number,
-                state.phase,
-                player,
-                action_name,
-                state.players[0].life,
-                state.players[1].life,
-            );
-        }
-
-        rules::apply_action(&mut state, &action);
-        actions_taken += 1;
-
-        if actions_taken.is_multiple_of(10) {
-            rules::check_state_based_actions(&mut state);
-        }
-    }
-
-    GameResult {
-        winner: state.winner,
-        turns: state.turn_number,
-        actions_taken,
-        final_life: [state.players[0].life, state.players[1].life],
-    }
+    run_goldfish_loop(&mut state, strategy, true)
 }
-
-/// Maximum turns for commander goldfish games (terminal state).
-/// Same as standard goldfish — games rarely reach this point.
-const COMMANDER_GOLDFISH_MAX_TURNS: u32 = 20;
 
 /// Run a single goldfish game in Commander format.
 ///
@@ -503,87 +379,86 @@ pub fn run_commander_goldfish_game(
     strategy: &dyn Strategy,
 ) -> GameResult {
     let db = Arc::new(card_db.clone());
-    run_commander_goldfish_game_inner(db, deck, commander, strategy, false)
+    init_and_run_goldfish(db, strategy, |state| {
+        *state = GameState::new_commander(2);
+        // card_db is set by the caller before this closure; re-set after replacing state
+        rules::setup_commander_game(state, deck, deck, commander, commander);
+    })
 }
 
-fn run_commander_goldfish_game_inner(
-    card_db: Arc<CardDatabase>,
+/// Run a single Commander goldfish game with verbose tracing.
+pub fn run_commander_goldfish_game_verbose(
+    card_db: &CardDatabase,
     deck: &[CardId],
     commander: CardId,
+    strategy: &dyn Strategy,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(db);
+    rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+    run_goldfish_loop(&mut state, strategy, true)
+}
+
+/// Initialize a game state and run the goldfish loop.
+///
+/// The `setup` closure receives a `&mut GameState` with `card_db` already set.
+/// For Commander, it should replace the state with `GameState::new_commander`
+/// and call the appropriate setup function.
+fn init_and_run_goldfish(
+    card_db: Arc<CardDatabase>,
+    strategy: &dyn Strategy,
+    setup: impl FnOnce(&mut GameState),
+) -> GameResult {
+    let mut state = GameState::new(2);
+    state.card_db = Some(card_db.clone());
+    setup(&mut state);
+    // Ensure card_db is set after setup (Commander setup replaces the state)
+    if state.card_db.is_none() {
+        state.card_db = Some(card_db);
+    }
+    run_goldfish_loop(&mut state, strategy, false)
+}
+
+/// Shared goldfish game loop for both Standard and Commander formats.
+///
+/// Player 0 uses the provided strategy; player 1 is a passive goldfish
+/// that always passes priority.
+fn run_goldfish_loop(
+    state: &mut GameState,
     strategy: &dyn Strategy,
     verbose: bool,
 ) -> GameResult {
     let goldfish = GoldfishStrategy;
-    let mut state = GameState::new_commander(2);
-    state.card_db = Some(card_db);
-
-    // Both players get the same deck/commander — the goldfish won't play cards.
-    rules::setup_commander_game(&mut state, deck, deck, commander, commander);
-
     let mut actions_taken: u32 = 0;
 
     while !state.game_over
-        && state.turn_number <= COMMANDER_GOLDFISH_MAX_TURNS
+        && state.turn_number <= GOLDFISH_MAX_TURNS
         && actions_taken < GOLDFISH_MAX_ACTIONS
     {
         let player = state.priority_player;
-        let actions = legal_actions(&state);
+        let actions = legal_actions(state);
 
         if actions.is_empty()
             || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
         {
-            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
+            rules::apply_action(state, &crate::action::Action::PassPriority);
             actions_taken += 1;
             continue;
         }
 
-        // Player 0 uses the provided strategy; player 1 is the goldfish.
         let active_strategy: &dyn Strategy = if player == 0 { strategy } else { &goldfish };
-        let action = active_strategy.choose_action(&state, player);
+        let action = active_strategy.choose_action(state, player);
 
         if verbose && actions_taken < 200 {
-            let db = state.card_db();
-            let action_name = match &action {
-                crate::action::Action::CastSpell { object_id, .. }
-                | crate::action::Action::CastCommander { object_id, .. } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Cast {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::PlayLand { object_id } => {
-                    let inst = &state.objects[object_id];
-                    format!(
-                        "Play {}",
-                        db.get(inst.card_def_id)
-                            .map(|d| d.name.as_str())
-                            .unwrap_or("?")
-                    )
-                }
-                crate::action::Action::OrderTriggers { ordering } => {
-                    format!("Order {} triggers", ordering.len())
-                }
-                other => format!("{}", other),
-            };
-            eprintln!(
-                "T{} {:?} P{}: {} (life: {}/{})",
-                state.turn_number,
-                state.phase,
-                player,
-                action_name,
-                state.players[0].life,
-                state.players[1].life,
-            );
+            log_action(state, &action, player);
         }
 
-        rules::apply_action(&mut state, &action);
+        rules::apply_action(state, &action);
         actions_taken += 1;
 
         if actions_taken.is_multiple_of(10) {
-            rules::check_state_based_actions(&mut state);
+            rules::check_state_based_actions(state);
         }
     }
 
@@ -592,80 +467,6 @@ fn run_commander_goldfish_game_inner(
         turns: state.turn_number,
         actions_taken,
         final_life: [state.players[0].life, state.players[1].life],
-    }
-}
-
-/// Run many commander goldfish games in parallel and aggregate results.
-pub fn simulate_commander_goldfish(
-    card_db: &CardDatabase,
-    deck: &[CardId],
-    commander: CardId,
-    strategy: &(dyn Strategy + Send + Sync),
-    num_games: u64,
-) -> GoldfishResults {
-    let db = Arc::new(card_db.clone());
-    let wins = AtomicU64::new(0);
-    let losses = AtomicU64::new(0);
-    let draws = AtomicU64::new(0);
-    let total_kill_turns = AtomicU64::new(0);
-    let total_actions = AtomicU64::new(0);
-    let fastest = AtomicU64::new(u64::MAX);
-    let slowest = AtomicU64::new(0);
-
-    let distribution: Vec<AtomicU64> = (0..=COMMANDER_GOLDFISH_MAX_TURNS)
-        .map(|_| AtomicU64::new(0))
-        .collect();
-
-    (0..num_games).into_par_iter().for_each(|_| {
-        let result = run_commander_goldfish_game_inner(
-            Arc::clone(&db), deck, commander, strategy, false,
-        );
-
-        total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
-
-        match result.winner {
-            Some(0) => {
-                wins.fetch_add(1, Ordering::Relaxed);
-                let turn = result.turns;
-                total_kill_turns.fetch_add(turn as u64, Ordering::Relaxed);
-                if (turn as usize) < distribution.len() {
-                    distribution[turn as usize].fetch_add(1, Ordering::Relaxed);
-                }
-                fastest.fetch_min(turn as u64, Ordering::Relaxed);
-                slowest.fetch_max(turn as u64, Ordering::Relaxed);
-            }
-            Some(_) => {
-                losses.fetch_add(1, Ordering::Relaxed);
-            }
-            None => {
-                draws.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    });
-
-    let total_wins = wins.load(Ordering::Relaxed);
-    let fast = fastest.load(Ordering::Relaxed);
-    let slow = slowest.load(Ordering::Relaxed);
-
-    let kill_turn_dist: Vec<u64> = distribution
-        .iter()
-        .map(|a| a.load(Ordering::Relaxed))
-        .collect();
-
-    GoldfishResults {
-        total_games: num_games,
-        wins: total_wins,
-        losses: losses.load(Ordering::Relaxed),
-        draws: draws.load(Ordering::Relaxed),
-        avg_kill_turn: if total_wins > 0 {
-            total_kill_turns.load(Ordering::Relaxed) as f64 / total_wins as f64
-        } else {
-            0.0
-        },
-        fastest_kill: if total_wins > 0 { fast as u32 } else { 0 },
-        slowest_kill: if total_wins > 0 { slow as u32 } else { 0 },
-        avg_actions: total_actions.load(Ordering::Relaxed) as f64 / num_games as f64,
-        kill_turn_distribution: kill_turn_dist,
     }
 }
 
@@ -682,6 +483,36 @@ pub fn simulate_goldfish(
     num_games: u64,
 ) -> GoldfishResults {
     let db = Arc::new(card_db.clone());
+    aggregate_goldfish_results(num_games, |_| {
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_game(&mut state, deck, deck);
+        run_goldfish_loop(&mut state, strategy, false)
+    })
+}
+
+/// Run many commander goldfish games in parallel and aggregate results.
+pub fn simulate_commander_goldfish(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    commander: CardId,
+    strategy: &(dyn Strategy + Send + Sync),
+    num_games: u64,
+) -> GoldfishResults {
+    let db = Arc::new(card_db.clone());
+    aggregate_goldfish_results(num_games, |_| {
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+        run_goldfish_loop(&mut state, strategy, false)
+    })
+}
+
+/// Shared aggregation logic for goldfish simulations.
+fn aggregate_goldfish_results(
+    num_games: u64,
+    run_one: impl Fn(u64) -> GameResult + Send + Sync,
+) -> GoldfishResults {
     let wins = AtomicU64::new(0);
     let losses = AtomicU64::new(0);
     let draws = AtomicU64::new(0);
@@ -690,13 +521,12 @@ pub fn simulate_goldfish(
     let fastest = AtomicU64::new(u64::MAX);
     let slowest = AtomicU64::new(0);
 
-    // Kill-turn distribution buckets (one per turn up to GOLDFISH_MAX_TURNS).
     let distribution: Vec<AtomicU64> = (0..=GOLDFISH_MAX_TURNS)
         .map(|_| AtomicU64::new(0))
         .collect();
 
-    (0..num_games).into_par_iter().for_each(|_| {
-        let result = run_goldfish_game_inner(Arc::clone(&db), deck, strategy, false);
+    (0..num_games).into_par_iter().for_each(|i| {
+        let result = run_one(i);
 
         total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
 
@@ -708,7 +538,6 @@ pub fn simulate_goldfish(
                 if (turn as usize) < distribution.len() {
                     distribution[turn as usize].fetch_add(1, Ordering::Relaxed);
                 }
-                // Update fastest/slowest atomically
                 fastest.fetch_min(turn as u64, Ordering::Relaxed);
                 slowest.fetch_max(turn as u64, Ordering::Relaxed);
             }
@@ -745,4 +574,43 @@ pub fn simulate_goldfish(
         avg_actions: total_actions.load(Ordering::Relaxed) as f64 / num_games as f64,
         kill_turn_distribution: kill_turn_dist,
     }
+}
+
+/// Log a game action to stderr for verbose tracing.
+fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerIndex) {
+    let db = state.card_db();
+    let action_name = match action {
+        crate::action::Action::CastSpell { object_id, .. }
+        | crate::action::Action::CastCommander { object_id, .. } => {
+            let inst = &state.objects[object_id];
+            format!(
+                "Cast {}",
+                db.get(inst.card_def_id)
+                    .map(|d| d.name.as_str())
+                    .unwrap_or("?")
+            )
+        }
+        crate::action::Action::PlayLand { object_id } => {
+            let inst = &state.objects[object_id];
+            format!(
+                "Play {}",
+                db.get(inst.card_def_id)
+                    .map(|d| d.name.as_str())
+                    .unwrap_or("?")
+            )
+        }
+        crate::action::Action::OrderTriggers { ordering } => {
+            format!("Order {} triggers", ordering.len())
+        }
+        other => format!("{}", other),
+    };
+    eprintln!(
+        "T{} {:?} P{}: {} (life: {}/{})",
+        state.turn_number,
+        state.phase,
+        player,
+        action_name,
+        state.players[0].life,
+        state.players[1].life,
+    );
 }
