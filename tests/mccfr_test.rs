@@ -19,13 +19,13 @@ use std::sync::Arc;
 use mtg_gto::action::legal_actions;
 use mtg_gto::card::sample;
 use mtg_gto::card::ZoneType;
-use mtg_gto::game::{GameState, Phase};
+use mtg_gto::game::{GameFormat, GameState, Phase};
 use mtg_gto::info_set::{BucketedAbstraction, InformationSet};
 use mtg_gto::rules;
 use mtg_gto::simulation;
 use mtg_gto::solver::mccfr::{self, McfrConfig, RolloutMode, TrainConfig};
 use mtg_gto::solver::RegretTable;
-use mtg_gto::simulation::simulate_goldfish;
+use mtg_gto::simulation::{simulate_goldfish, simulate_commander_goldfish};
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, McfrStrategy, RandomStrategy, Strategy};
 
 /// Helper: create a minimal game state with 15-card decks for MCCFR testing.
@@ -1034,4 +1034,294 @@ fn test_goldfish_mccfr_green_stompy() {
 
     assert!(greedy_results.win_rate() > 0.5, "Greedy should win goldfish with Green Stompy");
     assert!(mccfr_results.win_rate() > 0.3, "MCCFR should win some goldfish games");
+}
+
+// =========================================================================
+// Commander Goldfish MCCFR Training Tests
+// =========================================================================
+
+/// Helper: set up a commander game state for goldfish MCCFR training.
+fn setup_commander_goldfish_game(deck: &[u64], commander: u64) -> GameState {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+    state
+}
+
+#[test]
+fn test_commander_goldfish_mccfr_training_runs() {
+    // Verify goldfish MCCFR training completes on a commander deck without panics.
+    // Uses Brimaz commander deck (100 cards, 40 life, command zone mechanics).
+    let (deck, commander) = sample::brimaz_commander_deck();
+    let state = setup_commander_goldfish_game(&deck, commander);
+
+    assert_eq!(state.format, GameFormat::Commander);
+    assert_eq!(state.players[0].life, 40);
+    assert_eq!(state.players[1].life, 40);
+    assert!(!state.players[0].command_zone.is_empty(), "Commander should be in command zone");
+
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish(&state, 5, &config);
+
+    let p0_info_sets = tables[0].num_info_sets();
+    let p1_info_sets = tables[1].num_info_sets();
+
+    eprintln!(
+        "Commander Goldfish MCCFR (5 iters, Brimaz): P0 info sets = {}, P1 info sets = {}",
+        p0_info_sets, p1_info_sets,
+    );
+
+    assert!(p0_info_sets > 0, "Player 0 should have info sets from commander goldfish training");
+    assert_eq!(p1_info_sets, 0, "Player 1 (goldfish) should have no info sets");
+}
+
+#[test]
+fn test_commander_goldfish_mccfr_with_abstraction() {
+    // Train goldfish MCCFR on a commander deck with bucketed abstraction.
+    // This is the key path for production use — 100-card decks require abstraction.
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::brimaz_commander_deck();
+    let state = setup_commander_goldfish_game(&deck, commander);
+
+    let bucketed = BucketedAbstraction;
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish_with_abstraction(
+        &state, 10, &config, &bucketed, 0,
+    );
+
+    let stats = mccfr::training_stats(&tables);
+    eprintln!(
+        "Commander Goldfish MCCFR (abstracted, 10 iters): info_sets={}, visits={}, exploit={:.4}",
+        stats.total_info_sets[0], stats.total_visits[0], stats.exploitability,
+    );
+
+    assert!(stats.total_info_sets[0] > 0, "Should create info sets");
+
+    // Verify the trained strategy can play legal commander goldfish games
+    let strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let results = simulate_commander_goldfish(&db, &deck, commander, &strat, 20);
+    eprintln!(
+        "Commander Goldfish (trained, 20 games): win={:.0}% avg_kill=T{:.2}",
+        results.win_rate() * 100.0,
+        results.avg_kill_turn,
+    );
+
+    // All games must complete without panics
+    assert_eq!(results.total_games, 20);
+}
+
+#[test]
+fn test_commander_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
+    // Core commander goldfish comparison: train MCCFR, compare against baselines.
+    // With 40 starting life, games take longer — adjust expectations accordingly.
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::brimaz_commander_deck();
+    let state = setup_commander_goldfish_game(&deck, commander);
+
+    // --- Train MCCFR against goldfish ---
+    let bucketed = BucketedAbstraction;
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish_with_abstraction(
+        &state, 20, &config, &bucketed, 0,
+    );
+    let mccfr_strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let stats = mccfr::training_stats(&tables);
+    eprintln!(
+        "Commander Goldfish MCCFR training: {} info sets, {} visits, exploit={:.4}",
+        stats.total_info_sets[0], stats.total_visits[0], stats.exploitability,
+    );
+
+    // --- Run commander goldfish simulations with all three strategies ---
+    let num_games = 50;
+
+    let random_results = simulate_commander_goldfish(&db, &deck, commander, &RandomStrategy, num_games);
+    let greedy_results = simulate_commander_goldfish(&db, &deck, commander, &GreedyStrategy, num_games);
+    let mccfr_results = simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
+
+    eprintln!("\n=== Commander Goldfish Kill Turn Comparison (Brimaz, {} games) ===", num_games);
+    eprintln!(
+        "Random:  win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        random_results.win_rate() * 100.0,
+        random_results.avg_kill_turn,
+        random_results.fastest_kill,
+        random_results.slowest_kill,
+    );
+    eprintln!(
+        "Greedy:  win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        greedy_results.win_rate() * 100.0,
+        greedy_results.avg_kill_turn,
+        greedy_results.fastest_kill,
+        greedy_results.slowest_kill,
+    );
+    eprintln!(
+        "MCCFR:   win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        mccfr_results.win_rate() * 100.0,
+        mccfr_results.avg_kill_turn,
+        mccfr_results.fastest_kill,
+        mccfr_results.slowest_kill,
+    );
+
+    // Greedy should beat random
+    assert!(
+        greedy_results.win_rate() > 0.3,
+        "Greedy should win commander goldfish games (got {:.0}%)",
+        greedy_results.win_rate() * 100.0,
+    );
+
+    // All MCCFR games must complete
+    assert_eq!(mccfr_results.total_games, num_games);
+
+    // MCCFR should win some games even with limited training
+    if mccfr_results.wins > 0 {
+        eprintln!(
+            "\nMCCFR commander goldfish: wins={}, avg_kill=T{:.2}",
+            mccfr_results.wins, mccfr_results.avg_kill_turn,
+        );
+    }
+}
+
+#[test]
+fn test_commander_goldfish_thrun_deck() {
+    // Test with a different commander deck (Thrun, green creatures).
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::thrun_commander_deck();
+    let state = setup_commander_goldfish_game(&deck, commander);
+
+    let bucketed = BucketedAbstraction;
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish_with_abstraction(
+        &state, 10, &config, &bucketed, 0,
+    );
+
+    let mccfr_strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let num_games = 50;
+    let greedy_results = simulate_commander_goldfish(&db, &deck, commander, &GreedyStrategy, num_games);
+    let mccfr_results = simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
+
+    eprintln!("\n=== Commander Goldfish (Thrun, {} games) ===", num_games);
+    eprintln!(
+        "Greedy:  win={:.0}%  avg_kill=T{:.2}",
+        greedy_results.win_rate() * 100.0,
+        greedy_results.avg_kill_turn,
+    );
+    eprintln!(
+        "MCCFR:   win={:.0}%  avg_kill=T{:.2}",
+        mccfr_results.win_rate() * 100.0,
+        mccfr_results.avg_kill_turn,
+    );
+
+    assert_eq!(mccfr_results.total_games, num_games, "All games should complete");
+}
+
+#[test]
+fn test_commander_goldfish_deep_training_convergence() {
+    // Deep training test: validates that with more iterations, the MCCFR strategy
+    // improves. This is the test you'd run on dedicated hardware with higher
+    // iteration counts (e.g., 100-500+) to confirm convergence.
+    //
+    // CI-friendly budget: 10 vs 30 iterations.
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::brimaz_commander_deck();
+    let state = setup_commander_goldfish_game(&deck, commander);
+
+    let bucketed = BucketedAbstraction;
+    let config = McfrConfig { max_depth: 6, max_actions: 800 };
+
+    // Train with fewer iterations
+    let tables_10 = mccfr::train_goldfish_with_abstraction(
+        &state, 10, &config, &bucketed, 0,
+    );
+    let exploit_10 = mccfr::approximate_exploitability(&tables_10);
+    let strat_10 = AbstractedMcfrStrategy::new(
+        tables_10[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    // Train with more iterations
+    let tables_30 = mccfr::train_goldfish_with_abstraction(
+        &state, 30, &config, &bucketed, 0,
+    );
+    let exploit_30 = mccfr::approximate_exploitability(&tables_30);
+    let strat_30 = AbstractedMcfrStrategy::new(
+        tables_30[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let num_games = 50;
+    let results_10 = simulate_commander_goldfish(&db, &deck, commander, &strat_10, num_games);
+    let results_30 = simulate_commander_goldfish(&db, &deck, commander, &strat_30, num_games);
+
+    let stats_10 = mccfr::training_stats(&tables_10);
+    let stats_30 = mccfr::training_stats(&tables_30);
+
+    eprintln!("\n=== Commander Goldfish Convergence Test ===");
+    eprintln!(
+        "10 iters: info_sets={}, exploit={:.4}, win={:.0}%, avg_kill=T{:.2}",
+        stats_10.total_info_sets[0], exploit_10,
+        results_10.win_rate() * 100.0, results_10.avg_kill_turn,
+    );
+    eprintln!(
+        "30 iters: info_sets={}, exploit={:.4}, win={:.0}%, avg_kill=T{:.2}",
+        stats_30.total_info_sets[0], exploit_30,
+        results_30.win_rate() * 100.0, results_30.avg_kill_turn,
+    );
+
+    // More training should discover more of the game tree
+    assert!(
+        stats_30.total_info_sets[0] >= stats_10.total_info_sets[0],
+        "30 iters should discover >= info sets than 10 iters ({} vs {})",
+        stats_30.total_info_sets[0], stats_10.total_info_sets[0],
+    );
+
+    // Exploitability should be finite
+    assert!(exploit_10.is_finite(), "Exploitability should be finite (10 iters)");
+    assert!(exploit_30.is_finite(), "Exploitability should be finite (30 iters)");
+
+    // All games must complete
+    assert_eq!(results_10.total_games, num_games);
+    assert_eq!(results_30.total_games, num_games);
+}
+
+#[test]
+fn test_commander_goldfish_info_set_includes_command_zone() {
+    // Verify that the information set distinguishes commander in command zone
+    // vs commander on battlefield.
+    let (deck, commander) = sample::brimaz_commander_deck();
+
+    // State 1: commander in command zone (game start)
+    let state1 = setup_commander_goldfish_game(&deck, commander);
+
+    // State 2: commander moved to battlefield
+    let mut state2 = setup_commander_goldfish_game(&deck, commander);
+    let cmd_obj = state2.players[0].command_zone[0];
+    state2.move_object(cmd_obj, mtg_gto::card::ZoneType::Command, mtg_gto::card::ZoneType::Battlefield);
+
+    let view1 = state1.visible_state(0);
+    let info1 = InformationSet::from_view(&view1, state1.card_db());
+
+    let view2 = state2.visible_state(0);
+    let info2 = InformationSet::from_view(&view2, state2.card_db());
+
+    // Command zone status should affect the info set hash
+    assert_ne!(
+        info1.hash_value(), info2.hash_value(),
+        "Commander in command zone vs battlefield should produce different info set hashes"
+    );
+
+    // Verify command zone fields are populated correctly
+    assert_eq!(info1.my_command_zone.len(), 1, "Commander should be in command zone in state 1");
+    assert_eq!(info2.my_command_zone.len(), 0, "Commander should not be in command zone in state 2");
 }

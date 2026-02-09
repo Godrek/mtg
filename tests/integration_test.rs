@@ -3385,6 +3385,9 @@ fn test_multi_phase_abstraction() {
         opp_hand_size: 7,
         opp_library_size: 53,
         my_land_plays_remaining: 1,
+        my_command_zone: vec![],
+        opp_command_zone: vec![],
+        my_commander_tax: 0,
     };
 
     let info_set_upkeep = InformationSet {
