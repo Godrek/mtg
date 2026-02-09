@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
@@ -304,7 +304,7 @@ pub struct GameState {
     /// they're added to this queue. After the current turn's Cleanup,
     /// if this queue is non-empty, the next turn's active player is
     /// shifted to the player at the front of the queue.
-    pub extra_turns: Vec<PlayerIndex>,
+    pub extra_turns: VecDeque<PlayerIndex>,
 
     /// Phases to skip for the current turn (Phase 3A).
     /// When an effect says "skip your draw step" or "skip your combat phase",
@@ -395,26 +395,26 @@ impl CardDatabase {
 /// you save a state, apply several actions, then revert.
 #[derive(Clone)]
 pub struct GameStateSnapshot {
-    pub objects: HashMap<ObjectId, CardInstance>,
-    pub battlefield: Vec<ObjectId>,
-    pub stack: Vec<StackEntry>,
-    pub players: Vec<PlayerState>,
-    pub active_player: PlayerIndex,
-    pub phase: Phase,
-    pub priority_player: PlayerIndex,
-    pub turn_number: u32,
-    pub consecutive_passes: u32,
-    pub combat: CombatState,
-    pub next_object_id: ObjectId,
-    pub next_stack_id: u64,
-    pub pending_triggers: Vec<PendingTrigger>,
-    pub continuous_effects: Vec<ContinuousEffect>,
-    pub next_timestamp: u32,
-    pub replacement_effects: Vec<ReplacementEffect>,
-    pub extra_turns: Vec<PlayerIndex>,
-    pub skip_phases: HashSet<Phase>,
-    pub game_over: bool,
-    pub winner: Option<PlayerIndex>,
+    objects: HashMap<ObjectId, CardInstance>,
+    battlefield: Vec<ObjectId>,
+    stack: Vec<StackEntry>,
+    players: Vec<PlayerState>,
+    active_player: PlayerIndex,
+    phase: Phase,
+    priority_player: PlayerIndex,
+    turn_number: u32,
+    consecutive_passes: u32,
+    combat: CombatState,
+    next_object_id: ObjectId,
+    next_stack_id: u64,
+    pending_triggers: Vec<PendingTrigger>,
+    continuous_effects: Vec<ContinuousEffect>,
+    next_timestamp: u32,
+    replacement_effects: Vec<ReplacementEffect>,
+    extra_turns: VecDeque<PlayerIndex>,
+    skip_phases: HashSet<Phase>,
+    game_over: bool,
+    winner: Option<PlayerIndex>,
 }
 
 // ---------------------------------------------------------------------------
@@ -619,7 +619,7 @@ impl GameState {
             continuous_effects: Vec::new(),
             next_timestamp: 1,
             replacement_effects: Vec::new(),
-            extra_turns: Vec::new(),
+            extra_turns: VecDeque::new(),
             skip_phases: HashSet::new(),
             game_over: false,
             winner: None,

@@ -1,8 +1,6 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::action::Action;
@@ -762,7 +760,7 @@ fn resolve_effect(
         }
 
         Effect::ExtraTurn => {
-            state.extra_turns.push(controller);
+            state.extra_turns.push_back(controller);
         }
 
         Effect::SkipPhase(phase) => {
@@ -995,6 +993,42 @@ fn resolve_triggered_ability(
 /// loop will present `Action::OrderTriggers`, and after the player
 /// orders, the next call to `check_state_based_actions` will resume
 /// the outer loop.
+/// Find duplicate permanents to remove based on a predicate.
+/// Used by both the legendary rule (CR 704.5j) and planeswalker uniqueness
+/// rule (CR 704.5i). For each (controller, name) group with >1 match, keeps
+/// the newest (highest ObjectId) and returns the rest.
+fn find_duplicates_to_remove(
+    state: &GameState,
+    predicate: impl Fn(&CardDef) -> bool,
+) -> Vec<ObjectId> {
+    let db = state.card_db();
+    let mut name_map: std::collections::HashMap<(usize, String), Vec<ObjectId>> =
+        std::collections::HashMap::new();
+    for &id in &state.battlefield {
+        let inst = &state.objects[&id];
+        if let Some(def) = db.get(inst.card_def_id) {
+            if predicate(def) {
+                name_map
+                    .entry((inst.controller, def.name.clone()))
+                    .or_default()
+                    .push(id);
+            }
+        }
+    }
+    let mut to_remove = Vec::new();
+    for (_, ids) in name_map {
+        if ids.len() > 1 {
+            let keep = *ids.iter().max().unwrap();
+            for &id in &ids {
+                if id != keep {
+                    to_remove.push(id);
+                }
+            }
+        }
+    }
+    to_remove
+}
+
 pub fn check_state_based_actions(state: &mut GameState) {
     // Outer CR 704.3 loop: interleave SBA checks with trigger checks
     loop {
@@ -1029,38 +1063,11 @@ pub fn check_state_based_actions(state: &mut GameState) {
             }
 
             // CR 704.5j: Legendary rule — if a player controls two or more
-            // legendary permanents with the same name, they choose one to keep
-            // and put the rest into the graveyard. Simplified: keep the newest
-            // (highest ObjectId) and sacrifice the rest.
-            let legendary_dupes: Vec<ObjectId> = {
-                let db = state.card_db();
-                let mut name_map: std::collections::HashMap<(usize, String), Vec<ObjectId>> =
-                    std::collections::HashMap::new();
-                for &id in &state.battlefield {
-                    let inst = &state.objects[&id];
-                    if let Some(def) = db.get(inst.card_def_id) {
-                        if def.supertypes.contains(&crate::card::Supertype::Legendary) {
-                            name_map
-                                .entry((inst.controller, def.name.clone()))
-                                .or_default()
-                                .push(id);
-                        }
-                    }
-                }
-                let mut to_remove = Vec::new();
-                for (_, ids) in name_map {
-                    if ids.len() > 1 {
-                        // Keep the one with the highest ObjectId (newest)
-                        let keep = *ids.iter().max().unwrap();
-                        for &id in &ids {
-                            if id != keep {
-                                to_remove.push(id);
-                            }
-                        }
-                    }
-                }
-                to_remove
-            };
+            // legendary permanents with the same name, keep the newest.
+            let legendary_dupes: Vec<ObjectId> =
+                find_duplicates_to_remove(state, |def| {
+                    def.supertypes.contains(&crate::card::Supertype::Legendary)
+                });
             for &id in &legendary_dupes {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
                 any_action = true;
@@ -1071,37 +1078,11 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 died_this_round.extend(legendary_dupes);
             }
 
-            // CR 704.5i: Planeswalker uniqueness rule — if a player controls two
-            // or more planeswalkers with the same card name, keep the newest.
-            // (Modern rules use the same name, not subtype.)
-            let pw_dupes: Vec<ObjectId> = {
-                let db = state.card_db();
-                let mut name_map: std::collections::HashMap<(usize, String), Vec<ObjectId>> =
-                    std::collections::HashMap::new();
-                for &id in &state.battlefield {
-                    let inst = &state.objects[&id];
-                    if let Some(def) = db.get(inst.card_def_id) {
-                        if def.card_types.contains(&CardType::Planeswalker) {
-                            name_map
-                                .entry((inst.controller, def.name.clone()))
-                                .or_default()
-                                .push(id);
-                        }
-                    }
-                }
-                let mut to_remove = Vec::new();
-                for (_, ids) in name_map {
-                    if ids.len() > 1 {
-                        let keep = *ids.iter().max().unwrap();
-                        for &id in &ids {
-                            if id != keep {
-                                to_remove.push(id);
-                            }
-                        }
-                    }
-                }
-                to_remove
-            };
+            // CR 704.5i: Planeswalker uniqueness rule — keep newest per name.
+            let pw_dupes: Vec<ObjectId> =
+                find_duplicates_to_remove(state, |def| {
+                    def.card_types.contains(&CardType::Planeswalker)
+                });
             for &id in &pw_dupes {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
                 any_action = true;
@@ -1374,8 +1355,7 @@ fn next_turn(state: &mut GameState) {
     state.skip_phases.clear();
 
     // Check for extra turns (Phase 3A)
-    if let Some(extra_turn_player) = state.extra_turns.first().copied() {
-        state.extra_turns.remove(0);
+    if let Some(extra_turn_player) = state.extra_turns.pop_front() {
         state.active_player = extra_turn_player;
     } else {
         state.active_player = state.opponent(state.active_player);
@@ -1436,14 +1416,37 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
 
 /// Compute a stable CardId for a token type based on its properties.
 /// Uses the high bit to avoid collisions with regular card IDs.
+/// Uses FNV-1a hash for stability across Rust versions (DefaultHasher is not
+/// guaranteed to be stable).
 fn token_card_id(token_def: &TokenDef) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    token_def.name.hash(&mut hasher);
-    token_def.power.hash(&mut hasher);
-    token_def.toughness.hash(&mut hasher);
-    token_def.colors.hash(&mut hasher);
-    token_def.keywords.hash(&mut hasher);
-    hasher.finish() | (1u64 << 63)
+    // FNV-1a 64-bit constants
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in token_def.name.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for byte in token_def.power.to_le_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for byte in token_def.toughness.to_le_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for color in &token_def.colors {
+        let disc = *color as u8;
+        hash ^= disc as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for kw in &token_def.keywords {
+        let disc = *kw as u8;
+        hash ^= disc as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash | (1u64 << 63)
 }
 
 /// Convert a TokenDef into a CardDef suitable for the card database.
@@ -1451,23 +1454,13 @@ fn token_to_card_def(token_def: &TokenDef, card_id: u64) -> CardDef {
     CardDef {
         id: card_id,
         name: token_def.name.clone(),
-        mana_cost: None,
         card_types: vec![CardType::Creature],
-        supertypes: vec![],
         subtypes: token_def.subtypes.clone(),
         keywords: token_def.keywords.clone(),
         power: Some(token_def.power as i32),
         toughness: Some(token_def.toughness as i32),
-        mana_abilities: vec![],
-        spell_effect: None,
-        activated_abilities: vec![],
-        triggered_abilities: vec![],
-        static_abilities: vec![],
-        starting_loyalty: None,
-        enters_tapped: false,
         oracle_text: format!("{}/{} {} Token", token_def.power, token_def.toughness, token_def.name),
-        dynamic_power: None,
-        dynamic_toughness: None,
+        ..Default::default()
     }
 }
 

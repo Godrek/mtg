@@ -3060,7 +3060,7 @@ fn test_extra_turn() {
 
     // Remember who the active player is
     // Grant player 0 an extra turn
-    state.extra_turns.push(0);
+    state.extra_turns.push_back(0);
 
     // Play through until turn changes (max 2000 actions to prevent infinite loop)
     let greedy = GreedyStrategy;
@@ -3475,4 +3475,223 @@ fn test_games_complete_with_all_phase3_features() {
 
     let results = simulation::simulate(&db, &green, &red, &random, &greedy, 50);
     assert_eq!(results.total_games, 50);
+}
+
+// ==========================================================================
+// Phase 3 Review — Missing Tests
+// ==========================================================================
+
+/// Test CR 704.5j: Legendary rule — duplicate legendary permanents with the
+/// same name under the same controller should be reduced to one (newest kept).
+#[test]
+fn test_legendary_rule_sba() {
+    use mtg_gto::card::{CardDef, CardInstance, CardType, Supertype, Subtype};
+    use mtg_gto::game::CardDatabase;
+    use mtg_gto::mana::ManaCost;
+
+    let mut db = CardDatabase::new();
+    db.insert(CardDef {
+        id: 9000,
+        name: "Thalia Test".into(),
+        mana_cost: Some(ManaCost::new(1, 1, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into())],
+        power: Some(2),
+        toughness: Some(1),
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Manually place two copies of the same legendary creature on the battlefield
+    let id1 = state.next_object_id;
+    state.next_object_id += 1;
+    let mut inst1 = CardInstance::new(id1, 9000, 0);
+    inst1.summoning_sick = false;
+    state.objects.insert(id1, inst1);
+    state.battlefield.push(id1);
+
+    let id2 = state.next_object_id;
+    state.next_object_id += 1;
+    let mut inst2 = CardInstance::new(id2, 9000, 0);
+    inst2.summoning_sick = false;
+    state.objects.insert(id2, inst2);
+    state.battlefield.push(id2);
+
+    assert_eq!(state.battlefield.len(), 2);
+
+    // Run SBAs — should remove the older one (id1) and keep the newer one (id2)
+    rules::check_state_based_actions(&mut state);
+
+    assert_eq!(state.battlefield.len(), 1, "Legendary rule should remove duplicate");
+    assert!(state.battlefield.contains(&id2), "Newest legendary should survive");
+    assert!(!state.battlefield.contains(&id1), "Oldest legendary should be removed");
+}
+
+/// Test CR 704.5i: Planeswalker uniqueness rule — duplicate planeswalkers with
+/// the same name under the same controller should be reduced to one.
+#[test]
+fn test_planeswalker_uniqueness_sba() {
+    use mtg_gto::card::{CardDef, CardInstance, CardType};
+    use mtg_gto::game::CardDatabase;
+
+    let mut db = CardDatabase::new();
+    db.insert(CardDef {
+        id: 9100,
+        name: "Jace Test".into(),
+        card_types: vec![CardType::Planeswalker],
+        starting_loyalty: Some(3),
+        oracle_text: "Test planeswalker".into(),
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Place two copies of the same planeswalker
+    let id1 = state.next_object_id;
+    state.next_object_id += 1;
+    state.objects.insert(id1, CardInstance::new(id1, 9100, 0));
+    state.battlefield.push(id1);
+
+    let id2 = state.next_object_id;
+    state.next_object_id += 1;
+    state.objects.insert(id2, CardInstance::new(id2, 9100, 0));
+    state.battlefield.push(id2);
+
+    assert_eq!(state.battlefield.len(), 2);
+
+    rules::check_state_based_actions(&mut state);
+
+    assert_eq!(state.battlefield.len(), 1, "PW uniqueness should remove duplicate");
+    assert!(state.battlefield.contains(&id2), "Newest PW should survive");
+}
+
+/// Test CR 508.1d: MustAttack enforcement — a creature with MustAttack
+/// keyword that is eligible to attack must be included in declared attackers;
+/// the empty attacker set is not legal.
+#[test]
+fn test_must_attack_enforcement() {
+    use mtg_gto::card::{CardDef, CardInstance, CardType, Subtype};
+    use mtg_gto::game::CardDatabase;
+    use mtg_gto::mana::ManaCost;
+
+    let mut db = CardDatabase::new();
+    // A creature that must attack
+    db.insert(CardDef {
+        id: 9200,
+        name: "Juggernaut Test".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Golem".into())],
+        keywords: vec![KeywordAbility::MustAttack],
+        power: Some(5),
+        toughness: Some(3),
+        ..Default::default()
+    });
+    // A regular land for setup
+    db.insert(CardDef {
+        id: 9201,
+        name: "Wastes".into(),
+        card_types: vec![CardType::Land],
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Set up: player 0 controls an untapped, non-sick MustAttack creature
+    let id1 = state.next_object_id;
+    state.next_object_id += 1;
+    let mut inst = CardInstance::new(id1, 9200, 0);
+    inst.summoning_sick = false;
+    inst.tapped = false;
+    state.objects.insert(id1, inst);
+    state.battlefield.push(id1);
+
+    // Set to declare attackers phase with player 0 as active
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::DeclareAttackers;
+
+    let actions = legal_actions(&state);
+    let attacker_actions: Vec<_> = actions
+        .iter()
+        .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
+        .collect();
+
+    // There should be no empty attacker action
+    let has_empty = attacker_actions.iter().any(|a| {
+        matches!(a, Action::DeclareAttackers { attackers } if attackers.is_empty())
+    });
+    assert!(!has_empty, "Empty attacker set should not be legal with MustAttack creature");
+
+    // There should be an attack action that includes the must-attack creature
+    let has_must_attack = attacker_actions.iter().any(|a| {
+        matches!(a, Action::DeclareAttackers { attackers } if attackers.contains(&id1))
+    });
+    assert!(has_must_attack, "Must-attack creature should appear in legal attacker sets");
+}
+
+/// Test DynamicValue evaluation in the layer engine — a creature with
+/// dynamic power equal to the number of creatures controlled.
+#[test]
+fn test_dynamic_value_in_layer_engine() {
+    use mtg_gto::card::{CardDef, CardInstance, CardType, DynamicValue, Subtype};
+    use mtg_gto::game::CardDatabase;
+    use mtg_gto::mana::ManaCost;
+
+    let mut db = CardDatabase::new();
+    // A creature whose power = number of creatures you control
+    db.insert(CardDef {
+        id: 9300,
+        name: "Crowd Champion".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elemental".into())],
+        power: Some(0),
+        toughness: Some(4),
+        dynamic_power: Some(DynamicValue::CreaturesControlled),
+        ..Default::default()
+    });
+    // A vanilla creature
+    db.insert(CardDef {
+        id: 9301,
+        name: "Test Bear".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Bear".into())],
+        power: Some(2),
+        toughness: Some(2),
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Place the dynamic creature on the battlefield
+    let dyn_id = state.next_object_id;
+    state.next_object_id += 1;
+    state.objects.insert(dyn_id, CardInstance::new(dyn_id, 9300, 0));
+    state.battlefield.push(dyn_id);
+
+    // With just itself, power should be 1 (one creature controlled)
+    let power_alone = state.effective_power(dyn_id);
+    assert_eq!(power_alone, 1, "Dynamic power with 1 creature should be 1");
+
+    // Add a second creature
+    let bear_id = state.next_object_id;
+    state.next_object_id += 1;
+    state.objects.insert(bear_id, CardInstance::new(bear_id, 9301, 0));
+    state.battlefield.push(bear_id);
+    state.invalidate_characteristics_cache();
+
+    let power_with_bear = state.effective_power(dyn_id);
+    assert_eq!(power_with_bear, 2, "Dynamic power with 2 creatures should be 2");
+
+    // Toughness should remain static
+    let toughness = state.effective_toughness(dyn_id);
+    assert_eq!(toughness, 4, "Static toughness should be unchanged");
 }

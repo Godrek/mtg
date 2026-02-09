@@ -230,6 +230,18 @@ pub fn compute_characteristics(
     let mut abilities_removed = false;
     let mut counters_applied = false;
 
+    // Layer 7a: Evaluate dynamic power/toughness (CDA) if present.
+    // These characteristic-defining abilities set the base P/T from game state.
+    if def.dynamic_power.is_some() || def.dynamic_toughness.is_some() {
+        let bf_vec: Vec<ObjectId> = battlefield.iter().copied().collect();
+        if let Some(ref dyn_pow) = def.dynamic_power {
+            power = dyn_pow.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id));
+        }
+        if let Some(ref dyn_tough) = def.dynamic_toughness {
+            toughness = dyn_tough.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id));
+        }
+    }
+
     // Collect effects that apply to this object, sorted by (layer, timestamp)
     let mut applicable: Vec<&ContinuousEffect> = effects
         .iter()
@@ -589,21 +601,10 @@ mod tests {
             name: name.into(),
             mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
             card_types: vec![CardType::Creature],
-            supertypes: vec![],
             subtypes: vec![Subtype("Test".into())],
-            keywords: vec![],
             power: Some(power),
             toughness: Some(toughness),
-            mana_abilities: vec![],
-            spell_effect: None,
-            activated_abilities: vec![],
-            triggered_abilities: vec![],
-            static_abilities: vec![],
-            starting_loyalty: None,
-            enters_tapped: false,
-            oracle_text: "".into(),
-            dynamic_power: None,
-            dynamic_toughness: None,
+            ..Default::default()
         }
     }
 

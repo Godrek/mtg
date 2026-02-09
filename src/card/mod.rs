@@ -132,6 +132,66 @@ pub enum DynamicValue {
     Fixed(i32),
 }
 
+impl DynamicValue {
+    /// Evaluate this dynamic value in context.
+    /// `controller` is the controlling player index, `objects` is the full
+    /// object map, `battlefield` the set of object IDs on the battlefield,
+    /// and `card_db` looks up card definitions by ID.
+    pub fn evaluate<'a, F>(
+        &self,
+        controller: usize,
+        objects: &std::collections::HashMap<ObjectId, CardInstance>,
+        battlefield: &[ObjectId],
+        card_db: &'a F,
+    ) -> i32
+    where
+        F: Fn(u64) -> Option<&'a CardDef>,
+    {
+        match self {
+            DynamicValue::CardsInHand => {
+                // Not available from just objects/battlefield — return 0 as fallback.
+                // Full evaluation requires player hand data, handled at GameState level.
+                0
+            }
+            DynamicValue::CreaturesControlled => {
+                battlefield
+                    .iter()
+                    .filter(|&&id| {
+                        if let Some(inst) = objects.get(&id) {
+                            if inst.controller != controller {
+                                return false;
+                            }
+                            if let Some(def) = card_db(inst.card_def_id) {
+                                return def.is_creature();
+                            }
+                        }
+                        false
+                    })
+                    .count() as i32
+            }
+            DynamicValue::CardTypesInGraveyards => {
+                // Count unique card types across all graveyards.
+                // Without graveyard access here, this is also a fallback.
+                0
+            }
+            DynamicValue::TotalPowerControlled => {
+                battlefield
+                    .iter()
+                    .filter_map(|&id| {
+                        let inst = objects.get(&id)?;
+                        if inst.controller != controller {
+                            return None;
+                        }
+                        let def = card_db(inst.card_def_id)?;
+                        if def.is_creature() { def.power } else { None }
+                    })
+                    .sum()
+            }
+            DynamicValue::Fixed(val) => *val,
+        }
+    }
+}
+
 /// Effects that abilities and spells can produce.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Effect {
@@ -307,6 +367,32 @@ impl CardDef {
             .as_ref()
             .map(|c| c.colors())
             .unwrap_or_default()
+    }
+}
+
+impl Default for CardDef {
+    fn default() -> Self {
+        CardDef {
+            id: 0,
+            name: String::new(),
+            mana_cost: None,
+            card_types: Vec::new(),
+            supertypes: Vec::new(),
+            subtypes: Vec::new(),
+            keywords: Vec::new(),
+            power: None,
+            toughness: None,
+            mana_abilities: Vec::new(),
+            spell_effect: None,
+            activated_abilities: Vec::new(),
+            triggered_abilities: Vec::new(),
+            static_abilities: Vec::new(),
+            starting_loyalty: None,
+            enters_tapped: false,
+            oracle_text: String::new(),
+            dynamic_power: None,
+            dynamic_toughness: None,
+        }
     }
 }
 

@@ -210,9 +210,16 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 generate_subsets(&eligible, 10)
             };
             for subset in subsets {
-                // Filter: must-attack creatures must be included in any attack set
-                // (unless the subset is empty — you can choose not to attack at all)
-                if !must_attack.is_empty() && !subset.is_empty() {
+                // CR 508.1d: Must-attack creatures must attack if able.
+                // If any must-attack creature is eligible, the empty set (no attack)
+                // is only legal if none of them can attack — but they're already in
+                // `eligible`, so they can attack. Any non-empty subset must include
+                // all must-attack creatures.
+                if !must_attack.is_empty() {
+                    if subset.is_empty() {
+                        // Can't decline to attack when must-attack creatures exist
+                        continue;
+                    }
                     if !must_attack.iter().all(|ma| subset.contains(ma)) {
                         continue;
                     }

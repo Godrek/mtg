@@ -672,13 +672,16 @@ pub fn warm_start_from_greedy(
             // Find which action the greedy strategy would pick
             let greedy_action = greedy.choose_action(&state, player);
 
-            // Seed regret: give the greedy action positive regret
+            // Seed regret: give the greedy action a small positive nudge.
+            // Use a modest weight to avoid biasing the solver away from
+            // equilibrium — the MCCFR iterations will refine from here.
             let entry = tables[player].get_or_create(info_hash);
+            let effective_weight = warmup_weight * 0.1; // dampen to avoid over-seeding
             for (i, ca) in canonical_actions.iter().enumerate() {
                 let action_entry = entry.get_or_create_action(ca);
                 if actions[i] == greedy_action {
-                    action_entry.cumulative_regret += warmup_weight;
-                    action_entry.cumulative_strategy += warmup_weight;
+                    action_entry.cumulative_regret += effective_weight;
+                    // Don't seed cumulative_strategy — let MCCFR build it
                 }
             }
             entry.visit_count += 1;
@@ -745,6 +748,10 @@ pub struct OpponentModel {
     pub posteriors: Vec<f64>,
     /// Cards observed from the opponent.
     pub observed_cards: Vec<u64>,
+    /// Likelihood of a card appearing given it IS a signature card for the archetype.
+    pub signature_likelihood: f64,
+    /// Likelihood of a card appearing given it is NOT a signature card.
+    pub non_signature_likelihood: f64,
 }
 
 /// A deck archetype for opponent modeling.
@@ -758,8 +765,15 @@ pub struct DeckArchetype {
 }
 
 impl OpponentModel {
-    /// Create a new opponent model with uniform priors.
+    /// Create a new opponent model with uniform priors and default likelihoods.
     pub fn new(archetypes: Vec<DeckArchetype>) -> Self {
+        Self::with_likelihoods(archetypes, 0.8, 0.2)
+    }
+
+    /// Create a new opponent model with custom likelihood values.
+    /// `sig` is the likelihood when a card IS a signature card for the archetype.
+    /// `non_sig` is the likelihood when the card is NOT a signature card.
+    pub fn with_likelihoods(archetypes: Vec<DeckArchetype>, sig: f64, non_sig: f64) -> Self {
         let n = archetypes.len();
         let uniform = if n > 0 { 1.0 / n as f64 } else { 1.0 };
         let posteriors = vec![uniform; n];
@@ -767,6 +781,8 @@ impl OpponentModel {
             archetypes,
             posteriors,
             observed_cards: Vec::new(),
+            signature_likelihood: sig,
+            non_signature_likelihood: non_sig,
         }
     }
 
@@ -779,13 +795,15 @@ impl OpponentModel {
             return;
         }
 
+        let sig = self.signature_likelihood;
+        let non_sig = self.non_signature_likelihood;
         let likelihoods: Vec<f64> = self.archetypes
             .iter()
             .map(|arch| {
                 if arch.signature_cards.contains(&card_id) {
-                    0.8
+                    sig
                 } else {
-                    0.2
+                    non_sig
                 }
             })
             .collect();
@@ -931,16 +949,19 @@ pub struct MultiPhaseAbstraction<'a> {
     pub coarse: &'a dyn InfoSetAbstraction,
 }
 
+/// Phase indices that use fine-grained abstraction (PreCombatMain through
+/// PostCombatMain). These must match the encoding in `info_set::phase_to_u8`.
+const STRATEGIC_PHASES: std::ops::RangeInclusive<u8> = 3..=10;
+// 3=PreCombatMain, 4=BeginningOfCombat, 5=DeclareAttackers,
+// 6=DeclareBlockers, 7=FirstStrikeDamage, 8=CombatDamage,
+// 9=EndOfCombat, 10=PostCombatMain
+
 impl<'a> InfoSetAbstraction for MultiPhaseAbstraction<'a> {
     fn abstract_info_set(&self, info_set: &InformationSet) -> u64 {
-        // Phases 3-10 (PreCombatMain through PostCombatMain) use fine abstraction
-        match info_set.phase {
-            3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => {
-                self.fine.abstract_info_set(info_set)
-            }
-            _ => {
-                self.coarse.abstract_info_set(info_set)
-            }
+        if STRATEGIC_PHASES.contains(&info_set.phase) {
+            self.fine.abstract_info_set(info_set)
+        } else {
+            self.coarse.abstract_info_set(info_set)
         }
     }
 
