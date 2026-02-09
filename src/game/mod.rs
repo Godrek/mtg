@@ -182,7 +182,12 @@ pub struct PlayerState {
     /// currently in the command zone (typically the commander).
     pub command_zone: Vec<ObjectId>,
     /// The CardId of this player's commander (None in non-Commander formats).
+    /// Used during setup to identify which card is the commander.
     pub commander_card_id: Option<CardId>,
+    /// The ObjectId of this player's commander instance (set during game setup).
+    /// Used at runtime for identity checks — more robust than card_def_id
+    /// matching since two cards can share a CardId (e.g., clone effects).
+    pub commander_object_id: Option<ObjectId>,
     /// How many times the commander has been cast from the command zone.
     /// Each additional cast costs {2} more (the "commander tax").
     pub commander_tax: u32,
@@ -207,6 +212,7 @@ impl PlayerState {
             exile: Vec::new(),
             command_zone: Vec::new(),
             commander_card_id: None,
+            commander_object_id: None,
             commander_tax: 0,
             commander_damage_received: Vec::new(),
         }
@@ -823,17 +829,28 @@ impl GameState {
 
     /// Move a card instance from one zone to another.
     ///
+    /// # Commander redirect (GTO simplification)
+    ///
     /// In Commander format, when a commander would move to graveyard or exile
-    /// from anywhere, it is redirected to the command zone instead (CR 903.9a).
-    /// This is always applied automatically (the GTO-optimal choice in almost
-    /// all cases).
+    /// from anywhere, it is redirected to the command zone instead.
+    ///
+    /// **Note:** As of the 2024 rules update, CR 903.9a makes this a player
+    /// choice — the commander's owner may choose to let it go to graveyard/exile
+    /// instead. We always redirect to the command zone because in a GTO
+    /// (Game Theory Optimal) context, returning the commander to the command
+    /// zone is nearly always the dominant strategy: the commander remains
+    /// accessible for re-casting, and the marginal value of a commander in
+    /// graveyard/exile (e.g., for delve, escape, or reanimate) is rarely worth
+    /// giving up command zone access. If future strategies require modeling
+    /// this choice, surface it as an `Action::ChooseCommanderZone` decision
+    /// point for the solver.
     pub fn move_object(
         &mut self,
         obj_id: ObjectId,
         from: ZoneType,
         to: ZoneType,
     ) {
-        // Commander redirect: graveyard/exile -> command zone
+        // Commander redirect: graveyard/exile -> command zone (see doc above)
         let actual_to = if self.format == GameFormat::Commander
             && (to == ZoneType::Graveyard || to == ZoneType::Exile)
             && self.is_commander(obj_id)
@@ -1283,16 +1300,28 @@ impl GameState {
     }
 
     /// Check if the given object is a player's commander.
+    ///
+    /// Checks by object identity (`commander_object_id`) when available,
+    /// which is robust against clone effects. Falls back to `card_def_id`
+    /// matching for states set up without `commander_object_id`.
     pub fn is_commander(&self, obj_id: ObjectId) -> bool {
         if self.format != GameFormat::Commander {
             return false;
         }
+        // Prefer object identity check
+        for player in &self.players {
+            if player.commander_object_id == Some(obj_id) {
+                return true;
+            }
+        }
+        // Fallback: card_def_id match (for backwards compatibility)
         if let Some(inst) = self.objects.get(&obj_id) {
             let owner = inst.owner;
-            self.players[owner].commander_card_id == Some(inst.card_def_id)
-        } else {
-            false
+            if self.players[owner].commander_object_id.is_none() {
+                return self.players[owner].commander_card_id == Some(inst.card_def_id);
+            }
         }
+        false
     }
 
     /// Check if the given object is in a player's command zone.

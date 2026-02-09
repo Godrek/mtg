@@ -29,9 +29,11 @@ fn setup_commander_state(commander0: CardId, commander1: CardId) -> GameState {
     state.players[0].commander_card_id = Some(commander0);
     state.players[1].commander_card_id = Some(commander1);
 
-    // Put commanders in command zone
-    state.create_card_in_zone(commander0, 0, ZoneType::Command);
-    state.create_card_in_zone(commander1, 1, ZoneType::Command);
+    // Put commanders in command zone and record object IDs
+    let cmd0_obj = state.create_card_in_zone(commander0, 0, ZoneType::Command);
+    let cmd1_obj = state.create_card_in_zone(commander1, 1, ZoneType::Command);
+    state.players[0].commander_object_id = Some(cmd0_obj);
+    state.players[1].commander_object_id = Some(cmd1_obj);
 
     // Libraries so no one decks out
     for _ in 0..30 {
@@ -240,10 +242,11 @@ fn test_commander_tax_increments() {
 fn test_commander_redirects_to_command_zone_on_death() {
     let mut state = setup_commander_state(ids::BRIMAZ_KING, ids::THRUN_LAST_TROLL);
 
-    // Put Brimaz directly on the battlefield (simulating already resolved)
-    let brimaz_obj = state.create_card_in_zone(ids::BRIMAZ_KING, 0, ZoneType::Battlefield);
-    // Mark it as the commander object by ensuring card_def_id matches
-    state.players[0].commander_card_id = Some(ids::BRIMAZ_KING);
+    // Move the actual commander object from command zone to battlefield
+    // (simulating a resolved CastCommander)
+    let brimaz_obj = state.players[0].commander_object_id.unwrap();
+    state.move_object(brimaz_obj, ZoneType::Command, ZoneType::Battlefield);
+    assert!(state.battlefield.contains(&brimaz_obj));
 
     // Move Brimaz to graveyard (simulating destruction)
     state.move_object(brimaz_obj, ZoneType::Battlefield, ZoneType::Graveyard);
@@ -263,7 +266,9 @@ fn test_commander_redirects_to_command_zone_on_death() {
 fn test_commander_redirects_to_command_zone_on_exile() {
     let mut state = setup_commander_state(ids::BRIMAZ_KING, ids::THRUN_LAST_TROLL);
 
-    let brimaz_obj = state.create_card_in_zone(ids::BRIMAZ_KING, 0, ZoneType::Battlefield);
+    // Move the actual commander object to battlefield first
+    let brimaz_obj = state.players[0].commander_object_id.unwrap();
+    state.move_object(brimaz_obj, ZoneType::Command, ZoneType::Battlefield);
 
     // Move Brimaz to exile (simulating Path to Exile)
     state.move_object(brimaz_obj, ZoneType::Battlefield, ZoneType::Exile);

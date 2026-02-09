@@ -1974,7 +1974,8 @@ pub fn setup_commander_game(
     let mut found_commander0 = false;
     for &card_id in deck0 {
         if card_id == commander0 && !found_commander0 {
-            state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            let obj_id = state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            state.players[0].commander_object_id = Some(obj_id);
             found_commander0 = true;
         } else {
             lib0.push(state.create_card_in_zone(card_id, 0, ZoneType::Library));
@@ -1988,7 +1989,8 @@ pub fn setup_commander_game(
     let mut found_commander1 = false;
     for &card_id in deck1 {
         if card_id == commander1 && !found_commander1 {
-            state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            let obj_id = state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            state.players[1].commander_object_id = Some(obj_id);
             found_commander1 = true;
         } else {
             lib1.push(state.create_card_in_zone(card_id, 1, ZoneType::Library));
@@ -2046,6 +2048,26 @@ pub fn validate_commander_deck(
         }
     } else {
         return Err(format!("Commander card ID {} not found in database", commander));
+    }
+
+    // Color identity check (CR 903.4): every card must have a color identity
+    // that is a subset of the commander's color identity.
+    let commander_identity: std::collections::HashSet<crate::mana::Color> = db
+        .get(commander)
+        .map(|d| d.color_identity().into_iter().collect())
+        .unwrap_or_default();
+    for &card_id in deck {
+        if let Some(def) = db.get(card_id) {
+            let card_identity = def.color_identity();
+            for color in &card_identity {
+                if !commander_identity.contains(color) {
+                    return Err(format!(
+                        "'{}' has color {} which is outside the commander's color identity",
+                        def.name, color
+                    ));
+                }
+            }
+        }
     }
 
     // Singleton check: no more than 1 copy of non-basic-land cards

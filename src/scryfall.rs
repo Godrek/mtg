@@ -230,7 +230,7 @@ impl ScryfallFetcher {
         // Query Scryfall API
         let url = format!(
             "https://api.scryfall.com/cards/named?exact={}",
-            urlencod(name)
+            urlencode(name)
         );
 
         let response = ureq::get(&url)
@@ -493,11 +493,13 @@ fn parse_type_line(type_line: &str) -> (Vec<Supertype>, Vec<CardType>, Vec<Subty
     let mut card_types = Vec::new();
     let mut subtypes = Vec::new();
 
-    // Split on " — " (em dash) or " - " (hyphen)
-    let (main_part, sub_part) = if let Some(idx) = type_line.find(" — ") {
-        (&type_line[..idx], Some(&type_line[idx + 5..]))
-    } else if let Some(idx) = type_line.find(" - ") {
-        (&type_line[..idx], Some(&type_line[idx + 3..]))
+    // Split on " — " (em dash) or " - " (hyphen) using split_once
+    // for robustness (avoids manual byte-offset arithmetic for the
+    // multi-byte em dash character).
+    let (main_part, sub_part) = if let Some((main, sub)) = type_line.split_once(" — ") {
+        (main, Some(sub))
+    } else if let Some((main, sub)) = type_line.split_once(" - ") {
+        (main, Some(sub))
     } else {
         (type_line, None)
     };
@@ -926,17 +928,18 @@ fn extract_number_before(text: &str, after_word: &str) -> Option<u32> {
     None
 }
 
-/// Parse +N/+N or -N/-N buff/debuff from text.
+/// Parse buff/debuff from text: +N/+N, -N/-N, +N/-N, or -N/+N.
 fn parse_buff(text: &str) -> Option<(i32, i32)> {
-    // Look for "+N/+N" or "-N/-N" patterns
-    let re_patterns = ["+", "-"];
-    for sign in &re_patterns {
-        for p in 0..=10 {
-            for t in 0..=10 {
-                let pattern = format!("{sign}{p}/{sign}{t}");
-                if text.contains(&pattern) {
-                    let multiplier: i32 = if *sign == "-" { -1 } else { 1 };
-                    return Some((p as i32 * multiplier, t as i32 * multiplier));
+    for &sign_p in &["+", "-"] {
+        for &sign_t in &["+", "-"] {
+            for p in 0..=10 {
+                for t in 0..=10 {
+                    let pattern = format!("{sign_p}{p}/{sign_t}{t}");
+                    if text.contains(&pattern) {
+                        let p_val = if sign_p == "-" { -(p as i32) } else { p as i32 };
+                        let t_val = if sign_t == "-" { -(t as i32) } else { t as i32 };
+                        return Some((p_val, t_val));
+                    }
                 }
             }
         }
@@ -945,14 +948,31 @@ fn parse_buff(text: &str) -> Option<(i32, i32)> {
 }
 
 /// Count mana symbols in text like "add {B}{B}{B}" -> 3.
+/// Only counts actual mana symbols ({W}, {U}, {B}, {R}, {G}, {C}),
+/// not other braced tokens like {T} or ability costs.
 fn count_mana_symbols(text: &str) -> Option<u32> {
-    let count = text.matches('{').count() as u32;
+    let mana_symbols = ["{w}", "{u}", "{b}", "{r}", "{g}", "{c}"];
+    let count: u32 = mana_symbols.iter()
+        .map(|s| text.matches(s).count() as u32)
+        .sum();
     if count > 0 { Some(count.min(10)) } else { None }
 }
 
-/// Simple URL encoding for card names (spaces -> %20, etc.).
-fn urlencod(s: &str) -> String {
-    s.replace(' ', "+")
-        .replace('\'', "%27")
-        .replace(',', "%2C")
+/// URL-encode a string for use in query parameters.
+/// Handles common characters in MTG card names (spaces, apostrophes, commas,
+/// colons, etc.) using percent-encoding.
+fn urlencode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len() * 2);
+    for c in s.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => result.push(c),
+            ' ' => result.push('+'),
+            _ => {
+                for byte in c.to_string().as_bytes() {
+                    result.push_str(&format!("%{:02X}", byte));
+                }
+            }
+        }
+    }
+    result
 }

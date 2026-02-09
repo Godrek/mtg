@@ -379,12 +379,30 @@ impl CardDef {
         self.is_instant() || self.has_flash()
     }
 
-    /// Color identity of this card.
+    /// Color identity of this card (CR 903.4).
+    ///
+    /// Includes colors from the mana cost and from mana abilities (basic land
+    /// subtypes, dual lands, etc.). Full rules text scanning for mana symbols
+    /// is not yet implemented.
     pub fn color_identity(&self) -> Vec<Color> {
-        self.mana_cost
-            .as_ref()
-            .map(|c| c.colors())
-            .unwrap_or_default()
+        let mut colors = std::collections::HashSet::new();
+        // Mana cost contributes to color identity
+        if let Some(ref cost) = self.mana_cost {
+            for c in cost.colors() {
+                colors.insert(c);
+            }
+        }
+        // Mana abilities contribute to color identity (basic land subtypes, duals)
+        for ability in &self.mana_abilities {
+            match ability {
+                ManaAbility::TapForColor(c) => { colors.insert(*c); }
+                ManaAbility::TapForChoice(cs) => { for c in cs { colors.insert(*c); } }
+                _ => {}
+            }
+        }
+        let mut result: Vec<Color> = colors.into_iter().collect();
+        result.sort_by_key(|c| *c as u8);
+        result
     }
 }
 

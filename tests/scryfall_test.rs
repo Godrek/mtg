@@ -3,6 +3,10 @@
 //! These tests verify the card data parsing and conversion logic.
 //! Tests that require network access are gated behind the `scryfall_live`
 //! test name prefix and only run when explicitly targeted.
+//!
+//! Requires the `scryfall` feature: `cargo test --features scryfall`
+
+#![cfg(feature = "scryfall")]
 
 use mtg_gto::card::*;
 use mtg_gto::mana::{Color, ManaCost};

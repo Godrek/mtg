@@ -97,66 +97,8 @@ fn run_game_inner(
 ) -> GameResult {
     let mut state = GameState::new(2);
     state.card_db = Some(card_db);
-
     rules::setup_game(&mut state, deck0, deck1);
-
-    let mut actions_taken: u32 = 0;
-
-    while !state.game_over && state.turn_number <= MAX_TURNS && actions_taken < MAX_ACTIONS {
-        let player = state.priority_player;
-        let actions = legal_actions(&state);
-
-        if actions.is_empty() || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority) {
-            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
-            actions_taken += 1;
-            continue;
-        }
-
-        let strategy: &dyn Strategy = if player == 0 { strategy0 } else { strategy1 };
-        let action = strategy.choose_action(&state, player);
-
-        if verbose && actions_taken < 200 {
-            let db = state.card_db();
-            let action_name = match &action {
-                crate::action::Action::CastSpell { object_id, .. } => {
-                    let inst = &state.objects[object_id];
-                    format!("Cast {}", db.get(inst.card_def_id).map(|d| d.name.as_str()).unwrap_or("?"))
-                }
-                crate::action::Action::PlayLand { object_id } => {
-                    let inst = &state.objects[object_id];
-                    format!("Play {}", db.get(inst.card_def_id).map(|d| d.name.as_str()).unwrap_or("?"))
-                }
-                crate::action::Action::OrderTriggers { ordering } => {
-                    format!("Order {} triggers", ordering.len())
-                }
-                other => format!("{}", other),
-            };
-            eprintln!(
-                "T{} {:?} P{}: {} (life: {}/{})",
-                state.turn_number,
-                state.phase,
-                player,
-                action_name,
-                state.players[0].life,
-                state.players[1].life,
-            );
-        }
-
-        rules::apply_action(&mut state, &action);
-        actions_taken += 1;
-
-        // Periodic SBA check
-        if actions_taken % 10 == 0 {
-            rules::check_state_based_actions(&mut state);
-        }
-    }
-
-    GameResult {
-        winner: state.winner,
-        turns: state.turn_number,
-        actions_taken,
-        final_life: [state.players[0].life, state.players[1].life],
-    }
+    run_game_loop(&mut state, strategy0, strategy1, verbose)
 }
 
 /// Run a single Commander game to completion with the given strategies.
@@ -187,25 +129,33 @@ fn run_commander_game_inner(
 ) -> GameResult {
     let mut state = GameState::new_commander(2);
     state.card_db = Some(card_db);
-
     rules::setup_commander_game(&mut state, deck0, deck1, commander0, commander1);
+    run_game_loop(&mut state, strategy0, strategy1, verbose)
+}
 
+/// Shared game loop for both standard and commander formats.
+fn run_game_loop(
+    state: &mut GameState,
+    strategy0: &dyn Strategy,
+    strategy1: &dyn Strategy,
+    verbose: bool,
+) -> GameResult {
     let mut actions_taken: u32 = 0;
 
     while !state.game_over && state.turn_number <= MAX_TURNS && actions_taken < MAX_ACTIONS {
         let player = state.priority_player;
-        let actions = legal_actions(&state);
+        let actions = legal_actions(state);
 
         if actions.is_empty()
             || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
         {
-            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
+            rules::apply_action(state, &crate::action::Action::PassPriority);
             actions_taken += 1;
             continue;
         }
 
         let strategy: &dyn Strategy = if player == 0 { strategy0 } else { strategy1 };
-        let action = strategy.choose_action(&state, player);
+        let action = strategy.choose_action(state, player);
 
         if verbose && actions_taken < 200 {
             let db = state.card_db();
@@ -229,6 +179,9 @@ fn run_commander_game_inner(
                             .unwrap_or("?")
                     )
                 }
+                crate::action::Action::OrderTriggers { ordering } => {
+                    format!("Order {} triggers", ordering.len())
+                }
                 other => format!("{}", other),
             };
             eprintln!(
@@ -242,11 +195,11 @@ fn run_commander_game_inner(
             );
         }
 
-        rules::apply_action(&mut state, &action);
+        rules::apply_action(state, &action);
         actions_taken += 1;
 
         if actions_taken % 10 == 0 {
-            rules::check_state_based_actions(&mut state);
+            rules::check_state_based_actions(state);
         }
     }
 
