@@ -1,6 +1,7 @@
 pub mod mana;
 pub mod card;
 pub mod deck_import;
+pub mod scryfall;
 pub mod game;
 pub mod action;
 pub mod events;
