@@ -1,76 +1,77 @@
-# PR #22 Review: Commander Format + Scryfall API Integration
+# PR #22 Re-Review: Commander Format + Scryfall API Integration
 
-**Commits:** 2 (`880a4c6` Add 1v1 Commander format support, `fb537bc` Add Scryfall API integration)
-**Files changed:** 14 | **+3,149 / -9**
-**Build:** Compiles cleanly | **Tests:** 166 pass, 0 fail (4 network-gated ignored)
-
----
-
-## Summary
-
-This PR adds two major features:
-
-1. **1v1 Commander format** — command zone, commander tax, commander damage (21 lethal), death/exile redirect to command zone, 100-card singleton deck validation, full game setup and simulation.
-2. **Scryfall API integration** — fetch any Magic card by name, convert to internal `CardDef`, disk-cache results, import full decklists.
+**Commits:** 3 (`880a4c6` Commander support, `fb537bc` Scryfall integration, `9027790` Review fixes)
+**Files changed:** 14 | **Build:** Compiles cleanly in both `default` and `--features scryfall` configs
+**Tests:** 206 pass without `scryfall`, 223 pass with `--features scryfall`, 0 fail
 
 ---
 
-## What works well
+## Previous review status
 
-- **Clean separation of concerns.** Commander logic lives in the right places: format enum in `game/mod.rs`, rules in `rules/mod.rs`, actions in `action/`, simulation in `simulation/mod.rs`. The Scryfall module is fully self-contained.
-- **Comprehensive test coverage.** 24 commander tests cover every mechanic (command zone, tax, redirect, damage tracking, deck validation, full game sim). 17 offline Scryfall parser tests plus 4 gated live tests.
-- **Correct commander redirect.** `move_object` intercepts graveyard/exile destinations for commanders (CR 903.9a). The implementation correctly updates the emitted `ZoneType` events to reflect the actual destination.
-- **Rate limiting and caching.** Scryfall fetcher respects the 100ms rate limit and caches to disk, which is good API citizenship.
-- **Backward compatibility.** Existing `GameState::new()` defaults to `Standard` format. All pre-existing tests continue to pass.
-- **Combat damage source tracking fixed.** The `DamageEvent.source_id` field replaces the hardcoded `source: 0` placeholder — a real bug fix that benefits more than just commander.
+All 3 must-fix items and 6 other items from the first review have been addressed. Verification below.
 
 ---
 
-## Issues
+## Must-fix items: RESOLVED
 
-### Bugs / Correctness
+### 1. Feature flag for `ureq` — FIXED
 
-1. **Commander redirect is not optional (CR 903.9a).** The current implementation *always* redirects the commander to the command zone on death/exile. Per the 2024 rules update, the commander's owner must *choose* whether to send it to the command zone. This is a forced redirect in the code (`move_object` in `src/game/mod.rs:836-843`). The code comment says "the GTO-optimal choice in almost all cases," which is a reasonable simplification for a GTO solver, but it does deviate from the actual rules. This should be documented more prominently or gated behind a flag.
+`Cargo.toml` now has `[features] scryfall = ["ureq"]` with `ureq` marked `optional = true`. The `scryfall` module is gated with `#[cfg(feature = "scryfall")]` in `src/lib.rs`, and `tests/scryfall_test.rs` has `#![cfg(feature = "scryfall")]`. Default builds skip all HTTP/TLS dependencies entirely. Verified: `cargo check` (no feature) compiles in 11s vs previous 20s with all the TLS deps.
 
-2. **Commander tax is applied before mana payment verification in `apply_action`.** In `src/rules/mod.rs:285-310`, `CastCommander` calls `auto_tap_lands` then `mana_pool.pay` but does not check whether payment actually succeeded. If `can_potentially_pay` in `legal_actions` has an edge-case mismatch with `auto_tap_lands`, the game could proceed with unpaid costs. `CastSpell` has the same pattern, so this is pre-existing, but worth noting.
+### 2. Color identity validation — FIXED
 
-3. **`is_commander` matches by `card_def_id`, not object identity.** In `src/game/mod.rs:1284-1293`, `is_commander` checks if `inst.card_def_id == commander_card_id`. If a player somehow has two copies of the same card (e.g., via Clone effects), both would be treated as the commander. Not a problem today since Clone isn't implemented, but will be fragile if/when it is.
+`validate_commander_deck` in `src/rules/mod.rs:2053-2071` now checks every card's color identity is a subset of the commander's identity (CR 903.4). The `CardDef::color_identity()` method was enhanced (`src/card/mod.rs:387-406`) to include colors from both mana cost and mana abilities (`TapForColor`, `TapForChoice`), so dual lands and basic land subtypes contribute correctly. Uses `HashSet<Color>` for subset checking. Implementation is correct.
 
-4. **`count_mana_symbols` over-counts.** In `src/scryfall.rs:948-951`, `count_mana_symbols` counts *all* `{` characters in the text, not just mana symbols. Oracle text with ability costs like `{2}, {T}: ...` would inflate the count. This affects the `AddMana` effect parsing.
+**Note:** Color identity from mana symbols in oracle text (e.g., `{R}` in Alesha's activated ability text) is not yet scanned — the doc comment acknowledges this limitation. This is acceptable for the current card pool but should be tracked for future work.
 
-5. **`parse_buff` doesn't handle mixed signs.** `src/scryfall.rs:930-944` only matches `+N/+N` or `-N/-N`, not `+N/-N` (e.g., "target creature gets +3/-1 until end of turn"). The loop iterates signs `["+", "-"]` and uses the same sign for both power and toughness.
+### 3. Command-zone redirect documented — FIXED
 
-### Design / Architecture
+`move_object` in `src/game/mod.rs:832-847` now has a thorough doc comment explaining the GTO simplification, referencing CR 903.9a, explaining why always-redirect is the dominant strategy, and noting the future `Action::ChooseCommanderZone` extension point. Excellent documentation.
 
-6. **`ureq` is a synchronous HTTP client added as a non-optional dependency.** This adds 535 lines to `Cargo.lock` and substantial compile-time cost (ring, rustls, url, idna, icu_*). Since Scryfall fetching is only used for deck import (not during simulation), this should be behind a Cargo feature flag (e.g., `[features] scryfall = ["ureq"]`) so CI/simulation builds aren't burdened.
+---
 
-7. **`run_commander_game_inner` is a near-copy of `run_game_inner`.** `src/simulation/mod.rs` duplicates ~60 lines of game-loop logic. The only differences are `new_commander` vs `new`, `setup_commander_game` vs `setup_game`, and a verbose branch that handles `CastCommander`. These should share a common inner loop or be parameterized by format.
+## Other fixes: RESOLVED
 
-8. **`setup_commander_game` duplicates `setup_game` logic.** `src/rules/mod.rs:1949-2010` — the two functions have the same shuffle/draw/phase-entry pattern. Consider extracting a shared helper.
+### 4. Deduplicated game loops — FIXED
 
-9. **Snapshot doesn't persist `commander_tax` / `commander_damage_received` on players.** `GameStateSnapshot` now includes `format`, but the snapshot is just a clone of player state vectors (which *do* include commander fields since `PlayerState` is `Clone`). This works correctly today. However, `GameStateSnapshot` explicitly lists its fields — the new `format` field was added, but there's no verification that all new `PlayerState` commander fields are tested through snapshot/restore. A test that snapshots mid-commander-game and restores would be prudent.
+Extracted `run_game_loop()` in `src/simulation/mod.rs` as a shared function. Both `run_game_inner` and `run_commander_game_inner` now just set up their respective `GameState` and delegate to the common loop. The verbose logging branch now also handles `CastCommander` and `OrderTriggers` uniformly. Clean net reduction of ~60 lines.
 
-10. **`validate_commander_deck` does not check color identity.** Commander decks require all cards to share the commander's color identity. This is a core deckbuilding rule (CR 903.4) that's missing entirely.
+### 5. `is_commander` uses object identity — FIXED
 
-### Minor / Style
+`PlayerState` now has `commander_object_id: Option<ObjectId>` (`src/game/mod.rs:187-189`). `is_commander()` checks by `commander_object_id` first, falling back to `card_def_id` only when `commander_object_id` is `None` (backward compat). `setup_commander_game` sets `commander_object_id` during setup (`src/rules/mod.rs:1977,1992`). Tests updated to use object identity (`tests/commander_test.rs:32-34`). The redirect tests now properly move the actual commander object rather than creating a new card with the same `card_def_id`, which is a better test pattern.
 
-11. **`urlencod` is misspelled.** `src/scryfall.rs:954` — should be `urlencode` or `url_encode`. Also, the encoding is incomplete (only handles space, apostrophe, comma). Consider using the `url` crate's encoding since it's already a transitive dependency.
+### 6. `count_mana_symbols` — FIXED
 
-12. **`ManaCost::parse` is assumed to exist.** The Scryfall module calls `ManaCost::parse(s)` (`src/scryfall.rs:429`). I can see it compiles, but I couldn't find where this method was added — verify it handles all Scryfall mana cost formats (hybrid, phyrexian, X costs, etc.).
+Now explicitly counts only `{w}`, `{u}`, `{b}`, `{r}`, `{g}`, `{c}` symbols (`src/scryfall.rs:951-956`). `{T}`, `{2}`, etc. are correctly excluded.
 
-13. **Type line parsing with em-dash byte offset.** `src/scryfall.rs:498` uses `&type_line[idx + 5..]` for the em-dash (`" — "`). The em-dash `—` is 3 bytes in UTF-8, so `" — "` is `1 + 3 + 1 = 5` bytes. This is correct but fragile — a comment noting the byte math or using `str::split_once` would be safer.
+### 7. `parse_buff` mixed signs — FIXED
 
-14. **Magic numbers.** `next_card_id: 10_000` in the Scryfall fetcher (`src/scryfall.rs:158`) assumes sample card IDs stay below 10,000. A constant would be clearer.
+Iterates all four sign combinations (`+/+`, `-/-`, `+/-`, `-/+`) with independent `sign_p` and `sign_t` loops (`src/scryfall.rs:931-946`).
+
+### 8. `urlencode` — FIXED
+
+Renamed from `urlencod` to `urlencode` (`src/scryfall.rs:955`). Now does proper RFC 3986 percent-encoding: unreserved characters (`A-Za-z0-9-_.~`) pass through, spaces become `+`, everything else is percent-encoded byte-by-byte. Handles multi-byte UTF-8 correctly.
+
+### 9. Type line parsing — FIXED
+
+Uses `split_once(" — ")` and `split_once(" - ")` instead of manual `find` + byte offset arithmetic (`src/scryfall.rs:496-501`). Eliminates the fragile `idx + 5` calculation.
+
+---
+
+## Remaining items (non-blocking, informational)
+
+These items from the original review were not addressed in this round but are acceptable as follow-up work:
+
+- **Mana payment verification in `apply_action`** (original #2): `CastCommander` (and pre-existing `CastSpell`) don't verify that mana payment succeeded after `auto_tap_lands`. Low risk since `can_potentially_pay` gates the action in `legal_actions`.
+- **`setup_commander_game` duplication** (original #8): Still duplicates the shuffle/draw/phase-entry pattern from `setup_game`. Less critical now that the game loop itself is deduplicated.
+- **Snapshot/restore test for commander state** (original #9): No dedicated test for snapshot mid-commander-game. Works correctly since `PlayerState` is `Clone`, but a test would add confidence.
+- **`ManaCost::parse` format coverage** (original #12): Should verify handling of hybrid (`{W/U}`), phyrexian (`{W/P}`), and X costs.
+- **Magic number `10_000`** (original #14): Starting card ID for Scryfall-fetched cards. A named constant would be clearer.
 
 ---
 
 ## Verdict
 
-**Approve with requested changes.** The feature implementation is solid, well-tested, and correctly integrated into the existing architecture. The commander mechanics work as expected across all tests. The Scryfall integration is a practical addition for expanding the card pool.
+**Approve.** All must-fix items and requested changes have been properly addressed. The fixes are clean, well-implemented, and maintain backward compatibility. The feature flag correctly isolates the HTTP dependency. Color identity validation follows the comprehensive rules. The code deduplication and object-identity improvements strengthen the architecture.
 
-The mandatory items before merge are:
-- **Issue #6:** Put `ureq` behind a feature flag to avoid bloating non-network builds.
-- **Issue #10:** Add color identity validation to `validate_commander_deck` (core Commander rule).
-- **Issue #1:** Add a prominent doc comment about the forced command-zone redirect simplification.
-
-Everything else (dedup of simulation/setup code, `urlencod` rename, `count_mana_symbols` fix) can be follow-up work.
+223 tests pass across both build configurations. Ready to merge.
