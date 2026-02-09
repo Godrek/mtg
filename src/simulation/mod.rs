@@ -97,34 +97,87 @@ fn run_game_inner(
 ) -> GameResult {
     let mut state = GameState::new(2);
     state.card_db = Some(card_db);
-
     rules::setup_game(&mut state, deck0, deck1);
+    run_game_loop(&mut state, strategy0, strategy1, verbose)
+}
 
+/// Run a single Commander game to completion with the given strategies.
+pub fn run_commander_game(
+    card_db: &CardDatabase,
+    deck0: &[CardId],
+    deck1: &[CardId],
+    commander0: CardId,
+    commander1: CardId,
+    strategy0: &dyn Strategy,
+    strategy1: &dyn Strategy,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    run_commander_game_inner(
+        db, deck0, deck1, commander0, commander1, strategy0, strategy1, false,
+    )
+}
+
+fn run_commander_game_inner(
+    card_db: Arc<CardDatabase>,
+    deck0: &[CardId],
+    deck1: &[CardId],
+    commander0: CardId,
+    commander1: CardId,
+    strategy0: &dyn Strategy,
+    strategy1: &dyn Strategy,
+    verbose: bool,
+) -> GameResult {
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(card_db);
+    rules::setup_commander_game(&mut state, deck0, deck1, commander0, commander1);
+    run_game_loop(&mut state, strategy0, strategy1, verbose)
+}
+
+/// Shared game loop for both standard and commander formats.
+fn run_game_loop(
+    state: &mut GameState,
+    strategy0: &dyn Strategy,
+    strategy1: &dyn Strategy,
+    verbose: bool,
+) -> GameResult {
     let mut actions_taken: u32 = 0;
 
     while !state.game_over && state.turn_number <= MAX_TURNS && actions_taken < MAX_ACTIONS {
         let player = state.priority_player;
-        let actions = legal_actions(&state);
+        let actions = legal_actions(state);
 
-        if actions.is_empty() || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority) {
-            rules::apply_action(&mut state, &crate::action::Action::PassPriority);
+        if actions.is_empty()
+            || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
+        {
+            rules::apply_action(state, &crate::action::Action::PassPriority);
             actions_taken += 1;
             continue;
         }
 
         let strategy: &dyn Strategy = if player == 0 { strategy0 } else { strategy1 };
-        let action = strategy.choose_action(&state, player);
+        let action = strategy.choose_action(state, player);
 
         if verbose && actions_taken < 200 {
             let db = state.card_db();
             let action_name = match &action {
-                crate::action::Action::CastSpell { object_id, .. } => {
+                crate::action::Action::CastSpell { object_id, .. }
+                | crate::action::Action::CastCommander { object_id, .. } => {
                     let inst = &state.objects[object_id];
-                    format!("Cast {}", db.get(inst.card_def_id).map(|d| d.name.as_str()).unwrap_or("?"))
+                    format!(
+                        "Cast {}",
+                        db.get(inst.card_def_id)
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("?")
+                    )
                 }
                 crate::action::Action::PlayLand { object_id } => {
                     let inst = &state.objects[object_id];
-                    format!("Play {}", db.get(inst.card_def_id).map(|d| d.name.as_str()).unwrap_or("?"))
+                    format!(
+                        "Play {}",
+                        db.get(inst.card_def_id)
+                            .map(|d| d.name.as_str())
+                            .unwrap_or("?")
+                    )
                 }
                 crate::action::Action::OrderTriggers { ordering } => {
                     format!("Order {} triggers", ordering.len())
@@ -142,12 +195,11 @@ fn run_game_inner(
             );
         }
 
-        rules::apply_action(&mut state, &action);
+        rules::apply_action(state, &action);
         actions_taken += 1;
 
-        // Periodic SBA check
         if actions_taken % 10 == 0 {
-            rules::check_state_based_actions(&mut state);
+            rules::check_state_based_actions(state);
         }
     }
 
@@ -156,6 +208,62 @@ fn run_game_inner(
         turns: state.turn_number,
         actions_taken,
         final_life: [state.players[0].life, state.players[1].life],
+    }
+}
+
+/// Run many Commander games in parallel and aggregate results.
+pub fn simulate_commander(
+    card_db: &CardDatabase,
+    deck0: &[CardId],
+    deck1: &[CardId],
+    commander0: CardId,
+    commander1: CardId,
+    strategy0: &(dyn Strategy + Send + Sync),
+    strategy1: &(dyn Strategy + Send + Sync),
+    num_games: u64,
+) -> SimulationResults {
+    let db = Arc::new(card_db.clone());
+    let p0_wins = AtomicU64::new(0);
+    let p1_wins = AtomicU64::new(0);
+    let draws = AtomicU64::new(0);
+    let total_turns = AtomicU64::new(0);
+    let total_actions = AtomicU64::new(0);
+
+    (0..num_games).into_par_iter().for_each(|_| {
+        let result = run_commander_game_inner(
+            Arc::clone(&db),
+            deck0,
+            deck1,
+            commander0,
+            commander1,
+            strategy0,
+            strategy1,
+            false,
+        );
+
+        match result.winner {
+            Some(0) => {
+                p0_wins.fetch_add(1, Ordering::Relaxed);
+            }
+            Some(1) => {
+                p1_wins.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                draws.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        total_turns.fetch_add(result.turns as u64, Ordering::Relaxed);
+        total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
+    });
+
+    let total = num_games;
+    SimulationResults {
+        total_games: total,
+        player0_wins: p0_wins.load(Ordering::Relaxed),
+        player1_wins: p1_wins.load(Ordering::Relaxed),
+        draws: draws.load(Ordering::Relaxed),
+        avg_turns: total_turns.load(Ordering::Relaxed) as f64 / total as f64,
+        avg_actions: total_actions.load(Ordering::Relaxed) as f64 / total as f64,
     }
 }
 

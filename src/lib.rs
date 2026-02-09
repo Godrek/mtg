@@ -1,6 +1,8 @@
 pub mod mana;
 pub mod card;
 pub mod deck_import;
+#[cfg(feature = "scryfall")]
+pub mod scryfall;
 pub mod game;
 pub mod action;
 pub mod events;
