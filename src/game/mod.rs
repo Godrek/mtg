@@ -9,6 +9,20 @@ use crate::mana::ManaPool;
 use crate::replacement::{ReplacementEffect, ReplacementEventKind, ReplacementAction};
 
 // ---------------------------------------------------------------------------
+// Game format
+// ---------------------------------------------------------------------------
+
+/// Which format rules the game uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GameFormat {
+    /// Standard 60-card constructed, 20 life.
+    Standard,
+    /// 1v1 Commander: 100-card singleton, 40 life, commander zone, commander
+    /// tax, 21 commander damage.
+    Commander,
+}
+
+// ---------------------------------------------------------------------------
 // Characteristics cache (Fix 1 + Fix 3)
 // ---------------------------------------------------------------------------
 
@@ -162,6 +176,20 @@ pub struct PlayerState {
     pub hand: Vec<ObjectId>,
     pub graveyard: Vec<ObjectId>,
     pub exile: Vec<ObjectId>,
+
+    // ---- Commander fields ----
+    /// The command zone (Commander format only). Contains ObjectIds of cards
+    /// currently in the command zone (typically the commander).
+    pub command_zone: Vec<ObjectId>,
+    /// The CardId of this player's commander (None in non-Commander formats).
+    pub commander_card_id: Option<CardId>,
+    /// How many times the commander has been cast from the command zone.
+    /// Each additional cast costs {2} more (the "commander tax").
+    pub commander_tax: u32,
+    /// Commander damage received from each opponent's commander, indexed by
+    /// opponent PlayerIndex. In 1v1 this is a single-element vec.
+    /// A player loses if any entry reaches 21.
+    pub commander_damage_received: Vec<i32>,
 }
 
 impl PlayerState {
@@ -177,7 +205,18 @@ impl PlayerState {
             hand: Vec::new(),
             graveyard: Vec::new(),
             exile: Vec::new(),
+            command_zone: Vec::new(),
+            commander_card_id: None,
+            commander_tax: 0,
+            commander_damage_received: Vec::new(),
         }
+    }
+
+    /// Create a new PlayerState with commander-specific starting life.
+    pub fn new_commander(starting_life: i32) -> Self {
+        let mut state = Self::new();
+        state.life = starting_life;
+        state
     }
 }
 
@@ -241,6 +280,10 @@ pub struct GameState {
     /// `GameState::clone()` is O(1) for the DB — critical for MCTS/CFR search.
     #[serde(skip)]
     pub card_db: Option<Arc<CardDatabase>>,
+
+    /// The game format (Standard or Commander). Determines starting life,
+    /// deck construction rules, and whether commander-specific rules apply.
+    pub format: GameFormat,
 
     /// All card instances in the game, keyed by ObjectId.
     pub objects: HashMap<ObjectId, CardInstance>,
@@ -395,6 +438,7 @@ impl CardDatabase {
 /// you save a state, apply several actions, then revert.
 #[derive(Clone)]
 pub struct GameStateSnapshot {
+    format: GameFormat,
     objects: HashMap<ObjectId, CardInstance>,
     battlefield: Vec<ObjectId>,
     stack: Vec<StackEntry>,
@@ -554,6 +598,14 @@ impl GameState {
                 visible.insert(trigger.source_id, inst);
             }
         }
+        // Command zones — public (both players' commanders are visible)
+        for p in &self.players {
+            for &id in &p.command_zone {
+                if let Some(inst) = self.objects.get(&id) {
+                    visible.insert(id, inst);
+                }
+            }
+        }
         // Combat participants — attackers and blockers (both keys and values)
         for &id in &self.combat.attackers {
             if let Some(inst) = self.objects.get(&id) {
@@ -603,6 +655,7 @@ impl GameState {
     pub fn new(num_players: usize) -> Self {
         GameState {
             card_db: None,
+            format: GameFormat::Standard,
             objects: HashMap::new(),
             battlefield: Vec::new(),
             stack: Vec::new(),
@@ -628,6 +681,48 @@ impl GameState {
         }
     }
 
+    /// Create a new game state configured for Commander format.
+    pub fn new_commander(num_players: usize) -> Self {
+        let mut state = GameState {
+            card_db: None,
+            format: GameFormat::Commander,
+            objects: HashMap::new(),
+            battlefield: Vec::new(),
+            stack: Vec::new(),
+            players: (0..num_players)
+                .map(|_| PlayerState::new_commander(40))
+                .collect(),
+            active_player: 0,
+            phase: Phase::Untap,
+            priority_player: 0,
+            turn_number: 1,
+            consecutive_passes: 0,
+            combat: CombatState::default(),
+            next_object_id: 1,
+            next_stack_id: 1,
+            pending_triggers: Vec::new(),
+            continuous_effects: Vec::new(),
+            next_timestamp: 1,
+            replacement_effects: Vec::new(),
+            extra_turns: VecDeque::new(),
+            skip_phases: HashSet::new(),
+            game_over: false,
+            winner: None,
+            pending_events: Vec::new(),
+            characteristics_cache: CharacteristicsCache::default(),
+        };
+        // Initialize commander damage tracking (each player tracks damage from each opponent)
+        for i in 0..num_players {
+            state.players[i].commander_damage_received = vec![0; num_players];
+        }
+        state
+    }
+
+    /// Whether this game uses Commander format rules.
+    pub fn is_commander_format(&self) -> bool {
+        self.format == GameFormat::Commander
+    }
+
     pub fn card_db(&self) -> &CardDatabase {
         self.card_db.as_ref().expect("CardDatabase not set on GameState")
     }
@@ -637,6 +732,7 @@ impl GameState {
     /// the Arc<CardDatabase> or characteristics cache.
     pub fn snapshot(&self) -> GameStateSnapshot {
         GameStateSnapshot {
+            format: self.format,
             objects: self.objects.clone(),
             battlefield: self.battlefield.clone(),
             stack: self.stack.clone(),
@@ -663,6 +759,7 @@ impl GameState {
     /// Restore game state from a snapshot, keeping the current card_db.
     /// Invalidates all caches.
     pub fn restore(&mut self, snap: GameStateSnapshot) {
+        self.format = snap.format;
         self.objects = snap.objects;
         self.battlefield = snap.battlefield;
         self.stack = snap.stack;
@@ -719,25 +816,40 @@ impl GameState {
             ZoneType::Graveyard => self.players[owner].graveyard.push(obj_id),
             ZoneType::Exile => self.players[owner].exile.push(obj_id),
             ZoneType::Stack => {} // handled separately
-            ZoneType::Command => {} // not implemented yet
+            ZoneType::Command => self.players[owner].command_zone.push(obj_id),
         }
         obj_id
     }
 
     /// Move a card instance from one zone to another.
+    ///
+    /// In Commander format, when a commander would move to graveyard or exile
+    /// from anywhere, it is redirected to the command zone instead (CR 903.9a).
+    /// This is always applied automatically (the GTO-optimal choice in almost
+    /// all cases).
     pub fn move_object(
         &mut self,
         obj_id: ObjectId,
         from: ZoneType,
         to: ZoneType,
     ) {
+        // Commander redirect: graveyard/exile -> command zone
+        let actual_to = if self.format == GameFormat::Commander
+            && (to == ZoneType::Graveyard || to == ZoneType::Exile)
+            && self.is_commander(obj_id)
+        {
+            ZoneType::Command
+        } else {
+            to
+        };
+
         self.invalidate_characteristics_cache();
 
         // Emit zone change event
         self.emit_event(GameEvent::ZoneChange {
             object: obj_id,
             from: crate::events::Zone::from(from),
-            to: crate::events::Zone::from(to),
+            to: crate::events::Zone::from(actual_to),
         });
 
         // Increment zone-change counter (CR 400.7)
@@ -753,12 +865,14 @@ impl GameState {
         self.players[owner].hand.retain(|&id| id != obj_id);
         self.players[owner].graveyard.retain(|&id| id != obj_id);
         self.players[owner].exile.retain(|&id| id != obj_id);
+        self.players[owner].command_zone.retain(|&id| id != obj_id);
         // Also check controller's zones if different
         if controller != owner {
             self.players[controller].library.retain(|&id| id != obj_id);
             self.players[controller].hand.retain(|&id| id != obj_id);
             self.players[controller].graveyard.retain(|&id| id != obj_id);
             self.players[controller].exile.retain(|&id| id != obj_id);
+            self.players[controller].command_zone.retain(|&id| id != obj_id);
         }
         self.battlefield.retain(|&id| id != obj_id);
         self.stack.retain(|e| {
@@ -772,14 +886,14 @@ impl GameState {
         // CR 111.7: Tokens that leave the battlefield cease to exist.
         // They briefly visit the destination zone then are removed.
         let is_token = self.objects.get(&obj_id).map_or(false, |i| i.is_token);
-        if is_token && to != ZoneType::Battlefield {
+        if is_token && actual_to != ZoneType::Battlefield {
             // Token ceases to exist — remove it entirely
             self.objects.remove(&obj_id);
             return;
         }
 
         // Add to destination zone
-        match to {
+        match actual_to {
             ZoneType::Library => self.players[owner].library.push(obj_id),
             ZoneType::Hand => self.players[owner].hand.push(obj_id),
             ZoneType::Battlefield => {
@@ -800,7 +914,7 @@ impl GameState {
             ZoneType::Graveyard => self.players[owner].graveyard.push(obj_id),
             ZoneType::Exile => self.players[owner].exile.push(obj_id),
             ZoneType::Stack => {} // handled by cast_spell
-            ZoneType::Command => {}
+            ZoneType::Command => self.players[owner].command_zone.push(obj_id),
         }
     }
 
@@ -1166,6 +1280,29 @@ impl GameState {
         let bf: HashSet<ObjectId> = self.battlefield.iter().copied().collect();
         self.replacement_effects
             .retain(|e| bf.contains(&e.source_id));
+    }
+
+    /// Check if the given object is a player's commander.
+    pub fn is_commander(&self, obj_id: ObjectId) -> bool {
+        if self.format != GameFormat::Commander {
+            return false;
+        }
+        if let Some(inst) = self.objects.get(&obj_id) {
+            let owner = inst.owner;
+            self.players[owner].commander_card_id == Some(inst.card_def_id)
+        } else {
+            false
+        }
+    }
+
+    /// Check if the given object is in a player's command zone.
+    pub fn is_in_command_zone(&self, obj_id: ObjectId) -> bool {
+        for player in &self.players {
+            if player.command_zone.contains(&obj_id) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Check if an object is a creature using the layer engine.

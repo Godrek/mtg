@@ -282,6 +282,49 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             // decision, not a normal game action.
         }
 
+        Action::CastCommander { object_id, targets } => {
+            let obj_id = *object_id;
+            let player = state.priority_player;
+            let db = state.card_db();
+            let inst = &state.objects[&obj_id];
+            let def = db.get(inst.card_def_id).unwrap().clone();
+
+            // Pay mana cost with commander tax
+            if let Some(ref cost) = def.mana_cost {
+                let tax = state.players[player].commander_tax;
+                let mut taxed_cost = cost.clone();
+                taxed_cost.generic += tax * 2;
+                auto_tap_lands(state, player, &taxed_cost);
+                state.players[player].mana_pool.pay(&taxed_cost);
+            }
+
+            // Increment commander tax for next cast
+            state.players[player].commander_tax += 1;
+
+            // Move to stack
+            let stack_id = state.new_stack_id();
+            state.stack.push(StackEntry {
+                id: stack_id,
+                source: StackSource::Spell(obj_id),
+                controller: player,
+                targets: targets.clone(),
+            });
+            // Remove from command zone
+            state.players[player].command_zone.retain(|&id| id != obj_id);
+
+            state.emit_event(GameEvent::SpellCast {
+                object: obj_id,
+                controller: player,
+            });
+            state.emit_event(GameEvent::ZoneChange {
+                object: obj_id,
+                from: Zone::Command,
+                to: Zone::Stack,
+            });
+
+            state.consecutive_passes = 0;
+        }
+
         Action::ChooseReplacementOrder { ordering } => {
             // Store the chosen replacement order for the current pending replacement.
             // The replacement engine will apply effects in the chosen order when
@@ -398,7 +441,12 @@ fn resolve_spell(
         if let Some(ref effect) = def.spell_effect {
             resolve_effect(state, effect, controller, targets);
         }
-        state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
+        // Commander redirect: non-permanent commander spells go to command zone
+        if state.is_commander(obj_id) {
+            state.move_object(obj_id, ZoneType::Stack, ZoneType::Command);
+        } else {
+            state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
+        }
     }
 }
 
@@ -1047,6 +1095,23 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 }
             }
 
+            // CR 903.10a (Commander): Player with 21+ commander damage from
+            // a single commander loses the game.
+            if state.is_commander_format() {
+                for i in 0..state.players.len() {
+                    if state.players[i].has_lost {
+                        continue;
+                    }
+                    for dmg in &state.players[i].commander_damage_received {
+                        if *dmg >= 21 {
+                            state.players[i].has_lost = true;
+                            any_action = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
             // CR 704.5d: +1/+1 and -1/-1 counter cancellation
             for &obj_id in &state.battlefield.clone() {
                 if let Some(inst) = state.objects.get_mut(&obj_id) {
@@ -1515,6 +1580,8 @@ fn has_first_strike_creatures(state: &GameState) -> bool {
 
 /// A pending damage application collected during combat resolution.
 struct DamageEvent {
+    /// The attacker/source dealing the damage.
+    source_id: ObjectId,
     target_object: Option<ObjectId>,
     target_player: Option<PlayerIndex>,
     amount: u32,
@@ -1569,6 +1636,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
             if blockers.is_empty() {
                 // Unblocked — damage to defending player
                 damage_events.push(DamageEvent {
+                    source_id: attacker_id,
                     target_object: None,
                     target_player: Some(defending_player),
                     amount: power,
@@ -1599,6 +1667,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                     };
 
                     damage_events.push(DamageEvent {
+                        source_id: attacker_id,
                         target_object: Some(blocker_id),
                         target_player: None,
                         amount: damage,
@@ -1610,6 +1679,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                 // Trample: excess to defending player
                 if has_trample && remaining > 0 {
                     damage_events.push(DamageEvent {
+                        source_id: attacker_id,
                         target_object: None,
                         target_player: Some(defending_player),
                         amount: remaining,
@@ -1645,6 +1715,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                             };
 
                         damage_events.push(DamageEvent {
+                            source_id: blocker_id,
                             target_object: Some(attacker_id),
                             target_player: None,
                             amount: blocker_power,
@@ -1663,7 +1734,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                 inst.damage_marked += event.amount;
             }
             state.emit_event(GameEvent::DamageDealt {
-                source: 0, // source tracking deferred
+                source: event.source_id,
                 target: Target::Object(obj_id),
                 amount: event.amount,
                 is_combat: true,
@@ -1672,8 +1743,22 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
         if let Some(player) = event.target_player {
             let old_life = state.players[player].life;
             state.players[player].life -= event.amount as i32;
+
+            // Commander damage tracking (CR 903.10a)
+            if state.is_commander(event.source_id) {
+                let source_owner = state.objects.get(&event.source_id)
+                    .map(|i| i.owner)
+                    .unwrap_or(0);
+                if player < state.players.len()
+                    && source_owner < state.players[player].commander_damage_received.len()
+                {
+                    state.players[player].commander_damage_received[source_owner] +=
+                        event.amount as i32;
+                }
+            }
+
             state.emit_event(GameEvent::DamageDealt {
-                source: 0,
+                source: event.source_id,
                 target: Target::Player(player),
                 amount: event.amount,
                 is_combat: true,
@@ -1863,4 +1948,124 @@ pub fn setup_game(
 
     // Execute first untap step (which auto-advances to upkeep -> draw)
     execute_phase_entry(state);
+}
+
+/// Set up a Commander game from two decklists. The commander card ID is
+/// specified separately — it starts in the command zone rather than the
+/// library.
+///
+/// `deck0`/`deck1` should contain all 100 cards including the commander.
+/// The commander is extracted from the list and placed in the command zone.
+pub fn setup_commander_game(
+    state: &mut GameState,
+    deck0: &[crate::card::CardId],
+    deck1: &[crate::card::CardId],
+    commander0: crate::card::CardId,
+    commander1: crate::card::CardId,
+) {
+    let mut rng = rand::thread_rng();
+
+    // Record commander designations
+    state.players[0].commander_card_id = Some(commander0);
+    state.players[1].commander_card_id = Some(commander1);
+
+    // Player 0: create all cards, put commander in command zone, rest in library
+    let mut lib0 = Vec::new();
+    let mut found_commander0 = false;
+    for &card_id in deck0 {
+        if card_id == commander0 && !found_commander0 {
+            state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            found_commander0 = true;
+        } else {
+            lib0.push(state.create_card_in_zone(card_id, 0, ZoneType::Library));
+        }
+    }
+    lib0.shuffle(&mut rng);
+    state.players[0].library = lib0;
+
+    // Player 1: same
+    let mut lib1 = Vec::new();
+    let mut found_commander1 = false;
+    for &card_id in deck1 {
+        if card_id == commander1 && !found_commander1 {
+            state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            found_commander1 = true;
+        } else {
+            lib1.push(state.create_card_in_zone(card_id, 1, ZoneType::Library));
+        }
+    }
+    lib1.shuffle(&mut rng);
+    state.players[1].library = lib1;
+
+    // Draw opening hands (7 cards each)
+    draw_cards(state, 0, 7);
+    draw_cards(state, 1, 7);
+
+    // Set starting state
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Untap;
+    state.turn_number = 1;
+
+    // Execute first untap step (which auto-advances to upkeep -> draw)
+    execute_phase_entry(state);
+}
+
+/// Validate a Commander deck:
+/// - Exactly 100 cards (including commander)
+/// - Singleton (max 1 copy of each non-basic-land card)
+/// - Commander must be a legendary creature
+///
+/// Returns Ok(()) or an error message.
+pub fn validate_commander_deck(
+    db: &crate::game::CardDatabase,
+    deck: &[crate::card::CardId],
+    commander: crate::card::CardId,
+) -> Result<(), String> {
+    if deck.len() != 100 {
+        return Err(format!(
+            "Commander deck must be exactly 100 cards, got {}",
+            deck.len()
+        ));
+    }
+
+    // Commander must be in the deck
+    if !deck.contains(&commander) {
+        return Err("Commander card must be included in the deck".to_string());
+    }
+
+    // Commander must be a legendary creature
+    if let Some(def) = db.get(commander) {
+        let is_legendary = def.supertypes.contains(&crate::card::Supertype::Legendary);
+        let is_creature = def.is_creature();
+        if !is_legendary || !is_creature {
+            return Err(format!(
+                "Commander '{}' must be a legendary creature",
+                def.name
+            ));
+        }
+    } else {
+        return Err(format!("Commander card ID {} not found in database", commander));
+    }
+
+    // Singleton check: no more than 1 copy of non-basic-land cards
+    let mut counts: std::collections::HashMap<crate::card::CardId, u32> =
+        std::collections::HashMap::new();
+    for &card_id in deck {
+        *counts.entry(card_id).or_insert(0) += 1;
+    }
+    for (&card_id, &count) in &counts {
+        if count > 1 {
+            if let Some(def) = db.get(card_id) {
+                if !def.is_basic_land() {
+                    return Err(format!(
+                        "Commander decks allow only 1 copy of non-basic '{}', found {}",
+                        def.name, count
+                    ));
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

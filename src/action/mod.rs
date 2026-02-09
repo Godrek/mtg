@@ -81,6 +81,14 @@ pub enum Action {
         ordering: Vec<(ObjectId, usize)>,
     },
 
+    /// Cast commander from the command zone (Commander format).
+    /// Functions like CastSpell but sourced from the command zone with
+    /// commander tax applied to the cost.
+    CastCommander {
+        object_id: ObjectId,
+        targets: Vec<Target>,
+    },
+
     /// Concede the game.
     Concede,
 }
@@ -110,6 +118,9 @@ impl fmt::Display for Action {
             }
             Action::ChooseReplacementOrder { ordering } => {
                 write!(f, "Order {} replacement effects", ordering.len())
+            }
+            Action::CastCommander { object_id, .. } => {
+                write!(f, "Cast commander (obj {})", object_id)
             }
             Action::Concede => write!(f, "Concede"),
         }
@@ -312,6 +323,44 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                                             targets: vec![target],
                                         });
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Commander: cast commander from command zone
+            if state.is_commander_format() && is_main {
+                let cmd_zone = &state.players[player].command_zone;
+                for &obj_id in cmd_zone {
+                    let inst = &state.objects[&obj_id];
+                    let def = match db.get(inst.card_def_id) {
+                        Some(d) => d,
+                        None => continue,
+                    };
+                    // Only the player's own commander
+                    if state.players[player].commander_card_id != Some(inst.card_def_id) {
+                        continue;
+                    }
+                    if let Some(ref cost) = def.mana_cost {
+                        // Commander tax: add {2} per previous cast
+                        let tax = state.players[player].commander_tax;
+                        let mut taxed_cost = cost.clone();
+                        taxed_cost.generic += tax * 2;
+                        if can_potentially_pay(state, player, &taxed_cost) {
+                            let targets = enumerate_targets_for_spell(state, player, def);
+                            if targets.is_empty() {
+                                actions.push(Action::CastCommander {
+                                    object_id: obj_id,
+                                    targets: vec![],
+                                });
+                            } else {
+                                for target in targets {
+                                    actions.push(Action::CastCommander {
+                                        object_id: obj_id,
+                                        targets: vec![target],
+                                    });
                                 }
                             }
                         }

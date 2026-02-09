@@ -106,6 +106,12 @@ pub enum CanonicalAction {
         source_card_ids: Vec<(CardId, usize, usize)>,
     },
 
+    /// Cast commander from command zone (Commander format).
+    CastCommander {
+        card_id: CardId,
+        targets: Vec<CanonicalTarget>,
+    },
+
     Concede,
 }
 
@@ -247,6 +253,19 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
                 attacker_card_id: a_card,
                 attacker_instance_index: a_idx,
                 assignment: canonical_assignment,
+            }
+        }
+
+        Action::CastCommander { object_id, targets } => {
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let canonical_targets: Vec<CanonicalTarget> = targets
+                .iter()
+                .map(|t| canonicalize_target(t, state))
+                .collect();
+            CanonicalAction::CastCommander {
+                card_id,
+                targets: canonical_targets,
             }
         }
 
@@ -414,6 +433,22 @@ pub fn resolve(
             })
         }
 
+        CanonicalAction::CastCommander { card_id, targets } => {
+            // Find the commander in the player's command zone
+            let obj_id = find_in_command_zone(state, player, *card_id)?;
+            let concrete_targets: Vec<Target> = targets
+                .iter()
+                .filter_map(|t| resolve_target(t, state))
+                .collect();
+            if concrete_targets.len() != targets.len() {
+                return None;
+            }
+            Some(Action::CastCommander {
+                object_id: obj_id,
+                targets: concrete_targets,
+            })
+        }
+
         CanonicalAction::ChooseReplacementOrder { source_card_ids } => {
             let mut ordering = Vec::with_capacity(source_card_ids.len());
             for &(card_id, instance_index, effect_index) in source_card_ids {
@@ -526,6 +561,19 @@ fn find_on_battlefield_by_index(
         .collect();
     matches.sort();
     matches.get(instance_index).copied()
+}
+
+/// Find a card in a player's command zone by card_id.
+fn find_in_command_zone(
+    state: &GameState,
+    player: PlayerIndex,
+    card_id: CardId,
+) -> Option<ObjectId> {
+    state.players[player]
+        .command_zone
+        .iter()
+        .copied()
+        .find(|&id| state.objects[&id].card_def_id == card_id)
 }
 
 /// Find the N-th instance of `card_id` controlled by `controller` on the battlefield.
