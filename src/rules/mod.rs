@@ -821,6 +821,73 @@ fn resolve_effect(
             }
         }
 
+        Effect::SearchLibrary { destination } => {
+            // Simplified tutor: move the top card of the library to the destination.
+            // A real implementation would let the player search and choose, but
+            // for simulation purposes we move the first card.
+            if !state.players[controller].library.is_empty() {
+                let card_obj = state.players[controller].library.remove(0);
+                state.move_object(card_obj, ZoneType::Library, *destination);
+            }
+        }
+
+        Effect::BounceAllNonlandOpponents => {
+            // Bounce all nonland permanents opponents control to their owners' hands.
+            let db = state.card_db();
+            let to_bounce: Vec<ObjectId> = state
+                .battlefield
+                .iter()
+                .copied()
+                .filter(|&id| {
+                    if let Some(inst) = state.objects.get(&id) {
+                        if inst.controller == controller {
+                            return false; // skip own permanents
+                        }
+                        if let Some(def) = db.get(inst.card_def_id) {
+                            return !def.is_land();
+                        }
+                    }
+                    false
+                })
+                .collect();
+            for id in to_bounce {
+                state.move_object(id, ZoneType::Battlefield, ZoneType::Hand);
+            }
+        }
+
+        Effect::ReturnToTopOfLibrary { .. } => {
+            // Put target card from graveyard on top of owner's library.
+            for target in targets {
+                match target {
+                    Target::Object(obj_id) => {
+                        if let Some(inst) = state.objects.get(obj_id) {
+                            let owner = inst.owner;
+                            state.move_object(*obj_id, ZoneType::Graveyard, ZoneType::Library);
+                            // Move to front (top) of library
+                            if let Some(pos) = state.players[owner].library.iter().position(|&id| id == *obj_id) {
+                                let id = state.players[owner].library.remove(pos);
+                                state.players[owner].library.insert(0, id);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Effect::UntapTarget { .. } => {
+            for target in targets {
+                match target {
+                    Target::Object(obj_id) => {
+                        if let Some(inst) = state.objects.get_mut(obj_id) {
+                            inst.tapped = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }

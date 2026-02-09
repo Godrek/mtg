@@ -112,6 +112,12 @@ pub enum TriggerCondition {
     DealsDamage,
     DealsCombatDamage,
     DealsCombatDamageToPlayer,
+    /// Whenever the controller casts any spell (e.g., Tidespout Tyrant).
+    YouCastSpell,
+    /// Whenever an opponent casts a noncreature spell (e.g., Mystic Remora, Nezahal).
+    OpponentCastsNoncreatureSpell,
+    /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
+    OpponentDrawsCard,
 }
 
 /// A dynamic value that can be computed at runtime from the game state.
@@ -244,6 +250,16 @@ pub enum Effect {
     /// Skip a phase of the controller's next turn (e.g., Stasis skipping untap).
     SkipPhase(crate::game::Phase),
     Multiple(Vec<Effect>),
+    /// Search the controller's library and put a card into the destination zone.
+    /// Simplified tutor — in practice the strategy chooses; the engine just moves
+    /// the top matching card.
+    SearchLibrary { destination: ZoneType },
+    /// Bounce all nonland permanents opponents control (e.g., Cyclonic Rift overload).
+    BounceAllNonlandOpponents,
+    /// Put a card from a graveyard on top of its owner's library.
+    ReturnToTopOfLibrary { target: TargetSpec },
+    /// Untap target permanent.
+    UntapTarget { target: TargetSpec },
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
@@ -540,6 +556,9 @@ impl CardInstance {
 pub struct Decklist {
     pub name: String,
     pub cards: Vec<DeckEntry>,
+    /// Commander cards (for Commander format decks).
+    #[serde(default)]
+    pub commanders: Vec<DeckEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

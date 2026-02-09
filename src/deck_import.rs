@@ -56,6 +56,72 @@ impl From<std::io::Error> for DeckImportError {
     }
 }
 
+/// Which section of a deck file we're currently parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeckSection {
+    /// Default section (or ~~Mainboard~~) — cards go into the main deck.
+    Mainboard,
+    /// ~~Commanders~~ section — cards go into the commanders list.
+    Commanders,
+}
+
+/// Parse a single card line of the form "N Card Name" and return (card_id, quantity).
+fn parse_card_line(
+    trimmed: &str,
+    raw_line: &str,
+    line_number: usize,
+    card_db: &CardDatabase,
+) -> Result<(u64, u32), DeckImportError> {
+    let first_space = trimmed
+        .find(|c: char| c.is_whitespace())
+        .ok_or_else(|| DeckImportError::InvalidLine {
+            line_number,
+            line: raw_line.to_string(),
+            message: "missing card name after quantity".to_string(),
+        })?;
+    let (qty_str, rest) = trimmed.split_at(first_space);
+    let quantity: u32 = qty_str.parse().map_err(|_| DeckImportError::InvalidLine {
+        line_number,
+        line: raw_line.to_string(),
+        message: "quantity is not a number".to_string(),
+    })?;
+    if quantity == 0 {
+        return Err(DeckImportError::InvalidLine {
+            line_number,
+            line: raw_line.to_string(),
+            message: "quantity must be greater than zero".to_string(),
+        });
+    }
+
+    let name = rest.trim();
+    if name.is_empty() {
+        return Err(DeckImportError::InvalidLine {
+            line_number,
+            line: raw_line.to_string(),
+            message: "card name is empty".to_string(),
+        });
+    }
+
+    let card_id = card_db
+        .find_by_name(name)
+        .ok_or_else(|| DeckImportError::UnknownCard {
+            line_number,
+            name: name.to_string(),
+        })?;
+
+    Ok((card_id, quantity))
+}
+
+/// Insert or accumulate a card entry in the given list.
+fn insert_entry(entries: &mut Vec<DeckEntry>, indices: &mut HashMap<u64, usize>, card_id: u64, quantity: u32) {
+    if let Some(index) = indices.get(&card_id).copied() {
+        entries[index].quantity += quantity;
+    } else {
+        indices.insert(card_id, entries.len());
+        entries.push(DeckEntry { card_id, quantity });
+    }
+}
+
 pub fn import_deck_from_file<P: AsRef<Path>>(
     path: P,
     card_db: &CardDatabase,
@@ -69,8 +135,12 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
         .to_string();
 
     let contents = fs::read_to_string(path)?;
-    let mut entries: Vec<DeckEntry> = Vec::new();
-    let mut indices: HashMap<u64, usize> = HashMap::new();
+    let mut main_entries: Vec<DeckEntry> = Vec::new();
+    let mut main_indices: HashMap<u64, usize> = HashMap::new();
+    let mut commander_entries: Vec<DeckEntry> = Vec::new();
+    let mut commander_indices: HashMap<u64, usize> = HashMap::new();
+
+    let mut section = DeckSection::Mainboard;
 
     for (line_number, raw_line) in contents.lines().enumerate() {
         let line_number = line_number + 1;
@@ -79,53 +149,39 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
             continue;
         }
 
-        let first_space = trimmed
-            .find(|c: char| c.is_whitespace())
-            .ok_or_else(|| DeckImportError::InvalidLine {
-                line_number,
-                line: raw_line.to_string(),
-                message: "missing card name after quantity".to_string(),
-            })?;
-        let (qty_str, rest) = trimmed.split_at(first_space);
-        let quantity: u32 = qty_str.parse().map_err(|_| DeckImportError::InvalidLine {
-            line_number,
-            line: raw_line.to_string(),
-            message: "quantity is not a number".to_string(),
-        })?;
-        if quantity == 0 {
-            return Err(DeckImportError::InvalidLine {
-                line_number,
-                line: raw_line.to_string(),
-                message: "quantity must be greater than zero".to_string(),
-            });
+        // Check for section headers: ~~SectionName~~
+        if trimmed.starts_with("~~") && trimmed.ends_with("~~") && trimmed.len() > 4 {
+            let section_name = &trimmed[2..trimmed.len() - 2];
+            match section_name.to_ascii_lowercase().as_str() {
+                "commanders" | "commander" => {
+                    section = DeckSection::Commanders;
+                }
+                "mainboard" | "main" | "maindeck" => {
+                    section = DeckSection::Mainboard;
+                }
+                _ => {
+                    // Unknown section — treat as mainboard
+                    section = DeckSection::Mainboard;
+                }
+            }
+            continue;
         }
 
-        let name = rest.trim();
-        if name.is_empty() {
-            return Err(DeckImportError::InvalidLine {
-                line_number,
-                line: raw_line.to_string(),
-                message: "card name is empty".to_string(),
-            });
-        }
+        let (card_id, quantity) = parse_card_line(trimmed, raw_line, line_number, card_db)?;
 
-        let card_id = card_db
-            .find_by_name(name)
-            .ok_or_else(|| DeckImportError::UnknownCard {
-                line_number,
-                name: name.to_string(),
-            })?;
-
-        if let Some(index) = indices.get(&card_id).copied() {
-            entries[index].quantity += quantity;
-        } else {
-            indices.insert(card_id, entries.len());
-            entries.push(DeckEntry { card_id, quantity });
+        match section {
+            DeckSection::Commanders => {
+                insert_entry(&mut commander_entries, &mut commander_indices, card_id, quantity);
+            }
+            DeckSection::Mainboard => {
+                insert_entry(&mut main_entries, &mut main_indices, card_id, quantity);
+            }
         }
     }
 
     Ok(Decklist {
         name: deck_name,
-        cards: entries,
+        cards: main_entries,
+        commanders: commander_entries,
     })
 }
