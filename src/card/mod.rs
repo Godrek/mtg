@@ -58,6 +58,10 @@ pub enum KeywordAbility {
     Intimidate,
     Shroud,
     Protection, // simplified — full protection needs a parameter
+    /// This creature must attack each combat if able (e.g., Juggernaut).
+    MustAttack,
+    /// This creature can't block (e.g., Goblin Guide).
+    CantBlock,
 }
 
 /// What kind of mana a land can produce.
@@ -94,8 +98,13 @@ pub struct TriggeredAbility {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerCondition {
     EntersBattlefield,
+    /// "Whenever a creature enters the battlefield" — watcher trigger (e.g., Soul Warden).
+    /// Unlike EntersBattlefield (self-ETB), this fires for ANY creature entering.
+    ACreatureEnters,
     LeavesBattlefield,
     Dies,
+    /// "Whenever a creature dies" — watcher trigger (e.g., Blood Artist).
+    ACreatureDies,
     AttacksAlone,
     Attacks,
     BeginningOfUpkeep,
@@ -103,6 +112,24 @@ pub enum TriggerCondition {
     DealsDamage,
     DealsCombatDamage,
     DealsCombatDamageToPlayer,
+}
+
+/// A dynamic value that can be computed at runtime from the game state.
+/// Used for creatures with variable power/toughness like Tarmogoyf
+/// ("*/1+* where * is the number of card types in all graveyards")
+/// or Maro ("*/*, where * is the number of cards in your hand").
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DynamicValue {
+    /// Number of cards in the controller's hand (e.g., Maro).
+    CardsInHand,
+    /// Number of creatures the controller controls (e.g., Coat of Arms).
+    CreaturesControlled,
+    /// Number of card types among all graveyards (e.g., Tarmogoyf).
+    CardTypesInGraveyards,
+    /// Total power among creatures the controller controls.
+    TotalPowerControlled,
+    /// A fixed value (for testing / compatibility).
+    Fixed(i32),
 }
 
 /// Effects that abilities and spells can produce.
@@ -132,6 +159,12 @@ pub enum Effect {
     SacrificeCreatures { count: u32, target: TargetSpec },
     /// Prevent all combat damage this turn.
     PreventCombatDamage,
+    /// Add mana to the controller's mana pool.
+    AddMana { color: Option<Color>, amount: u32 },
+    /// Take an extra turn after this one (e.g., Time Walk, Temporal Manipulation).
+    ExtraTurn,
+    /// Skip a phase of the controller's next turn (e.g., Stasis skipping untap).
+    SkipPhase(crate::game::Phase),
     Multiple(Vec<Effect>),
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
@@ -222,6 +255,16 @@ pub struct CardDef {
 
     // Original oracle text for reference.
     pub oracle_text: String,
+
+    /// Dynamic power formula — if set, the creature's base power is computed
+    /// at runtime from the game state (e.g., Tarmogoyf, Maro).
+    /// Takes precedence over the `power` field when present.
+    #[serde(default)]
+    pub dynamic_power: Option<DynamicValue>,
+
+    /// Dynamic toughness formula — same as dynamic_power but for toughness.
+    #[serde(default)]
+    pub dynamic_toughness: Option<DynamicValue>,
 }
 
 impl CardDef {
@@ -300,6 +343,15 @@ pub struct CardInstance {
     // Attached permanents (auras, equipment).
     pub attached_to: Option<ObjectId>,
     pub attachments: Vec<ObjectId>,
+
+    /// Whether this is a token (CR 111.6). Tokens cease to exist when
+    /// they leave the battlefield (CR 111.7).
+    pub is_token: bool,
+
+    /// Zone-change counter — incremented each time this object changes zones.
+    /// Used to detect stale references (e.g., targeting a creature that has left
+    /// and re-entered the battlefield is a different game object per CR 400.7).
+    pub zone_change_count: u32,
 }
 
 impl CardInstance {
@@ -319,6 +371,8 @@ impl CardInstance {
             temp_keywords: Vec::new(),
             attached_to: None,
             attachments: Vec::new(),
+            is_token: false,
+            zone_change_count: 0,
         }
     }
 

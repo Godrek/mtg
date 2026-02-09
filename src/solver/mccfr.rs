@@ -617,6 +617,342 @@ pub fn load_checkpoint(
     Ok(tables)
 }
 
+// =========================================================================
+// Phase 3B.1 — Warm-Starting from GreedyStrategy Heuristics
+// =========================================================================
+
+/// Warm-start regret tables by running GreedyStrategy games and seeding
+/// the regret table with initial regret values based on heuristic play.
+///
+/// This bootstraps the MCCFR training process by giving the solver a
+/// starting point better than uniform random. The greedy strategy's
+/// preferred actions get positive initial regret, while non-preferred
+/// actions start at zero.
+pub fn warm_start_from_greedy(
+    initial_state: &GameState,
+    num_warmup_games: u32,
+    abstraction: &dyn InfoSetAbstraction,
+    warmup_weight: f64,
+) -> [RegretTable; 2] {
+    use crate::strategy::GreedyStrategy;
+
+    let mut tables = [RegretTable::new(), RegretTable::new()];
+    let greedy = GreedyStrategy;
+
+    for _ in 0..num_warmup_games {
+        let mut state = initial_state.clone();
+        let mut actions_taken = 0u32;
+
+        while !state.game_over && actions_taken < 500 {
+            let player = state.priority_player;
+            let actions = legal_actions_abstracted(&state);
+
+            if actions.len() <= 1 {
+                let action = if actions.is_empty() {
+                    Action::PassPriority
+                } else {
+                    actions[0].clone()
+                };
+                rules::apply_action(&mut state, &action);
+                actions_taken += 1;
+                continue;
+            }
+
+            // Canonicalize actions
+            let canonical_actions: Vec<_> = actions
+                .iter()
+                .map(|a| canonicalize(a, &state))
+                .collect();
+
+            // Compute info set hash
+            let view = state.visible_state(player);
+            let info_set = InformationSet::from_view(&view, state.card_db());
+            let info_hash = abstraction.abstract_info_set(&info_set);
+
+            // Find which action the greedy strategy would pick
+            let greedy_action = greedy.choose_action(&state, player);
+
+            // Seed regret: give the greedy action positive regret
+            let entry = tables[player].get_or_create(info_hash);
+            for (i, ca) in canonical_actions.iter().enumerate() {
+                let action_entry = entry.get_or_create_action(ca);
+                if actions[i] == greedy_action {
+                    action_entry.cumulative_regret += warmup_weight;
+                    action_entry.cumulative_strategy += warmup_weight;
+                }
+            }
+            entry.visit_count += 1;
+
+            // Play the greedy action
+            rules::apply_action(&mut state, &greedy_action);
+            actions_taken += 1;
+        }
+    }
+
+    tables
+}
+
+/// Train with warm-starting: first seed tables from GreedyStrategy,
+/// then run standard MCCFR iterations.
+pub fn train_warm_started(
+    initial_state: &GameState,
+    num_warmup_games: u32,
+    num_iterations: u32,
+    train_config: &TrainConfig,
+) -> [RegretTable; 2] {
+    // Phase 1: Warm-start
+    let mut regret_tables = warm_start_from_greedy(
+        initial_state,
+        num_warmup_games,
+        train_config.abstraction,
+        1.0,
+    );
+
+    // Phase 2: Regular MCCFR training
+    for i in 0..num_iterations {
+        run_iteration_with_abstraction(
+            initial_state,
+            &mut regret_tables,
+            &train_config.mccfr,
+            train_config.abstraction,
+            &train_config.rollout_mode,
+            train_config.rollout_strategies,
+        );
+
+        if train_config.checkpoint_interval > 0
+            && (i + 1) % train_config.checkpoint_interval == 0
+        {
+            if let Some(ref dir) = train_config.checkpoint_dir {
+                let _ = save_checkpoint(&regret_tables, dir, i + 1);
+            }
+        }
+    }
+
+    regret_tables
+}
+
+// =========================================================================
+// Phase 3B.2 — Opponent Modeling / Deck Inference
+// =========================================================================
+
+/// Bayesian opponent model that updates beliefs about the opponent's deck
+/// based on observed actions and revealed cards.
+#[derive(Debug, Clone)]
+pub struct OpponentModel {
+    /// Known deck archetypes with names and prior probabilities.
+    pub archetypes: Vec<DeckArchetype>,
+    /// Posterior probabilities for each archetype.
+    pub posteriors: Vec<f64>,
+    /// Cards observed from the opponent.
+    pub observed_cards: Vec<u64>,
+}
+
+/// A deck archetype for opponent modeling.
+#[derive(Debug, Clone)]
+pub struct DeckArchetype {
+    pub name: String,
+    /// Key card IDs that are characteristic of this archetype.
+    pub signature_cards: Vec<u64>,
+    /// Prior probability of facing this archetype.
+    pub prior: f64,
+}
+
+impl OpponentModel {
+    /// Create a new opponent model with uniform priors.
+    pub fn new(archetypes: Vec<DeckArchetype>) -> Self {
+        let n = archetypes.len();
+        let uniform = if n > 0 { 1.0 / n as f64 } else { 1.0 };
+        let posteriors = vec![uniform; n];
+        OpponentModel {
+            archetypes,
+            posteriors,
+            observed_cards: Vec::new(),
+        }
+    }
+
+    /// Update beliefs after observing a card from the opponent.
+    /// Uses Bayesian updating: P(archetype | card) ∝ P(card | archetype) × P(archetype)
+    pub fn observe_card(&mut self, card_id: u64) {
+        self.observed_cards.push(card_id);
+
+        if self.archetypes.is_empty() {
+            return;
+        }
+
+        let likelihoods: Vec<f64> = self.archetypes
+            .iter()
+            .map(|arch| {
+                if arch.signature_cards.contains(&card_id) {
+                    0.8
+                } else {
+                    0.2
+                }
+            })
+            .collect();
+
+        let mut unnormalized: Vec<f64> = self.posteriors
+            .iter()
+            .zip(likelihoods.iter())
+            .map(|(&post, &lik)| post * lik)
+            .collect();
+
+        let total: f64 = unnormalized.iter().sum();
+        if total > 0.0 {
+            for p in &mut unnormalized {
+                *p /= total;
+            }
+            self.posteriors = unnormalized;
+        }
+    }
+
+    /// Get the most likely archetype.
+    pub fn most_likely_archetype(&self) -> Option<(&DeckArchetype, f64)> {
+        self.archetypes
+            .iter()
+            .zip(self.posteriors.iter())
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(arch, &prob)| (arch, prob))
+    }
+
+    /// Get the posterior probability distribution.
+    pub fn distribution(&self) -> Vec<(&str, f64)> {
+        let mut result: Vec<(&str, f64)> = self.archetypes
+            .iter()
+            .zip(self.posteriors.iter())
+            .map(|(arch, &prob)| (arch.name.as_str(), prob))
+            .collect();
+        result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        result
+    }
+}
+
+// =========================================================================
+// Phase 3B.3 — Policy Visualization
+// =========================================================================
+
+/// Action distribution at a decision point.
+#[derive(Debug, Clone)]
+pub struct PolicySnapshot {
+    pub state_description: String,
+    pub phase: String,
+    pub turn: u32,
+    pub player: PlayerIndex,
+    /// Action probabilities: (canonical_action_description, probability).
+    pub action_distribution: Vec<(String, f64)>,
+    pub visit_count: u64,
+}
+
+/// Collect policy snapshots from a trained regret table at key decision points
+/// during a sample game.
+pub fn collect_policy_snapshots(
+    initial_state: &GameState,
+    regret_tables: &[RegretTable; 2],
+    abstraction: &dyn InfoSetAbstraction,
+    max_snapshots: usize,
+) -> Vec<PolicySnapshot> {
+    let mut snapshots = Vec::new();
+    let mut state = initial_state.clone();
+    let mut actions_taken = 0u32;
+
+    while !state.game_over && actions_taken < 500 && snapshots.len() < max_snapshots {
+        let player = state.priority_player;
+        let actions = legal_actions_abstracted(&state);
+
+        if actions.len() <= 1 {
+            let action = if actions.is_empty() {
+                Action::PassPriority
+            } else {
+                actions[0].clone()
+            };
+            rules::apply_action(&mut state, &action);
+            actions_taken += 1;
+            continue;
+        }
+
+        let canonical_actions: Vec<_> = actions
+            .iter()
+            .map(|a| canonicalize(a, &state))
+            .collect();
+
+        let view = state.visible_state(player);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = abstraction.abstract_info_set(&info_set);
+
+        let (distribution, visit_count) = match regret_tables[player].get(info_hash) {
+            Some(data) => (data.average_strategy(&canonical_actions), data.visit_count),
+            None => {
+                let n = actions.len();
+                (vec![1.0 / n as f64; n], 0)
+            }
+        };
+
+        let action_dist: Vec<(String, f64)> = canonical_actions
+            .iter()
+            .zip(distribution.iter())
+            .map(|(ca, &prob)| (format!("{:?}", ca), prob))
+            .collect();
+
+        snapshots.push(PolicySnapshot {
+            state_description: format!(
+                "Turn {} {:?} P{} life={}/{} hand={} board={}",
+                state.turn_number,
+                state.phase,
+                player,
+                state.players[player].life,
+                state.players[state.opponent(player)].life,
+                state.players[player].hand.len(),
+                state.creatures_controlled_by(player).len(),
+            ),
+            phase: format!("{:?}", state.phase),
+            turn: state.turn_number,
+            player,
+            action_distribution: action_dist,
+            visit_count,
+        });
+
+        let mut rng = rand::thread_rng();
+        let idx = sample_from_distribution(&distribution, &mut rng);
+        rules::apply_action(&mut state, &actions[idx]);
+        actions_taken += 1;
+    }
+
+    snapshots
+}
+
+// =========================================================================
+// Phase 3B.4 — Multi-Abstraction
+// =========================================================================
+
+/// Multi-abstraction that uses different granularity for different game phases.
+///
+/// Main/combat phases use fine-grained abstraction; other phases use coarser.
+pub struct MultiPhaseAbstraction<'a> {
+    pub fine: &'a dyn InfoSetAbstraction,
+    pub coarse: &'a dyn InfoSetAbstraction,
+}
+
+impl<'a> InfoSetAbstraction for MultiPhaseAbstraction<'a> {
+    fn abstract_info_set(&self, info_set: &InformationSet) -> u64 {
+        // Phases 3-10 (PreCombatMain through PostCombatMain) use fine abstraction
+        match info_set.phase {
+            3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 => {
+                self.fine.abstract_info_set(info_set)
+            }
+            _ => {
+                self.coarse.abstract_info_set(info_set)
+            }
+        }
+    }
+
+    fn name(&self) -> &str {
+        "MultiPhase"
+    }
+}
+
+// =========================================================================
+// Exploitability
+// =========================================================================
+
 /// Compute a rough measure of exploitability by comparing the two players'
 /// expected values. In a perfect Nash equilibrium of a zero-sum game,
 /// both players' values sum to zero and neither can improve unilaterally.

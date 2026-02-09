@@ -343,6 +343,18 @@ pub fn compute_characteristics(
         toughness += inst.plus_counters - inst.minus_counters;
     }
 
+    // Apply temporary keywords from CardInstance (set by resolve_effect).
+    // These represent EoT effects that haven't been converted to continuous effects.
+    for kw in &inst.temp_keywords {
+        if !keywords.contains(kw) {
+            keywords.push(*kw);
+        }
+    }
+
+    // Apply temporary power/toughness modifications from CardInstance.
+    power += inst.temp_power_mod;
+    toughness += inst.temp_toughness_mod;
+
     Some(ComputedCharacteristics {
         card_types,
         subtypes,
@@ -590,6 +602,8 @@ mod tests {
             starting_loyalty: None,
             enters_tapped: false,
             oracle_text: "".into(),
+            dynamic_power: None,
+            dynamic_toughness: None,
         }
     }
 

@@ -300,6 +300,17 @@ pub struct GameState {
     /// replacements are surfaced as Action::ChooseReplacementOrder.
     pub replacement_effects: Vec<ReplacementEffect>,
 
+    /// Extra turns queue (Phase 3A). When a player takes an extra turn,
+    /// they're added to this queue. After the current turn's Cleanup,
+    /// if this queue is non-empty, the next turn's active player is
+    /// shifted to the player at the front of the queue.
+    pub extra_turns: Vec<PlayerIndex>,
+
+    /// Phases to skip for the current turn (Phase 3A).
+    /// When an effect says "skip your draw step" or "skip your combat phase",
+    /// the relevant phase is added here. `advance_phase()` checks this set.
+    pub skip_phases: HashSet<Phase>,
+
     /// Game over flag.
     pub game_over: bool,
 
@@ -367,6 +378,43 @@ impl CardDatabase {
             .find(|card| card.name.eq_ignore_ascii_case(target))
             .map(|card| card.id)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3A — GameStateSnapshot for optimized copy/restore
+// ---------------------------------------------------------------------------
+
+/// A lightweight snapshot of a GameState for save/restore during deep search.
+///
+/// Unlike `GameState::clone()`, this captures only the canonical state needed
+/// to restore the game position. The `card_db` Arc is shared (not cloned),
+/// and derived caches (CharacteristicsCache) are empty on restore.
+///
+/// Use `GameState::snapshot()` to create and `GameState::restore(snapshot)` to
+/// revert. This is cheaper than full clone for MCTS rollback patterns where
+/// you save a state, apply several actions, then revert.
+#[derive(Clone)]
+pub struct GameStateSnapshot {
+    pub objects: HashMap<ObjectId, CardInstance>,
+    pub battlefield: Vec<ObjectId>,
+    pub stack: Vec<StackEntry>,
+    pub players: Vec<PlayerState>,
+    pub active_player: PlayerIndex,
+    pub phase: Phase,
+    pub priority_player: PlayerIndex,
+    pub turn_number: u32,
+    pub consecutive_passes: u32,
+    pub combat: CombatState,
+    pub next_object_id: ObjectId,
+    pub next_stack_id: u64,
+    pub pending_triggers: Vec<PendingTrigger>,
+    pub continuous_effects: Vec<ContinuousEffect>,
+    pub next_timestamp: u32,
+    pub replacement_effects: Vec<ReplacementEffect>,
+    pub extra_turns: Vec<PlayerIndex>,
+    pub skip_phases: HashSet<Phase>,
+    pub game_over: bool,
+    pub winner: Option<PlayerIndex>,
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +619,8 @@ impl GameState {
             continuous_effects: Vec::new(),
             next_timestamp: 1,
             replacement_effects: Vec::new(),
+            extra_turns: Vec::new(),
+            skip_phases: HashSet::new(),
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -580,6 +630,61 @@ impl GameState {
 
     pub fn card_db(&self) -> &CardDatabase {
         self.card_db.as_ref().expect("CardDatabase not set on GameState")
+    }
+
+    /// Create a lightweight snapshot of the current game state for later restore.
+    /// Cheaper than `clone()` for rollback patterns since it doesn't carry
+    /// the Arc<CardDatabase> or characteristics cache.
+    pub fn snapshot(&self) -> GameStateSnapshot {
+        GameStateSnapshot {
+            objects: self.objects.clone(),
+            battlefield: self.battlefield.clone(),
+            stack: self.stack.clone(),
+            players: self.players.clone(),
+            active_player: self.active_player,
+            phase: self.phase,
+            priority_player: self.priority_player,
+            turn_number: self.turn_number,
+            consecutive_passes: self.consecutive_passes,
+            combat: self.combat.clone(),
+            next_object_id: self.next_object_id,
+            next_stack_id: self.next_stack_id,
+            pending_triggers: self.pending_triggers.clone(),
+            continuous_effects: self.continuous_effects.clone(),
+            next_timestamp: self.next_timestamp,
+            replacement_effects: self.replacement_effects.clone(),
+            extra_turns: self.extra_turns.clone(),
+            skip_phases: self.skip_phases.clone(),
+            game_over: self.game_over,
+            winner: self.winner,
+        }
+    }
+
+    /// Restore game state from a snapshot, keeping the current card_db.
+    /// Invalidates all caches.
+    pub fn restore(&mut self, snap: GameStateSnapshot) {
+        self.objects = snap.objects;
+        self.battlefield = snap.battlefield;
+        self.stack = snap.stack;
+        self.players = snap.players;
+        self.active_player = snap.active_player;
+        self.phase = snap.phase;
+        self.priority_player = snap.priority_player;
+        self.turn_number = snap.turn_number;
+        self.consecutive_passes = snap.consecutive_passes;
+        self.combat = snap.combat;
+        self.next_object_id = snap.next_object_id;
+        self.next_stack_id = snap.next_stack_id;
+        self.pending_triggers = snap.pending_triggers;
+        self.continuous_effects = snap.continuous_effects;
+        self.next_timestamp = snap.next_timestamp;
+        self.replacement_effects = snap.replacement_effects;
+        self.extra_turns = snap.extra_turns;
+        self.skip_phases = snap.skip_phases;
+        self.game_over = snap.game_over;
+        self.winner = snap.winner;
+        self.pending_events.clear();
+        self.invalidate_characteristics_cache();
     }
 
     /// Allocate a new unique ObjectId.
@@ -635,6 +740,11 @@ impl GameState {
             to: crate::events::Zone::from(to),
         });
 
+        // Increment zone-change counter (CR 400.7)
+        if let Some(inst) = self.objects.get_mut(&obj_id) {
+            inst.zone_change_count += 1;
+        }
+
         // Remove from all zones (brute force but correct)
         let owner = self.objects[&obj_id].owner;
         let controller = self.objects[&obj_id].controller;
@@ -658,6 +768,15 @@ impl GameState {
                 true
             }
         });
+
+        // CR 111.7: Tokens that leave the battlefield cease to exist.
+        // They briefly visit the destination zone then are removed.
+        let is_token = self.objects.get(&obj_id).map_or(false, |i| i.is_token);
+        if is_token && to != ZoneType::Battlefield {
+            // Token ceases to exist — remove it entirely
+            self.objects.remove(&obj_id);
+            return;
+        }
 
         // Add to destination zone
         match to {

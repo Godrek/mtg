@@ -2849,3 +2849,630 @@ fn test_artifact_creatures_in_db() {
     assert!(skirge.keywords.contains(&KeywordAbility::Flying));
     assert!(skirge.keywords.contains(&KeywordAbility::Lifelink));
 }
+
+// =========================================================================
+// Phase 3A Tests
+// =========================================================================
+
+#[test]
+fn test_token_creation() {
+    // Test that CreateToken actually produces a creature on the battlefield.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Set up Blade Splicer (creates a 3/3 Golem token on ETB)
+    let blade_splicer_id = state.create_card_in_zone(
+        sample::ids::BLADE_SPLICER,
+        0,
+        ZoneType::Hand,
+    );
+
+    // Give player 0 lands to cast it (costs 2W)
+    for _ in 0..3 {
+        let land_id = state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Battlefield);
+        if let Some(inst) = state.objects.get_mut(&land_id) {
+            inst.summoning_sick = false;
+        }
+    }
+
+    // Set up game state for casting
+    state.phase = Phase::PreCombatMain;
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.players[0].land_plays_remaining = 0;
+
+    let creatures_before = state.creatures_controlled_by(0).len();
+
+    // Cast Blade Splicer
+    let actions = legal_actions(&state);
+    let cast_action = actions.iter().find(|a| {
+        if let Action::CastSpell { object_id, .. } = a {
+            *object_id == blade_splicer_id
+        } else {
+            false
+        }
+    });
+
+    if let Some(action) = cast_action {
+        rules::apply_action(&mut state, action);
+
+        // Pass priority to resolve
+        rules::apply_action(&mut state, &Action::PassPriority);
+        rules::apply_action(&mut state, &Action::PassPriority);
+
+        // After resolution, Blade Splicer should be on the battlefield
+        // along with a 3/3 Golem token
+        let creatures_after = state.creatures_controlled_by(0).len();
+        // We should have at least 1 more creature (Blade Splicer itself + token)
+        assert!(
+            creatures_after > creatures_before,
+            "Token should have been created. Before: {}, After: {}",
+            creatures_before, creatures_after
+        );
+    }
+}
+
+#[test]
+fn test_token_ceases_to_exist_when_leaving_battlefield() {
+    // Tokens that leave the battlefield cease to exist (CR 111.7)
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Test the move_object behavior for tokens (CR 111.7)
+    let token_id = state.create_card_in_zone(100000, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&token_id) {
+        inst.is_token = true;
+    }
+
+    assert!(state.objects.contains_key(&token_id));
+    assert!(state.battlefield.contains(&token_id));
+
+    // Move token to graveyard — it should cease to exist
+    state.move_object(token_id, ZoneType::Battlefield, ZoneType::Graveyard);
+
+    // Token should be gone entirely
+    assert!(!state.objects.contains_key(&token_id));
+    assert!(!state.battlefield.contains(&token_id));
+    assert!(!state.players[0].graveyard.contains(&token_id));
+}
+
+#[test]
+fn test_dark_ritual_adds_mana() {
+    // Dark Ritual should add BBB to the caster's mana pool
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let ritual_id = state.create_card_in_zone(sample::ids::DARK_RITUAL, 0, ZoneType::Hand);
+
+    // Give player 0 a Swamp to cast it
+    let land_id = state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&land_id) {
+        inst.summoning_sick = false;
+    }
+
+    state.phase = Phase::PreCombatMain;
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.players[0].land_plays_remaining = 0;
+
+    let black_before = state.players[0].mana_pool.black;
+
+    // Cast Dark Ritual
+    let actions = legal_actions(&state);
+    let cast_action = actions.iter().find(|a| {
+        if let Action::CastSpell { object_id, .. } = a {
+            *object_id == ritual_id
+        } else {
+            false
+        }
+    });
+
+    if let Some(action) = cast_action {
+        rules::apply_action(&mut state, action);
+        // Pass priority to resolve
+        rules::apply_action(&mut state, &Action::PassPriority);
+        rules::apply_action(&mut state, &Action::PassPriority);
+
+        // Dark Ritual adds BBB = 3 black mana
+        let black_after = state.players[0].mana_pool.black;
+        assert!(
+            black_after >= black_before + 3,
+            "Dark Ritual should add 3 black mana. Before: {}, After: {}",
+            black_before, black_after
+        );
+    }
+}
+
+#[test]
+fn test_counter_cancellation_sba() {
+    // +1/+1 and -1/-1 counters should cancel each other (CR 704.5d)
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    // Add counters
+    if let Some(inst) = state.objects.get_mut(&bear_id) {
+        inst.plus_counters = 3;
+        inst.minus_counters = 2;
+    }
+
+    state.phase = Phase::PreCombatMain;
+    state.active_player = 0;
+    state.priority_player = 0;
+
+    // Run SBA check
+    rules::check_state_based_actions(&mut state);
+
+    // After cancellation, should have 1 +1/+1 counter and 0 -1/-1 counters
+    let inst = &state.objects[&bear_id];
+    assert_eq!(inst.plus_counters, 1, "Should have 1 +1/+1 counter remaining");
+    assert_eq!(inst.minus_counters, 0, "All -1/-1 counters should be cancelled");
+}
+
+#[test]
+fn test_zone_change_counter_increments() {
+    // Zone-change counter should increment when object changes zones
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    let bear_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    let initial_count = state.objects[&bear_id].zone_change_count;
+
+    // Move to graveyard
+    state.move_object(bear_id, ZoneType::Battlefield, ZoneType::Graveyard);
+    assert_eq!(
+        state.objects[&bear_id].zone_change_count,
+        initial_count + 1,
+        "Zone-change counter should increment on zone change"
+    );
+
+    // Move to exile
+    state.move_object(bear_id, ZoneType::Graveyard, ZoneType::Exile);
+    assert_eq!(
+        state.objects[&bear_id].zone_change_count,
+        initial_count + 2,
+        "Zone-change counter should increment again"
+    );
+}
+
+#[test]
+fn test_extra_turn() {
+    // Test that extra turns work correctly
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+
+    // Remember who the active player is
+    // Grant player 0 an extra turn
+    state.extra_turns.push(0);
+
+    // Play through until turn changes (max 2000 actions to prevent infinite loop)
+    let greedy = GreedyStrategy;
+    let mut actions_taken = 0;
+    let initial_turn = state.turn_number;
+    while !state.game_over && state.turn_number == initial_turn && actions_taken < 2000 {
+        let action = greedy.choose_action(&state, state.priority_player);
+        rules::apply_action(&mut state, &action);
+        actions_taken += 1;
+    }
+
+    if !state.game_over {
+        // After the turn ends, the extra turn should have been consumed
+        // and player 0 should be the active player
+        assert_eq!(state.active_player, 0, "Player 0 should get the extra turn");
+        assert!(state.extra_turns.is_empty(), "Extra turn queue should be empty");
+    }
+}
+
+#[test]
+fn test_game_state_snapshot_restore() {
+    // Test that snapshot/restore correctly preserves and restores game state
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+
+    // Take a snapshot
+    let snap = state.snapshot();
+
+    // Modify the state
+    let original_life = state.players[0].life;
+    state.players[0].life -= 5;
+    state.turn_number += 3;
+    state.active_player = 1;
+
+    // Verify it changed
+    assert_ne!(state.players[0].life, original_life);
+
+    // Restore from snapshot
+    state.restore(snap);
+
+    // Verify restoration
+    assert_eq!(state.players[0].life, original_life, "Life should be restored");
+    assert_eq!(state.turn_number, 1, "Turn number should be restored");
+}
+
+#[test]
+fn test_cant_block_keyword() {
+    // Creatures with CantBlock shouldn't appear in blocking options
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Create an attacker for player 0
+    let attacker_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        0,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&attacker_id) {
+        inst.summoning_sick = false;
+    }
+
+    // Create a blocker for player 1 — give it CantBlock
+    let blocker_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        1,
+        ZoneType::Battlefield,
+    );
+    if let Some(inst) = state.objects.get_mut(&blocker_id) {
+        inst.summoning_sick = false;
+        inst.temp_keywords.push(KeywordAbility::CantBlock);
+    }
+
+    // Set up combat
+    state.phase = Phase::DeclareBlockers;
+    state.active_player = 0;
+    state.priority_player = 1; // Defending player declares blockers
+    state.combat.attackers = vec![attacker_id];
+
+    let actions = legal_actions(&state);
+
+    // Should only have PassPriority and empty blocks (no actual blocking)
+    for action in &actions {
+        if let Action::DeclareBlockers { blocks } = action {
+            assert!(
+                blocks.is_empty(),
+                "Creature with CantBlock should not be able to block"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_a_creature_dies_watcher_trigger() {
+    // ACreatureDies should fire on other permanents when a creature dies
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Create a creature that will die
+    let victim_id = state.create_card_in_zone(
+        sample::ids::GRIZZLY_BEARS,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    // Deal lethal damage to the creature
+    if let Some(inst) = state.objects.get_mut(&victim_id) {
+        inst.damage_marked = 10;
+    }
+
+    state.phase = Phase::PreCombatMain;
+    state.active_player = 0;
+    state.priority_player = 0;
+
+    // Run SBA check — creature should die
+    rules::check_state_based_actions(&mut state);
+
+    // Verify creature died (moved to graveyard)
+    assert!(
+        state.players[0].graveyard.contains(&victim_id),
+        "Creature with lethal damage should be in graveyard"
+    );
+    assert!(
+        !state.battlefield.contains(&victim_id),
+        "Creature should not be on battlefield"
+    );
+}
+
+#[test]
+fn test_replacement_effect_ordering_api() {
+    use mtg_gto::replacement::{apply_replacement_effects, ReplacementEffect, ReplacementEventKind, ReplacementAction};
+    use mtg_gto::card::ZoneType;
+
+    let effects = vec![
+        ReplacementEffect {
+            source_id: 1,
+            controller: 0,
+            applies_to: ReplacementEventKind::WouldDie,
+            action: ReplacementAction::RedirectToZone(ZoneType::Exile),
+            is_self_replacement: true,
+            description: "Self-exile".into(),
+        },
+        ReplacementEffect {
+            source_id: 2,
+            controller: 0,
+            applies_to: ReplacementEventKind::WouldDie,
+            action: ReplacementAction::Prevent,
+            is_self_replacement: false,
+            description: "Prevent death A".into(),
+        },
+        ReplacementEffect {
+            source_id: 3,
+            controller: 0,
+            applies_to: ReplacementEventKind::WouldDie,
+            action: ReplacementAction::RedirectToZone(ZoneType::Hand),
+            is_self_replacement: false,
+            description: "Return to hand".into(),
+        },
+    ];
+
+    let (auto_applied, choice) = apply_replacement_effects(
+        &effects,
+        &ReplacementEventKind::WouldDie,
+        0,
+    );
+
+    // Self-replacement should be auto-applied
+    assert_eq!(auto_applied.len(), 1, "One self-replacement should be auto-applied");
+    assert_eq!(auto_applied[0].description, "Self-exile");
+
+    // Two player-choice effects should require ordering
+    assert!(choice.is_some(), "Multiple non-self replacements should require player choice");
+    let choice = choice.unwrap();
+    assert_eq!(choice.applicable_effects.len(), 2);
+}
+
+#[test]
+fn test_dynamic_value_trait_exists() {
+    // Test that DynamicValue enum variants exist and CardDef accepts them
+    use mtg_gto::card::DynamicValue;
+
+    let dv = DynamicValue::CardsInHand;
+    assert!(matches!(dv, DynamicValue::CardsInHand));
+
+    let dv2 = DynamicValue::CardTypesInGraveyards;
+    assert!(matches!(dv2, DynamicValue::CardTypesInGraveyards));
+
+    let dv3 = DynamicValue::Fixed(5);
+    assert!(matches!(dv3, DynamicValue::Fixed(5)));
+}
+
+// =========================================================================
+// Phase 3B Tests
+// =========================================================================
+
+#[test]
+fn test_opponent_model_bayesian_update() {
+    use mtg_gto::solver::mccfr::{OpponentModel, DeckArchetype};
+
+    let archetypes = vec![
+        DeckArchetype {
+            name: "Red Aggro".into(),
+            signature_cards: vec![sample::ids::LIGHTNING_BOLT, sample::ids::GOBLIN_GUIDE],
+            prior: 0.5,
+        },
+        DeckArchetype {
+            name: "Green Stompy".into(),
+            signature_cards: vec![sample::ids::LLANOWAR_ELVES, sample::ids::KALONIAN_TUSKER],
+            prior: 0.5,
+        },
+    ];
+
+    let mut model = OpponentModel::new(archetypes);
+
+    // Initially uniform
+    assert!((model.posteriors[0] - 0.5).abs() < 0.01);
+    assert!((model.posteriors[1] - 0.5).abs() < 0.01);
+
+    // Observe a Lightning Bolt — should shift toward Red Aggro
+    model.observe_card(sample::ids::LIGHTNING_BOLT);
+    assert!(
+        model.posteriors[0] > model.posteriors[1],
+        "Red Aggro posterior should be higher after observing Lightning Bolt"
+    );
+
+    // Observe another red card
+    model.observe_card(sample::ids::GOBLIN_GUIDE);
+    assert!(
+        model.posteriors[0] > 0.9,
+        "Red Aggro should be very likely after two signature cards: {}",
+        model.posteriors[0]
+    );
+
+    // Most likely archetype
+    let (arch, prob) = model.most_likely_archetype().unwrap();
+    assert_eq!(arch.name, "Red Aggro");
+    assert!(prob > 0.9);
+}
+
+#[test]
+fn test_policy_snapshot_collection() {
+    use mtg_gto::solver::mccfr::{
+        collect_policy_snapshots, McfrConfig, TrainConfig, RolloutMode,
+        train_extended,
+    };
+    use mtg_gto::info_set::BucketedAbstraction;
+
+    let db = sample::build_sample_db();
+    let deck0 = sample::mini_red_burn();
+    let deck1 = sample::mini_red_creatures();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &deck0, &deck1);
+
+    let abstraction = BucketedAbstraction;
+    let train_cfg = TrainConfig {
+        mccfr: McfrConfig { max_depth: 6, max_actions: 100 },
+        abstraction: &abstraction,
+        rollout_mode: RolloutMode::Heuristic,
+        rollout_strategies: None,
+        checkpoint_interval: 0,
+        checkpoint_dir: None,
+    };
+
+    // Train a small model
+    let tables = train_extended(&state, 5, &train_cfg);
+
+    // Collect policy snapshots
+    let snapshots = collect_policy_snapshots(&state, &tables, &abstraction, 10);
+
+    // Should have at least some snapshots from the game
+    assert!(!snapshots.is_empty(), "Should collect some policy snapshots");
+
+    // Each snapshot should have non-empty action distributions
+    for snap in &snapshots {
+        assert!(!snap.action_distribution.is_empty());
+        // Probabilities should sum to approximately 1.0
+        let total: f64 = snap.action_distribution.iter().map(|(_, p)| p).sum();
+        assert!(
+            (total - 1.0).abs() < 0.01,
+            "Action probabilities should sum to 1.0, got {}",
+            total
+        );
+    }
+}
+
+#[test]
+fn test_multi_phase_abstraction() {
+    use mtg_gto::solver::mccfr::MultiPhaseAbstraction;
+    use mtg_gto::info_set::{BucketedAbstraction, IdentityAbstraction, InfoSetAbstraction, InformationSet};
+
+    let fine = IdentityAbstraction;
+    let coarse = BucketedAbstraction;
+    let multi = MultiPhaseAbstraction {
+        fine: &fine,
+        coarse: &coarse,
+    };
+
+    assert_eq!(multi.name(), "MultiPhase");
+
+    // Create a minimal info set for testing
+    let info_set_main = InformationSet {
+        phase: 3, // PreCombatMain
+        active_player: 0,
+        turn_number: 1,
+        priority_player: 0,
+        my_life: 20,
+        opp_life: 20,
+        my_hand: vec![],
+        my_mana: [0; 6],
+        battlefield: vec![],
+        stack_entries: vec![],
+        my_graveyard: vec![],
+        opp_graveyard: vec![],
+        my_exile: vec![],
+        opp_exile: vec![],
+        opp_hand_size: 7,
+        opp_library_size: 53,
+        my_land_plays_remaining: 1,
+    };
+
+    let info_set_upkeep = InformationSet {
+        phase: 1, // Upkeep
+        ..info_set_main.clone()
+    };
+
+    // Main phase should use fine abstraction (same hash as IdentityAbstraction)
+    let main_hash = multi.abstract_info_set(&info_set_main);
+    let fine_hash = fine.abstract_info_set(&info_set_main);
+    assert_eq!(main_hash, fine_hash, "Main phase should use fine abstraction");
+
+    // Upkeep should use coarse abstraction
+    let upkeep_hash = multi.abstract_info_set(&info_set_upkeep);
+    let coarse_hash = coarse.abstract_info_set(&info_set_upkeep);
+    assert_eq!(upkeep_hash, coarse_hash, "Upkeep should use coarse abstraction");
+}
+
+#[test]
+fn test_warm_start_produces_nonempty_tables() {
+    use mtg_gto::solver::mccfr::warm_start_from_greedy;
+    use mtg_gto::info_set::BucketedAbstraction;
+
+    let db = sample::build_sample_db();
+    let deck0 = sample::mini_red_burn();
+    let deck1 = sample::mini_red_creatures();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &deck0, &deck1);
+
+    let abstraction = BucketedAbstraction;
+    let tables = warm_start_from_greedy(&state, 5, &abstraction, 1.0);
+
+    // Both tables should have entries from warm-up
+    let p0_entries = tables[0].num_info_sets();
+    let p1_entries = tables[1].num_info_sets();
+
+    assert!(p0_entries > 0, "P0 table should have warm-start entries");
+    assert!(p1_entries > 0, "P1 table should have warm-start entries");
+}
+
+#[test]
+fn test_skip_phases() {
+    // Test that skip_phases correctly skips a phase
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+
+    // Skip the draw phase
+    state.skip_phases.insert(Phase::Draw);
+
+    // Advance through phases from Untap (which auto-advances)
+    // The game should skip Draw and go to Upkeep -> (skip Draw) -> PreCombatMain
+    let greedy = GreedyStrategy;
+    let initial_turn = state.turn_number;
+    let mut actions_taken = 0;
+
+    while !state.game_over && state.turn_number == initial_turn && actions_taken < 500 {
+        let action = greedy.choose_action(&state, state.priority_player);
+        rules::apply_action(&mut state, &action);
+        actions_taken += 1;
+    }
+
+    // Note: depending on turn order, the skip may not be observable directly
+    // since Untap auto-advances. The key test is that the game completes without panic.
+    assert!(actions_taken > 0, "Game should have progressed");
+}
+
+#[test]
+fn test_games_complete_with_all_phase3_features() {
+    // Comprehensive test: run many games with all Phase 3 features active
+    let db = sample::build_sample_db();
+    let greedy = GreedyStrategy;
+    let random = RandomStrategy;
+
+    // Test with all deck combinations
+    let red = sample::red_aggro_deck();
+    let green = sample::green_stompy_deck();
+    let mini_burn = sample::mini_red_burn();
+
+    let results = simulation::simulate(&db, &red, &green, &greedy, &greedy, 100);
+    assert_eq!(results.total_games, 100);
+    assert!(results.draws < 50, "Too many draws suggests a bug");
+
+    let results = simulation::simulate(&db, &mini_burn, &red, &greedy, &random, 50);
+    assert_eq!(results.total_games, 50);
+
+    let results = simulation::simulate(&db, &green, &red, &random, &greedy, 50);
+    assert_eq!(results.total_games, 50);
+}

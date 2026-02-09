@@ -122,6 +122,53 @@ pub fn find_applicable_replacements(
     (self_replacements, player_choice)
 }
 
+/// Apply replacement effects for a given event, following CR 614 ordering rules.
+///
+/// 1. Self-replacement effects (CR 614.16a) are applied first automatically
+/// 2. If multiple non-self replacement effects apply, the affected player chooses
+///    the order — returns a `PendingReplacementChoice` so the game can surface
+///    an `Action::ChooseReplacementOrder`
+/// 3. If only one non-self effect applies, it's applied automatically
+///
+/// Returns `Some(PendingReplacementChoice)` if player input is needed,
+/// `None` if all effects were applied automatically.
+pub fn apply_replacement_effects<'a>(
+    effects: &'a [ReplacementEffect],
+    event_kind: &ReplacementEventKind,
+    affected_player: PlayerIndex,
+) -> (Vec<&'a ReplacementEffect>, Option<PendingReplacementChoice>) {
+    let (self_indices, player_indices) =
+        find_applicable_replacements(effects, event_kind, affected_player);
+
+    // Phase 1: Auto-apply self-replacement effects
+    let auto_applied: Vec<&ReplacementEffect> = self_indices
+        .iter()
+        .map(|&i| &effects[i])
+        .collect();
+
+    // Phase 2: Handle player-choice effects
+    if player_indices.len() <= 1 {
+        // 0 or 1 player-choice effect — apply automatically
+        let mut result = auto_applied;
+        for &i in &player_indices {
+            result.push(&effects[i]);
+        }
+        (result, None)
+    } else {
+        // Multiple player-choice effects — player must choose order
+        let applicable = player_indices
+            .iter()
+            .map(|&i| (effects[i].source_id, i))
+            .collect();
+        let choice = PendingReplacementChoice {
+            chooser: affected_player,
+            applicable_effects: applicable,
+            event_kind: event_kind.clone(),
+        };
+        (auto_applied, Some(choice))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -192,6 +192,13 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 })
                 .collect();
 
+            // CR 508.1d: Creatures that must attack do so if able.
+            let must_attack: Vec<ObjectId> = eligible
+                .iter()
+                .filter(|&&id| state.has_keyword(id, KeywordAbility::MustAttack))
+                .copied()
+                .collect();
+
             let use_buckets = abstraction == CombatAbstraction::Bucketed
                 && eligible.len() > 5;
 
@@ -203,6 +210,13 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 generate_subsets(&eligible, 10)
             };
             for subset in subsets {
+                // Filter: must-attack creatures must be included in any attack set
+                // (unless the subset is empty — you can choose not to attack at all)
+                if !must_attack.is_empty() && !subset.is_empty() {
+                    if !must_attack.iter().all(|ma| subset.contains(ma)) {
+                        continue;
+                    }
+                }
                 actions.push(Action::DeclareAttackers { attackers: subset });
             }
         }
@@ -217,6 +231,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                     let inst = &state.objects[&id];
                     !inst.tapped
                         && db.get(inst.card_def_id).is_some()
+                        && !state.has_keyword(id, KeywordAbility::CantBlock)
                 })
                 .collect();
 
