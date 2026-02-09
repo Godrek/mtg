@@ -1,6 +1,47 @@
+use std::sync::Arc;
+
 use mtg_gto::card::sample;
-use mtg_gto::simulation::{simulate, simulate_goldfish};
-use mtg_gto::strategy::{GreedyStrategy, RandomStrategy};
+use mtg_gto::card::CardId;
+use mtg_gto::game::{CardDatabase, GameState};
+use mtg_gto::rules;
+use mtg_gto::simulation::{simulate, simulate_goldfish, GoldfishResults};
+use mtg_gto::solver::mccfr::{self, McfrConfig};
+use mtg_gto::strategy::{GreedyStrategy, McfrStrategy, RandomStrategy};
+
+/// Train goldfish MCCFR for a deck and compare against the Greedy baseline.
+fn goldfish_mccfr_report(
+    db: &CardDatabase,
+    deck: &[CardId],
+    deck_name: &str,
+    config: &McfrConfig,
+    iterations: u32,
+    num_games: u64,
+    greedy_baseline: &GoldfishResults,
+) {
+    println!("Training MCCFR for {} goldfish ({} iterations)...", deck_name, iterations);
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, deck, deck);
+    let tables = mccfr::train_goldfish(&state, iterations, config);
+
+    let stats = mccfr::training_stats(&tables);
+    println!(
+        "  Trained: {} info sets, {} visits",
+        stats.total_info_sets[0], stats.total_visits[0],
+    );
+
+    let mccfr_strat = McfrStrategy::new(tables[0].clone());
+    println!("\n{} (MCCFR) — Goldfish:", deck_name);
+    let mccfr_results = simulate_goldfish(db, deck, &mccfr_strat, num_games);
+    mccfr_results.display();
+
+    println!(
+        "\n  >> Greedy avg kill: T{:.2}  |  MCCFR avg kill: T{:.2}  |  delta: {:.2} turns",
+        greedy_baseline.avg_kill_turn,
+        mccfr_results.avg_kill_turn,
+        greedy_baseline.avg_kill_turn - mccfr_results.avg_kill_turn,
+    );
+}
 
 fn main() {
     println!("MTG GTO Simulator");
@@ -39,12 +80,25 @@ fn main() {
     println!("==================\n");
 
     println!("Red Aggro (Greedy) — Goldfish:");
-    let results = simulate_goldfish(&db, &red_deck, &greedy, 1000);
-    results.display();
+    let greedy_red = simulate_goldfish(&db, &red_deck, &greedy, 1000);
+    greedy_red.display();
 
     println!();
 
     println!("Green Stompy (Greedy) — Goldfish:");
-    let results = simulate_goldfish(&db, &green_deck, &greedy, 1000);
-    results.display();
+    let greedy_green = simulate_goldfish(&db, &green_deck, &greedy, 1000);
+    greedy_green.display();
+
+    // --- MCCFR Goldfish ---
+    println!("\n==================");
+    println!("MCCFR Goldfish Training");
+    println!("==================\n");
+
+    let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+
+    goldfish_mccfr_report(&db, &red_deck, "Red Aggro", &config, 50, 1000, &greedy_red);
+
+    println!();
+
+    goldfish_mccfr_report(&db, &green_deck, "Green Stompy", &config, 50, 1000, &greedy_green);
 }
