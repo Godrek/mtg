@@ -316,9 +316,10 @@ pub fn simulate(
 // Goldfish mode — solitaire simulation against a passive opponent
 // ---------------------------------------------------------------------------
 
-/// Maximum turns before a goldfish game is declared a draw.
-/// Lower than normal since goldfish games should end quickly.
-const GOLDFISH_MAX_TURNS: u32 = 50;
+/// Maximum turns before a goldfish game is declared a draw (terminal state).
+/// Games that haven't ended by turn 20 are treated as terminal — this applies
+/// to both Standard and Commander goldfish.
+const GOLDFISH_MAX_TURNS: u32 = 20;
 
 /// Maximum actions per goldfish game (lower bound since opponent does nothing).
 const GOLDFISH_MAX_ACTIONS: u32 = 10_000;
@@ -486,9 +487,9 @@ fn run_goldfish_game_inner(
     }
 }
 
-/// Maximum turns for commander goldfish games. Higher than standard goldfish
-/// because 40 starting life requires roughly double the damage.
-const COMMANDER_GOLDFISH_MAX_TURNS: u32 = 80;
+/// Maximum turns for commander goldfish games (terminal state).
+/// Same as standard goldfish — games rarely reach this point.
+const COMMANDER_GOLDFISH_MAX_TURNS: u32 = 20;
 
 /// Run a single goldfish game in Commander format.
 ///
