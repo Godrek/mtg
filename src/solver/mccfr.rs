@@ -403,13 +403,19 @@ fn terminal_utility(state: &GameState, player: PlayerIndex) -> f64 {
 /// - Positive when we're ahead on life
 /// - Normalized to [-1, 1] range
 fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
+    use crate::game::GameFormat;
+
     let opp = state.opponent(player);
     let my_life = state.players[player].life as f64;
     let opp_life = state.players[opp].life as f64;
 
-    // Life advantage, normalized by starting life (20)
+    // Life advantage, normalized by format starting life (20 for Standard, 40 for Commander)
+    let starting_life = match state.format {
+        GameFormat::Commander => 40.0,
+        _ => 20.0,
+    };
     let life_diff = my_life - opp_life;
-    let normalized = (life_diff / 20.0).clamp(-1.0, 1.0);
+    let normalized = (life_diff / starting_life).clamp(-1.0, 1.0);
 
     // Board presence bonus (using layer engine for accurate power)
     let my_power: i32 = state

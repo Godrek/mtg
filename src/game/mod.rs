@@ -529,6 +529,16 @@ pub struct PlayerView<'a> {
     /// Remaining land plays this turn for the viewing player.
     pub my_land_plays_remaining: u32,
 
+    // --- Commander fields (public in Commander format) ---
+    /// Cards in the viewing player's command zone.
+    pub my_command_zone: &'a [ObjectId],
+    /// Cards in the opponent's command zone.
+    pub opp_command_zone: &'a [ObjectId],
+    /// How many times the viewing player has cast their commander.
+    pub my_commander_tax: u32,
+    /// The game format (Standard or Commander).
+    pub format: GameFormat,
+
     // --- Object lookup (filtered, read-only) ---
     /// Card instances visible to the viewing player, keyed by ObjectId.
     /// Includes objects on the battlefield, stack, both graveyards, both exile
@@ -650,6 +660,11 @@ impl GameState {
 
             my_mana_pool: &self.players[player].mana_pool,
             my_land_plays_remaining: self.players[player].land_plays_remaining,
+
+            my_command_zone: &self.players[player].command_zone,
+            opp_command_zone: &self.players[opp].command_zone,
+            my_commander_tax: self.players[player].commander_tax,
+            format: self.format,
 
             objects: visible,
             card_db: self.card_db(),

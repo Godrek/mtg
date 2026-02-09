@@ -69,6 +69,14 @@ pub struct InformationSet {
     pub my_land_plays_remaining: u32,
     /// Available mana per color (W, U, B, R, G, colorless).
     pub my_mana: [u32; 6],
+
+    // --- Commander fields ---
+    /// Cards in our command zone, represented as sorted CardIds.
+    pub my_command_zone: Vec<u64>,
+    /// Cards in opponent's command zone, represented as sorted CardIds.
+    pub opp_command_zone: Vec<u64>,
+    /// Commander tax (number of times commander has been cast from command zone).
+    pub my_commander_tax: u32,
 }
 
 /// Observable information about a permanent on the battlefield.
@@ -172,6 +180,21 @@ impl InformationSet {
             mana.colorless,
         ];
 
+        // Command zones: sorted CardIds
+        let mut my_command_zone: Vec<u64> = view
+            .my_command_zone
+            .iter()
+            .filter_map(|&id| view.objects.get(&id).map(|inst| inst.card_def_id))
+            .collect();
+        my_command_zone.sort();
+
+        let mut opp_command_zone: Vec<u64> = view
+            .opp_command_zone
+            .iter()
+            .filter_map(|&id| view.objects.get(&id).map(|inst| inst.card_def_id))
+            .collect();
+        opp_command_zone.sort();
+
         InformationSet {
             phase,
             active_player: view.active_player,
@@ -190,6 +213,9 @@ impl InformationSet {
             opp_exile,
             my_land_plays_remaining: view.my_land_plays_remaining,
             my_mana,
+            my_command_zone,
+            opp_command_zone,
+            my_commander_tax: view.my_commander_tax,
         }
     }
 
@@ -216,6 +242,9 @@ impl InformationSet {
         self.opp_exile.hash(&mut hasher);
         self.my_land_plays_remaining.hash(&mut hasher);
         self.my_mana.hash(&mut hasher);
+        self.my_command_zone.hash(&mut hasher);
+        self.opp_command_zone.hash(&mut hasher);
+        self.my_commander_tax.hash(&mut hasher);
         hasher.finish()
     }
 }
@@ -331,22 +360,27 @@ impl InfoSetAbstraction for IdentityAbstraction {
     }
 }
 
-/// Bucketed abstraction for scaling MCCFR to realistic (60-card) decks.
+/// Bucketed abstraction for scaling MCCFR to realistic decks.
 ///
 /// Reduces the information set space by bucketizing continuous values:
-/// - **Life**: {<=0, 1-5, 6-10, 11-15, 16-20, 21+} (6 buckets per player)
+/// - **Life**: 10 buckets covering 0 through 41+ (supports both Standard
+///   20-life and Commander 40-life formats)
 /// - **Board**: permanent count per controller (no power/toughness — that
 ///   requires card_db; see `CardAwareBucketedAbstraction` for richer stats)
 /// - **Hand**: hand size and opponent hand size (no role classification
 ///   without card_db; see `CardAwareBucketedAbstraction`)
 /// - **Turn**: {early 0-3, mid 4-6, late 7+} (3 buckets)
+/// - **Commander**: command zone occupancy and commander tax
 ///
 /// This abstraction operates without a `CardDatabase` reference, making it
 /// suitable for use in contexts where only the `InformationSet` is available.
 pub struct BucketedAbstraction;
 
 impl BucketedAbstraction {
-    /// Bucket a life total into 6 categories.
+    /// Bucket a life total into categories.
+    ///
+    /// Extended to 10 buckets to support Commander format (40 starting life).
+    /// Standard format uses buckets 0-4; Commander uses the full range.
     fn life_bucket(life: i32) -> u8 {
         match life {
             i32::MIN..=0 => 0,
@@ -354,7 +388,11 @@ impl BucketedAbstraction {
             6..=10 => 2,
             11..=15 => 3,
             16..=20 => 4,
-            _ => 5, // 21+
+            21..=25 => 5,
+            26..=30 => 6,
+            31..=35 => 7,
+            36..=40 => 8,
+            _ => 9, // 41+
         }
     }
 
@@ -433,6 +471,13 @@ impl InfoSetAbstraction for BucketedAbstraction {
 
         // Land plays remaining
         info_set.my_land_plays_remaining.hash(&mut hasher);
+
+        // Commander: command zone occupancy and tax
+        let my_cmd_count = info_set.my_command_zone.len() as u8;
+        let opp_cmd_count = info_set.opp_command_zone.len() as u8;
+        my_cmd_count.hash(&mut hasher);
+        opp_cmd_count.hash(&mut hasher);
+        info_set.my_commander_tax.hash(&mut hasher);
 
         hasher.finish()
     }
@@ -564,6 +609,13 @@ impl<'a> InfoSetAbstraction for CardAwareBucketedAbstraction<'a> {
 
         // Land plays remaining
         info_set.my_land_plays_remaining.hash(&mut hasher);
+
+        // Commander: command zone occupancy and tax
+        let my_cmd_count = info_set.my_command_zone.len() as u8;
+        let opp_cmd_count = info_set.opp_command_zone.len() as u8;
+        my_cmd_count.hash(&mut hasher);
+        opp_cmd_count.hash(&mut hasher);
+        info_set.my_commander_tax.hash(&mut hasher);
 
         hasher.finish()
     }
@@ -869,7 +921,11 @@ mod tests {
         assert_eq!(BucketedAbstraction::life_bucket(16), 4);
         assert_eq!(BucketedAbstraction::life_bucket(20), 4);
         assert_eq!(BucketedAbstraction::life_bucket(21), 5);
-        assert_eq!(BucketedAbstraction::life_bucket(100), 5);
+        assert_eq!(BucketedAbstraction::life_bucket(25), 5);
+        assert_eq!(BucketedAbstraction::life_bucket(30), 6);
+        assert_eq!(BucketedAbstraction::life_bucket(35), 7);
+        assert_eq!(BucketedAbstraction::life_bucket(40), 8);
+        assert_eq!(BucketedAbstraction::life_bucket(100), 9);
     }
 
     #[test]
