@@ -935,6 +935,206 @@ pub fn collect_policy_snapshots(
 }
 
 // =========================================================================
+// Goldfish MCCFR Training
+// =========================================================================
+
+/// Train MCCFR for goldfish (solitaire) mode.
+///
+/// In goldfish mode, player 1 is completely passive (uses `GoldfishStrategy`),
+/// so this is a single-agent optimization problem. Key differences from
+/// standard 2-player MCCFR:
+///
+/// - Only traverses for player 0 (the pilot). Player 1's strategy is fixed.
+/// - When player 1 has priority, `GoldfishStrategy` chooses the action
+///   directly — no regret table lookup or strategy sampling needed.
+/// - Returns only player 0's regret table (wrapped in the 2-element array
+///   for API compatibility; player 1's table will be empty).
+///
+/// This converges faster than standard MCCFR because the opponent's
+/// action space is collapsed to a single deterministic choice at each node.
+pub fn train_goldfish(
+    initial_state: &GameState,
+    num_iterations: u32,
+    config: &McfrConfig,
+) -> [RegretTable; 2] {
+    train_goldfish_with_abstraction(
+        initial_state,
+        num_iterations,
+        config,
+        &IdentityAbstraction,
+    )
+}
+
+/// Train goldfish MCCFR with information set abstraction.
+pub fn train_goldfish_with_abstraction(
+    initial_state: &GameState,
+    num_iterations: u32,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+) -> [RegretTable; 2] {
+    let mut regret_tables = [RegretTable::new(), RegretTable::new()];
+    let goldfish = crate::strategy::GoldfishStrategy;
+
+    for _ in 0..num_iterations {
+        // Only traverse for player 0 — player 1 is the goldfish
+        let state = initial_state.clone();
+        let mut rng = rand::thread_rng();
+        traverse_goldfish(
+            state,
+            &mut regret_tables[0],
+            config,
+            abstraction,
+            &goldfish,
+            0,
+            0,
+            &mut rng,
+        );
+    }
+
+    regret_tables
+}
+
+/// Recursive goldfish MCCFR traversal for player 0.
+///
+/// When it's player 0's turn: explore all actions and accumulate regrets
+/// (same as standard MCCFR traverser node).
+/// When it's player 1's turn: use GoldfishStrategy deterministically
+/// (no sampling, no regret tracking).
+fn traverse_goldfish(
+    state: GameState,
+    regret_table: &mut RegretTable,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    goldfish: &dyn Strategy,
+    depth: u32,
+    actions_taken: u32,
+    rng: &mut impl Rng,
+) -> f64 {
+    // Terminal check
+    if state.game_over {
+        return terminal_utility(&state, 0);
+    }
+
+    // Action limit
+    if actions_taken >= config.max_actions {
+        return heuristic_utility(&state, 0);
+    }
+
+    let player = state.priority_player;
+
+    // Player 1 (goldfish): deterministic, no regret tracking
+    if player == 1 {
+        let action = goldfish.choose_action(&state, 1);
+        let mut next_state = state;
+        rules::apply_action(&mut next_state, &action);
+        return traverse_goldfish(
+            next_state,
+            regret_table,
+            config,
+            abstraction,
+            goldfish,
+            depth, // don't increment depth for opponent actions
+            actions_taken + 1,
+            rng,
+        );
+    }
+
+    // Player 0: MCCFR decision node
+    let actions = legal_actions_abstracted(&state);
+
+    // No actions — pass
+    if actions.is_empty() {
+        let mut next_state = state;
+        rules::apply_action(&mut next_state, &Action::PassPriority);
+        return traverse_goldfish(
+            next_state,
+            regret_table,
+            config,
+            abstraction,
+            goldfish,
+            depth,
+            actions_taken + 1,
+            rng,
+        );
+    }
+
+    // Single action — no decision to make
+    if actions.len() == 1 {
+        let mut next_state = state.clone();
+        rules::apply_action(&mut next_state, &actions[0]);
+        return traverse_goldfish(
+            next_state,
+            regret_table,
+            config,
+            abstraction,
+            goldfish,
+            depth,
+            actions_taken + 1,
+            rng,
+        );
+    }
+
+    // Depth limit
+    if config.max_depth > 0 && depth >= config.max_depth {
+        return heuristic_utility(&state, 0);
+    }
+
+    // Canonicalize actions
+    let canonical_actions: Vec<_> = actions
+        .iter()
+        .map(|a| canonicalize(a, &state))
+        .collect();
+
+    // Compute info set
+    let view = state.visible_state(0);
+    let info_set = InformationSet::from_view(&view, state.card_db());
+    let info_hash = abstraction.abstract_info_set(&info_set);
+
+    // Get current strategy via regret matching
+    let strategy = {
+        let entry = regret_table.get_or_create(info_hash);
+        entry.current_strategy(&canonical_actions)
+    };
+
+    // Explore ALL actions (traverser node)
+    let num_actions = actions.len();
+    let mut action_utilities = vec![0.0f64; num_actions];
+
+    for (i, action) in actions.iter().enumerate() {
+        let mut child_state = state.clone();
+        rules::apply_action(&mut child_state, action);
+        action_utilities[i] = traverse_goldfish(
+            child_state,
+            regret_table,
+            config,
+            abstraction,
+            goldfish,
+            depth + 1,
+            actions_taken + 1,
+            rng,
+        );
+    }
+
+    // Expected utility under current strategy
+    let node_utility: f64 = strategy
+        .iter()
+        .zip(action_utilities.iter())
+        .map(|(&s, &u)| s * u)
+        .sum();
+
+    // Update regrets and cumulative strategy
+    let entry = regret_table.get_or_create(info_hash);
+    for (i, ca) in canonical_actions.iter().enumerate() {
+        let action_entry = entry.get_or_create_action(ca);
+        action_entry.cumulative_regret += action_utilities[i] - node_utility;
+        action_entry.cumulative_strategy += strategy[i];
+    }
+    entry.visit_count += 1;
+
+    node_utility
+}
+
+// =========================================================================
 // Phase 3B.4 — Multi-Abstraction
 // =========================================================================
 

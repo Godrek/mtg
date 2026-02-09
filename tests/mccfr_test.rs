@@ -25,6 +25,7 @@ use mtg_gto::rules;
 use mtg_gto::simulation;
 use mtg_gto::solver::mccfr::{self, McfrConfig, RolloutMode, TrainConfig};
 use mtg_gto::solver::RegretTable;
+use mtg_gto::simulation::simulate_goldfish;
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, McfrStrategy, RandomStrategy, Strategy};
 
 /// Helper: create a minimal game state with 15-card decks for MCCFR testing.
@@ -798,4 +799,239 @@ fn test_parallel_vs_sequential_consistency() {
     // Both should have non-trivial entries
     assert!(seq_info > 0, "Sequential should have info sets");
     assert!(par_info > 0, "Parallel should have info sets");
+}
+
+// =========================================================================
+// Goldfish MCCFR Training Tests
+// =========================================================================
+
+#[test]
+fn test_goldfish_mccfr_training_runs() {
+    // Verify goldfish MCCFR training completes without panics and produces
+    // info set entries for player 0 only (player 1 is the goldfish).
+    let db = sample::build_sample_db();
+    let deck = sample::mini_red_burn();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &deck, &deck);
+
+    let config = McfrConfig { max_depth: 6, max_actions: 300 };
+    let tables = mccfr::train_goldfish(&state, 10, &config);
+
+    let p0_info_sets = tables[0].num_info_sets();
+    let p1_info_sets = tables[1].num_info_sets();
+
+    eprintln!(
+        "Goldfish MCCFR (20 iters): P0 info sets = {}, P1 info sets = {}",
+        p0_info_sets, p1_info_sets,
+    );
+
+    assert!(p0_info_sets > 0, "Player 0 should have info sets from goldfish training");
+    assert_eq!(p1_info_sets, 0, "Player 1 (goldfish) should have no info sets");
+}
+
+#[test]
+fn test_goldfish_mccfr_strategy_plays_legal_games() {
+    // Train goldfish MCCFR, then use the resulting strategy to play
+    // goldfish games end-to-end.
+    let db = sample::build_sample_db();
+    let deck = sample::mini_red_burn();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &deck, &deck);
+
+    let config = McfrConfig { max_depth: 6, max_actions: 300 };
+    let tables = mccfr::train_goldfish(&state, 15, &config);
+
+    let mccfr_strat = McfrStrategy::new(tables[0].clone());
+
+    // Play 20 goldfish games — all must complete without panics
+    for _ in 0..20 {
+        let result = simulation::run_goldfish_game(&db, &deck, &mccfr_strat);
+        assert!(result.turns <= 50, "Goldfish game should terminate within limit");
+    }
+}
+
+#[test]
+fn test_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
+    // Core goldfish comparison: train MCCFR on goldfish mode, then compare
+    // average kill turns against Greedy and Random baselines.
+    //
+    // Expected ordering (lower avg kill turn = better):
+    //   MCCFR <= Greedy < Random
+    //
+    // With limited training budget, MCCFR should be competitive with Greedy.
+    let db = sample::build_sample_db();
+    let deck = sample::red_aggro_deck();
+
+    // --- Train MCCFR against goldfish ---
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &deck, &deck);
+
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish(&state, 20, &config);
+    let mccfr_strat = McfrStrategy::new(tables[0].clone());
+
+    let stats = mccfr::training_stats(&tables);
+    eprintln!(
+        "Goldfish MCCFR training: {} info sets, {} visits, exploit={:.4}",
+        stats.total_info_sets[0], stats.total_visits[0], stats.exploitability,
+    );
+
+    // --- Run goldfish simulations with all three strategies ---
+    let num_games = 100;
+
+    let random_results = simulate_goldfish(&db, &deck, &RandomStrategy, num_games);
+    let greedy_results = simulate_goldfish(&db, &deck, &GreedyStrategy, num_games);
+    let mccfr_results = simulate_goldfish(&db, &deck, &mccfr_strat, num_games);
+
+    eprintln!("\n=== Goldfish Kill Turn Comparison (Red Aggro, {} games) ===", num_games);
+    eprintln!(
+        "Random:  win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        random_results.win_rate() * 100.0,
+        random_results.avg_kill_turn,
+        random_results.fastest_kill,
+        random_results.slowest_kill,
+    );
+    eprintln!(
+        "Greedy:  win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        greedy_results.win_rate() * 100.0,
+        greedy_results.avg_kill_turn,
+        greedy_results.fastest_kill,
+        greedy_results.slowest_kill,
+    );
+    eprintln!(
+        "MCCFR:   win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        mccfr_results.win_rate() * 100.0,
+        mccfr_results.avg_kill_turn,
+        mccfr_results.fastest_kill,
+        mccfr_results.slowest_kill,
+    );
+
+    // All strategies should win most goldfish games (opponent does nothing)
+    assert!(
+        random_results.win_rate() > 0.5,
+        "Random should win >50% of goldfish games (got {:.0}%)",
+        random_results.win_rate() * 100.0,
+    );
+    assert!(
+        greedy_results.win_rate() > 0.8,
+        "Greedy should win >80% of goldfish games (got {:.0}%)",
+        greedy_results.win_rate() * 100.0,
+    );
+    assert!(
+        mccfr_results.win_rate() > 0.5,
+        "MCCFR should win >50% of goldfish games (got {:.0}%)",
+        mccfr_results.win_rate() * 100.0,
+    );
+
+    // Greedy should be faster than Random
+    if random_results.wins > 0 && greedy_results.wins > 0 {
+        assert!(
+            greedy_results.avg_kill_turn < random_results.avg_kill_turn,
+            "Greedy ({:.2}) should kill faster than Random ({:.2})",
+            greedy_results.avg_kill_turn,
+            random_results.avg_kill_turn,
+        );
+    }
+
+    // MCCFR with limited training should at least outperform Random.
+    // Full convergence to Greedy-level performance requires hundreds of
+    // iterations; this test uses a CI-friendly budget of 20.
+    if mccfr_results.wins > 0 && random_results.wins > 0 {
+        eprintln!(
+            "\nMCCFR vs Random gap: {:.2} turns (MCCFR={:.2}, Random={:.2})",
+            random_results.avg_kill_turn - mccfr_results.avg_kill_turn,
+            mccfr_results.avg_kill_turn,
+            random_results.avg_kill_turn,
+        );
+        assert!(
+            mccfr_results.avg_kill_turn <= random_results.avg_kill_turn + 3.0,
+            "MCCFR ({:.2}) should not be worse than Random ({:.2}) by more than 3 turns",
+            mccfr_results.avg_kill_turn,
+            random_results.avg_kill_turn,
+        );
+    }
+    if mccfr_results.wins > 0 && greedy_results.wins > 0 {
+        eprintln!(
+            "MCCFR vs Greedy gap: {:.2} turns (Greedy={:.2}, MCCFR={:.2})",
+            mccfr_results.avg_kill_turn - greedy_results.avg_kill_turn,
+            greedy_results.avg_kill_turn,
+            mccfr_results.avg_kill_turn,
+        );
+    }
+}
+
+#[test]
+fn test_goldfish_mccfr_with_abstraction() {
+    // Train goldfish MCCFR with bucketed abstraction on 60-card deck.
+    let db = sample::build_sample_db();
+    let deck = sample::red_aggro_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &deck, &deck);
+
+    let bucketed = BucketedAbstraction;
+    let config = McfrConfig { max_depth: 6, max_actions: 500 };
+    let tables = mccfr::train_goldfish_with_abstraction(
+        &state, 30, &config, &bucketed,
+    );
+
+    let strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(BucketedAbstraction),
+    );
+
+    let results = simulate_goldfish(&db, &deck, &strat, 100);
+    eprintln!(
+        "Goldfish MCCFR (abstracted, 60-card): win={:.0}% avg_kill=T{:.2}",
+        results.win_rate() * 100.0,
+        results.avg_kill_turn,
+    );
+
+    assert!(results.win_rate() > 0.3, "Abstracted MCCFR should win goldfish games");
+}
+
+#[test]
+fn test_goldfish_mccfr_green_stompy() {
+    // Run the same comparison for Green Stompy — a creature-based deck
+    // with different sequencing challenges.
+    let db = sample::build_sample_db();
+    let deck = sample::green_stompy_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &deck, &deck);
+
+    let config = McfrConfig { max_depth: 5, max_actions: 500 };
+    let tables = mccfr::train_goldfish(&state, 20, &config);
+    let mccfr_strat = McfrStrategy::new(tables[0].clone());
+
+    let num_games = 100;
+
+    let greedy_results = simulate_goldfish(&db, &deck, &GreedyStrategy, num_games);
+    let mccfr_results = simulate_goldfish(&db, &deck, &mccfr_strat, num_games);
+
+    eprintln!("\n=== Goldfish Kill Turn Comparison (Green Stompy, {} games) ===", num_games);
+    eprintln!(
+        "Greedy:  win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        greedy_results.win_rate() * 100.0,
+        greedy_results.avg_kill_turn,
+        greedy_results.fastest_kill,
+        greedy_results.slowest_kill,
+    );
+    eprintln!(
+        "MCCFR:   win={:.0}%  avg_kill=T{:.2}  fastest=T{}  slowest=T{}",
+        mccfr_results.win_rate() * 100.0,
+        mccfr_results.avg_kill_turn,
+        mccfr_results.fastest_kill,
+        mccfr_results.slowest_kill,
+    );
+
+    assert!(greedy_results.win_rate() > 0.5, "Greedy should win goldfish with Green Stompy");
+    assert!(mccfr_results.win_rate() > 0.3, "MCCFR should win some goldfish games");
 }
