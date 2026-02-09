@@ -3695,3 +3695,143 @@ fn test_dynamic_value_in_layer_engine() {
     let toughness = state.effective_toughness(dyn_id);
     assert_eq!(toughness, 4, "Static toughness should be unchanged");
 }
+
+/// Test that Effect::ExtraTurn goes through the full spell resolution path:
+/// card in hand → CastSpell → stack → resolve → extra_turns queue → extra turn taken.
+#[test]
+fn test_extra_turn_through_spell_resolution() {
+    use mtg_gto::card::{CardDef, CardType, Effect};
+    use mtg_gto::mana::ManaCost;
+
+    let mut db = sample::build_sample_db();
+
+    // Create a "Time Walk" test card: {1}{U} Sorcery — Take an extra turn.
+    db.insert(CardDef {
+        id: 9400,
+        name: "Time Walk Test".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::ExtraTurn),
+        oracle_text: "Take an extra turn after this one.".into(),
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Put Time Walk in player 0's hand
+    let tw_id = state.create_card_in_zone(9400, 0, ZoneType::Hand);
+
+    // Give player 0 enough mana (1 generic + 1 blue)
+    // The engine allows paying generic with colored mana
+    state.players[0].mana_pool.blue = 2;
+
+    state.phase = Phase::PreCombatMain;
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.turn_number = 2;
+    state.players[0].land_plays_remaining = 0;
+
+    assert!(state.extra_turns.is_empty(), "No extra turns queued initially");
+
+    // Cast Time Walk
+    let actions = legal_actions(&state);
+    let cast_action = actions.iter().find(|a| {
+        matches!(a, Action::CastSpell { object_id, .. } if *object_id == tw_id)
+    });
+    assert!(cast_action.is_some(), "Time Walk should be castable with 1U mana available");
+
+    rules::apply_action(&mut state, cast_action.unwrap());
+    assert_eq!(state.stack.len(), 1, "Time Walk should be on the stack");
+
+    // Both players pass to resolve
+    rules::apply_action(&mut state, &Action::PassPriority);
+    rules::apply_action(&mut state, &Action::PassPriority);
+
+    // After resolution, extra_turns should have player 0 queued
+    assert!(!state.extra_turns.is_empty(), "Extra turn should be queued after resolution");
+    assert_eq!(state.extra_turns[0], 0, "Player 0 should get the extra turn");
+
+    // Now play through the rest of the turn to verify the extra turn fires
+    let greedy = GreedyStrategy;
+    let initial_turn = state.turn_number;
+    let mut actions_taken = 0;
+    while !state.game_over && state.turn_number == initial_turn && actions_taken < 2000 {
+        let action = greedy.choose_action(&state, state.priority_player);
+        rules::apply_action(&mut state, &action);
+        actions_taken += 1;
+    }
+
+    if !state.game_over {
+        assert_eq!(state.active_player, 0, "Player 0 should be active during their extra turn");
+        assert!(state.extra_turns.is_empty(), "Extra turn queue should be drained");
+    }
+}
+
+/// Test that DynamicValue::CardsInHand correctly reads the controller's hand size
+/// through the full GameState → layer engine → DynamicContext pipeline.
+#[test]
+fn test_dynamic_value_cards_in_hand() {
+    use mtg_gto::card::{CardDef, CardInstance, CardType, DynamicValue, Subtype};
+    use mtg_gto::game::CardDatabase;
+    use mtg_gto::mana::ManaCost;
+
+    let mut db = CardDatabase::new();
+    // A creature whose power = cards in hand (like Maro)
+    db.insert(CardDef {
+        id: 9500,
+        name: "Maro Test".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elemental".into())],
+        power: Some(0),
+        toughness: Some(0),
+        dynamic_power: Some(DynamicValue::CardsInHand),
+        dynamic_toughness: Some(DynamicValue::CardsInHand),
+        ..Default::default()
+    });
+    // A dummy card for hand padding
+    db.insert(CardDef {
+        id: 9501,
+        name: "Padding Card".into(),
+        card_types: vec![CardType::Instant],
+        ..Default::default()
+    });
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+
+    // Place Maro on the battlefield under player 0
+    let maro_id = state.next_object_id;
+    state.next_object_id += 1;
+    state.objects.insert(maro_id, CardInstance::new(maro_id, 9500, 0));
+    state.battlefield.push(maro_id);
+
+    // Player 0 has 0 cards in hand → P/T = 0/0
+    assert_eq!(state.effective_power(maro_id), 0);
+    assert_eq!(state.effective_toughness(maro_id), 0);
+
+    // Add 3 cards to player 0's hand
+    for _ in 0..3 {
+        let cid = state.next_object_id;
+        state.next_object_id += 1;
+        state.objects.insert(cid, CardInstance::new(cid, 9501, 0));
+        state.players[0].hand.push(cid);
+    }
+    state.invalidate_characteristics_cache();
+
+    // Now Maro should be 3/3
+    assert_eq!(state.effective_power(maro_id), 3, "Maro power should equal hand size (3)");
+    assert_eq!(state.effective_toughness(maro_id), 3, "Maro toughness should equal hand size (3)");
+
+    // Add 2 more cards
+    for _ in 0..2 {
+        let cid = state.next_object_id;
+        state.next_object_id += 1;
+        state.objects.insert(cid, CardInstance::new(cid, 9501, 0));
+        state.players[0].hand.push(cid);
+    }
+    state.invalidate_characteristics_cache();
+
+    assert_eq!(state.effective_power(maro_id), 5, "Maro power should equal hand size (5)");
+}

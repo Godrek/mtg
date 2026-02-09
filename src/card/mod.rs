@@ -132,26 +132,36 @@ pub enum DynamicValue {
     Fixed(i32),
 }
 
+/// Extra context from the game state for evaluating `DynamicValue` variants
+/// that need data beyond the battlefield (hand size, graveyards).
+pub struct DynamicContext {
+    /// Number of cards in the controller's hand.
+    pub hand_size: usize,
+    /// All card type sets across all graveyards, flattened for counting
+    /// distinct types. Each inner Vec is one card's types.
+    pub graveyard_card_types: Vec<Vec<CardType>>,
+}
+
 impl DynamicValue {
     /// Evaluate this dynamic value in context.
     /// `controller` is the controlling player index, `objects` is the full
     /// object map, `battlefield` the set of object IDs on the battlefield,
-    /// and `card_db` looks up card definitions by ID.
+    /// `card_db` looks up card definitions by ID, and `ctx` provides
+    /// player hand/graveyard data needed by some variants.
     pub fn evaluate<'a, F>(
         &self,
         controller: usize,
         objects: &std::collections::HashMap<ObjectId, CardInstance>,
         battlefield: &[ObjectId],
         card_db: &'a F,
+        ctx: Option<&DynamicContext>,
     ) -> i32
     where
         F: Fn(u64) -> Option<&'a CardDef>,
     {
         match self {
             DynamicValue::CardsInHand => {
-                // Not available from just objects/battlefield — return 0 as fallback.
-                // Full evaluation requires player hand data, handled at GameState level.
-                0
+                ctx.map(|c| c.hand_size as i32).unwrap_or(0)
             }
             DynamicValue::CreaturesControlled => {
                 battlefield
@@ -170,9 +180,17 @@ impl DynamicValue {
                     .count() as i32
             }
             DynamicValue::CardTypesInGraveyards => {
-                // Count unique card types across all graveyards.
-                // Without graveyard access here, this is also a fallback.
-                0
+                if let Some(c) = ctx {
+                    let mut seen = std::collections::HashSet::new();
+                    for types in &c.graveyard_card_types {
+                        for ct in types {
+                            seen.insert(*ct);
+                        }
+                    }
+                    seen.len() as i32
+                } else {
+                    0
+                }
             }
             DynamicValue::TotalPowerControlled => {
                 battlefield

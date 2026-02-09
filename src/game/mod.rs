@@ -962,14 +962,36 @@ impl GameState {
             cache.battlefield_set = Some(self.battlefield.iter().copied().collect());
         }
 
+        // Build DynamicContext for this object's controller (needed for
+        // DynamicValue::CardsInHand and CardTypesInGraveyards).
+        let dyn_ctx = self.objects.get(&obj_id).map(|inst| {
+            let controller = inst.controller;
+            let hand_size = self.players.get(controller)
+                .map(|p| p.hand.len())
+                .unwrap_or(0);
+            let db = self.card_db();
+            let mut graveyard_card_types = Vec::new();
+            for player in &self.players {
+                for &gid in &player.graveyard {
+                    if let Some(gi) = self.objects.get(&gid) {
+                        if let Some(gdef) = db.get(gi.card_def_id) {
+                            graveyard_card_types.push(gdef.card_types.clone());
+                        }
+                    }
+                }
+            }
+            crate::card::DynamicContext { hand_size, graveyard_card_types }
+        });
+
         // Compute characteristics with the cached battlefield set
         let bf_set = cache.battlefield_set.as_ref().unwrap();
-        let result = crate::layers::compute_characteristics(
+        let result = crate::layers::compute_characteristics_with_ctx(
             obj_id,
             &self.continuous_effects,
             &self.objects,
             bf_set,
             self.card_db(),
+            dyn_ctx.as_ref(),
         );
 
         if let Some(ref chars) = result {

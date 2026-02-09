@@ -621,18 +621,20 @@ pub fn load_checkpoint(
 // Phase 3B.1 — Warm-Starting from GreedyStrategy Heuristics
 // =========================================================================
 
-/// Warm-start regret tables by running GreedyStrategy games and seeding
-/// the regret table with initial regret values based on heuristic play.
+/// Warm-start regret tables by pre-populating info set entries from greedy
+/// play-throughs. This gives the MCCFR solver a "map" of reachable info sets
+/// and actions without biasing the regret values.
 ///
-/// This bootstraps the MCCFR training process by giving the solver a
-/// starting point better than uniform random. The greedy strategy's
-/// preferred actions get positive initial regret, while non-preferred
-/// actions start at zero.
+/// Instead of seeding positive regret (which biases the solver away from
+/// equilibrium), we only register info sets and their legal actions so that
+/// the first real MCCFR iterations don't start from a completely empty table.
+/// All regret and strategy values start at zero — the warm-start benefit
+/// comes from pre-discovering the reachable game tree via greedy rollouts.
 pub fn warm_start_from_greedy(
     initial_state: &GameState,
     num_warmup_games: u32,
     abstraction: &dyn InfoSetAbstraction,
-    warmup_weight: f64,
+    _warmup_weight: f64, // kept for API compatibility, no longer used for seeding
 ) -> [RegretTable; 2] {
     use crate::strategy::GreedyStrategy;
 
@@ -669,24 +671,15 @@ pub fn warm_start_from_greedy(
             let info_set = InformationSet::from_view(&view, state.card_db());
             let info_hash = abstraction.abstract_info_set(&info_set);
 
-            // Find which action the greedy strategy would pick
-            let greedy_action = greedy.choose_action(&state, player);
-
-            // Seed regret: give the greedy action a small positive nudge.
-            // Use a modest weight to avoid biasing the solver away from
-            // equilibrium — the MCCFR iterations will refine from here.
+            // Pre-populate the info set entry with all legal actions.
+            // Regrets and strategy values remain at zero — no bias introduced.
             let entry = tables[player].get_or_create(info_hash);
-            let effective_weight = warmup_weight * 0.1; // dampen to avoid over-seeding
-            for (i, ca) in canonical_actions.iter().enumerate() {
-                let action_entry = entry.get_or_create_action(ca);
-                if actions[i] == greedy_action {
-                    action_entry.cumulative_regret += effective_weight;
-                    // Don't seed cumulative_strategy — let MCCFR build it
-                }
+            for ca in &canonical_actions {
+                entry.get_or_create_action(ca);
             }
-            entry.visit_count += 1;
 
-            // Play the greedy action
+            // Play the greedy action to explore realistic game paths
+            let greedy_action = greedy.choose_action(&state, player);
             rules::apply_action(&mut state, &greedy_action);
             actions_taken += 1;
         }

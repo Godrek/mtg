@@ -209,12 +209,26 @@ pub struct ComputedCharacteristics {
 /// * `effects` - All active continuous effects on the battlefield
 /// * `objects` - All card instances (for reading base stats)
 /// * `card_db` - Card definitions database
+/// * `dyn_ctx` - Optional context for evaluating DynamicValue (hand/graveyard data)
 pub fn compute_characteristics(
     obj_id: ObjectId,
     effects: &[ContinuousEffect],
     objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
     battlefield: &std::collections::HashSet<ObjectId>,
     card_db: &crate::game::CardDatabase,
+) -> Option<ComputedCharacteristics> {
+    compute_characteristics_with_ctx(obj_id, effects, objects, battlefield, card_db, None)
+}
+
+/// Like `compute_characteristics` but accepts an optional `DynamicContext`
+/// for evaluating `DynamicValue::CardsInHand` and `CardTypesInGraveyards`.
+pub fn compute_characteristics_with_ctx(
+    obj_id: ObjectId,
+    effects: &[ContinuousEffect],
+    objects: &std::collections::HashMap<ObjectId, crate::card::CardInstance>,
+    battlefield: &std::collections::HashSet<ObjectId>,
+    card_db: &crate::game::CardDatabase,
+    dyn_ctx: Option<&crate::card::DynamicContext>,
 ) -> Option<ComputedCharacteristics> {
     let inst = objects.get(&obj_id)?;
     let def = card_db.get(inst.card_def_id)?;
@@ -235,10 +249,10 @@ pub fn compute_characteristics(
     if def.dynamic_power.is_some() || def.dynamic_toughness.is_some() {
         let bf_vec: Vec<ObjectId> = battlefield.iter().copied().collect();
         if let Some(ref dyn_pow) = def.dynamic_power {
-            power = dyn_pow.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id));
+            power = dyn_pow.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id), dyn_ctx);
         }
         if let Some(ref dyn_tough) = def.dynamic_toughness {
-            toughness = dyn_tough.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id));
+            toughness = dyn_tough.evaluate(controller, objects, &bf_vec, &|id| card_db.get(id), dyn_ctx);
         }
     }
 
