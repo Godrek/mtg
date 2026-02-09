@@ -146,7 +146,7 @@ fn run_game_inner(
         actions_taken += 1;
 
         // Periodic SBA check
-        if actions_taken % 10 == 0 {
+        if actions_taken.is_multiple_of(10) {
             rules::check_state_based_actions(&mut state);
         }
     }
@@ -223,8 +223,13 @@ const GOLDFISH_MAX_ACTIONS: u32 = 10_000;
 #[derive(Debug, Clone)]
 pub struct GoldfishResults {
     pub total_games: u64,
+    /// Games where the pilot (player 0) reduced the goldfish to 0 life.
     pub wins: u64,
+    /// Games where the pilot (player 0) lost — e.g. self-inflicted life loss,
+    /// decking out, or an effect that causes the pilot to lose. Should be rare
+    /// against a passive opponent, but tracked for completeness.
     pub losses: u64,
+    /// Games that hit the turn/action limit without either player winning.
     pub draws: u64,
     pub avg_kill_turn: f64,
     pub fastest_kill: u32,
@@ -360,7 +365,7 @@ fn run_goldfish_game_inner(
         rules::apply_action(&mut state, &action);
         actions_taken += 1;
 
-        if actions_taken % 10 == 0 {
+        if actions_taken.is_multiple_of(10) {
             rules::check_state_based_actions(&mut state);
         }
     }
@@ -399,48 +404,15 @@ pub fn simulate_goldfish(
         .map(|_| AtomicU64::new(0))
         .collect();
 
-    let goldfish = GoldfishStrategy;
-
     (0..num_games).into_par_iter().for_each(|_| {
-        let mut state = GameState::new(2);
-        state.card_db = Some(Arc::clone(&db));
-        rules::setup_game(&mut state, deck, deck);
+        let result = run_goldfish_game_inner(Arc::clone(&db), deck, strategy, false);
 
-        let mut actions_taken: u32 = 0;
+        total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
 
-        while !state.game_over
-            && state.turn_number <= GOLDFISH_MAX_TURNS
-            && actions_taken < GOLDFISH_MAX_ACTIONS
-        {
-            let player = state.priority_player;
-            let actions = legal_actions(&state);
-
-            if actions.is_empty()
-                || (actions.len() == 1 && actions[0] == crate::action::Action::PassPriority)
-            {
-                rules::apply_action(&mut state, &crate::action::Action::PassPriority);
-                actions_taken += 1;
-                continue;
-            }
-
-            let active_strategy: &dyn Strategy =
-                if player == 0 { strategy } else { &goldfish };
-            let action = active_strategy.choose_action(&state, player);
-
-            rules::apply_action(&mut state, &action);
-            actions_taken += 1;
-
-            if actions_taken % 10 == 0 {
-                rules::check_state_based_actions(&mut state);
-            }
-        }
-
-        total_actions.fetch_add(actions_taken as u64, Ordering::Relaxed);
-
-        match state.winner {
+        match result.winner {
             Some(0) => {
                 wins.fetch_add(1, Ordering::Relaxed);
-                let turn = state.turn_number;
+                let turn = result.turns;
                 total_kill_turns.fetch_add(turn as u64, Ordering::Relaxed);
                 if (turn as usize) < distribution.len() {
                     distribution[turn as usize].fetch_add(1, Ordering::Relaxed);

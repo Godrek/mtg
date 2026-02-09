@@ -286,9 +286,15 @@ impl Strategy for GoldfishStrategy {
 
         // Handle mandatory actions that can't be skipped
 
-        // Trigger ordering: pick the first ordering (FIFO)
+        // Trigger ordering, replacement ordering, and damage assignment:
+        // pick the first option offered (FIFO / default ordering).
         for action in &actions {
-            if matches!(action, Action::OrderTriggers { .. } | Action::ChooseReplacementOrder { .. }) {
+            if matches!(
+                action,
+                Action::OrderTriggers { .. }
+                    | Action::ChooseReplacementOrder { .. }
+                    | Action::OrderDamageAssignment { .. }
+            ) {
                 return action.clone();
             }
         }

@@ -13,7 +13,7 @@ use mtg_gto::replacement::{
 };
 use mtg_gto::rules;
 use mtg_gto::simulation;
-use mtg_gto::strategy::{GreedyStrategy, RandomStrategy, Strategy};
+use mtg_gto::strategy::{GoldfishStrategy, GreedyStrategy, RandomStrategy, Strategy};
 
 #[test]
 fn test_sample_db_builds() {
@@ -3834,4 +3834,233 @@ fn test_dynamic_value_cards_in_hand() {
     state.invalidate_characteristics_cache();
 
     assert_eq!(state.effective_power(maro_id), 5, "Maro power should equal hand size (5)");
+}
+
+// ---------------------------------------------------------------------------
+// Goldfish mode tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_goldfish_strategy_passes_priority() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_game(&mut state, &red, &red);
+
+    // Goldfish (player 1) should pass priority during a main phase
+    state.priority_player = 1;
+    state.phase = Phase::PreCombatMain;
+    let goldfish = GoldfishStrategy;
+    let action = goldfish.choose_action(&state, 1);
+    assert_eq!(action, Action::PassPriority, "Goldfish should pass priority");
+}
+
+#[test]
+fn test_goldfish_strategy_never_attacks() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &red, &red);
+
+    // Give goldfish (player 1) a creature on the battlefield and make it the active player
+    state.active_player = 1;
+    state.priority_player = 1;
+    state.phase = Phase::DeclareAttackers;
+
+    // Put a creature on battlefield for player 1
+    let obj_id = state.create_card_in_zone(sample::ids::GREY_OGRE, 1, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&obj_id) {
+        inst.summoning_sick = false;
+        inst.controller = 1;
+    }
+
+    let goldfish = GoldfishStrategy;
+    let action = goldfish.choose_action(&state, 1);
+    match &action {
+        Action::DeclareAttackers { attackers } => {
+            assert!(attackers.is_empty(), "Goldfish should declare no attackers");
+        }
+        Action::PassPriority => {} // Also acceptable
+        other => panic!("Goldfish should not attack, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_goldfish_strategy_never_blocks() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &red, &red);
+
+    // Set up combat: player 0 is active, player 1 is blocking
+    state.active_player = 0;
+    state.priority_player = 1;
+    state.phase = Phase::DeclareBlockers;
+
+    // Give player 0 an attacker
+    let attacker_id = state.create_card_in_zone(sample::ids::GREY_OGRE, 0, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&attacker_id) {
+        inst.summoning_sick = false;
+        inst.controller = 0;
+    }
+    state.combat.attackers.push(attacker_id);
+
+    // Give player 1 a potential blocker
+    let blocker_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&blocker_id) {
+        inst.summoning_sick = false;
+        inst.controller = 1;
+    }
+
+    let goldfish = GoldfishStrategy;
+    let action = goldfish.choose_action(&state, 1);
+    match &action {
+        Action::DeclareBlockers { blocks } => {
+            assert!(blocks.is_empty(), "Goldfish should declare no blockers");
+        }
+        Action::PassPriority => {} // Also acceptable
+        other => panic!("Goldfish should not block, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_goldfish_strategy_handles_forced_discard() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+    rules::setup_game(&mut state, &red, &red);
+
+    // Force goldfish to have >7 cards and be in cleanup
+    state.active_player = 1;
+    state.priority_player = 1;
+    state.phase = Phase::Cleanup;
+
+    // Add extra cards to player 1's hand to exceed 7
+    for _ in 0..3 {
+        let id = state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Hand);
+        if let Some(inst) = state.objects.get_mut(&id) {
+            inst.controller = 1;
+        }
+    }
+    assert!(state.players[1].hand.len() > 7);
+
+    let goldfish = GoldfishStrategy;
+    let action = goldfish.choose_action(&state, 1);
+    assert!(
+        matches!(action, Action::Discard { .. }),
+        "Goldfish should discard when forced, got {:?}",
+        action
+    );
+}
+
+#[test]
+fn test_goldfish_single_game_completes() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let greedy = GreedyStrategy;
+    let result = simulation::run_goldfish_game(&db, &red, &greedy);
+
+    // Game should complete with a winner (pilot should kill the goldfish)
+    assert!(result.winner.is_some(), "Goldfish game should have a winner");
+    assert!(result.turns > 0, "Game should last at least 1 turn");
+    assert!(result.actions_taken > 0, "Game should have actions");
+}
+
+#[test]
+fn test_goldfish_simulation_produces_valid_results() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let greedy = GreedyStrategy;
+    let results = simulation::simulate_goldfish(&db, &red, &greedy, 200);
+
+    assert_eq!(results.total_games, 200);
+    assert_eq!(
+        results.wins + results.losses + results.draws,
+        200,
+        "wins + losses + draws should equal total games"
+    );
+    // Greedy should reliably win against a passive opponent
+    assert!(
+        results.wins > 100,
+        "Greedy should win most goldfish games, got {} wins out of 200",
+        results.wins
+    );
+}
+
+#[test]
+fn test_goldfish_kill_turn_distribution_consistent() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let greedy = GreedyStrategy;
+    let results = simulation::simulate_goldfish(&db, &red, &greedy, 500);
+
+    if results.wins > 0 {
+        // Sum of kill-turn distribution should equal total wins
+        let dist_sum: u64 = results.kill_turn_distribution.iter().sum();
+        assert_eq!(
+            dist_sum, results.wins,
+            "Kill-turn distribution sum ({}) should equal wins ({})",
+            dist_sum, results.wins
+        );
+
+        // Fastest kill should be <= slowest kill
+        assert!(
+            results.fastest_kill <= results.slowest_kill,
+            "Fastest kill (T{}) should be <= slowest kill (T{})",
+            results.fastest_kill,
+            results.slowest_kill
+        );
+
+        // Average kill turn should be between fastest and slowest
+        assert!(
+            results.avg_kill_turn >= results.fastest_kill as f64
+                && results.avg_kill_turn <= results.slowest_kill as f64,
+            "Avg kill turn ({:.2}) should be between T{} and T{}",
+            results.avg_kill_turn,
+            results.fastest_kill,
+            results.slowest_kill,
+        );
+    }
+}
+
+#[test]
+fn test_goldfish_higher_winrate_than_two_player() {
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let greedy = GreedyStrategy;
+
+    // Run goldfish simulation (pilot vs passive opponent)
+    let goldfish_results = simulation::simulate_goldfish(&db, &red, &greedy, 500);
+
+    // Run two-player simulation (same deck, both sides active)
+    let two_player_results = simulation::simulate(&db, &red, &red, &greedy, &greedy, 500);
+
+    // Against a passive opponent, the pilot should win at a higher rate
+    // than in a two-player mirror where both sides fight back.
+    let goldfish_wr = goldfish_results.win_rate();
+    let two_player_wr = two_player_results.win_rate(0);
+    assert!(
+        goldfish_wr > two_player_wr,
+        "Goldfish win rate ({:.1}%) should exceed two-player P0 win rate ({:.1}%)",
+        goldfish_wr * 100.0,
+        two_player_wr * 100.0
+    );
+}
+
+#[test]
+fn test_goldfish_strategy_name() {
+    let goldfish = GoldfishStrategy;
+    assert_eq!(goldfish.name(), "Goldfish");
 }
