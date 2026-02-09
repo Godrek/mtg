@@ -73,8 +73,10 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             if let Some(ref cost) = def.mana_cost {
                 // First, auto-tap lands to generate mana if pool is insufficient
                 auto_tap_lands(state, player, cost);
-                // Then pay from pool
-                state.players[player].mana_pool.pay(cost);
+                // Then pay from pool — if payment fails, abort the cast
+                if !state.players[player].mana_pool.pay(cost) {
+                    return;
+                }
             }
 
             // Move to stack
@@ -161,7 +163,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
 
             if let Some(ability) = ability {
                 auto_tap_lands(state, player, &ability.cost);
-                state.players[player].mana_pool.pay(&ability.cost);
+                if !state.players[player].mana_pool.pay(&ability.cost) {
+                    return;
+                }
 
                 if ability.requires_tap {
                     if let Some(inst) = state.objects.get_mut(&obj_id) {
@@ -295,7 +299,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 let mut taxed_cost = cost.clone();
                 taxed_cost.generic += tax * 2;
                 auto_tap_lands(state, player, &taxed_cost);
-                state.players[player].mana_pool.pay(&taxed_cost);
+                if !state.players[player].mana_pool.pay(&taxed_cost) {
+                    return;
+                }
             }
 
             // Increment commander tax for next cast
