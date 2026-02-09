@@ -177,6 +177,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {R}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -197,6 +198,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -217,6 +219,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {W}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -237,6 +240,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {U}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -257,6 +261,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {B}.".into(),
+        ..Default::default()
     });
 
     // === Red Creatures ===
@@ -278,6 +283,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -298,6 +304,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -318,6 +325,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste, Prowess".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -338,6 +346,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying. {R}: Shivan Dragon gets +1/+0 until end of turn.".into(),
+        ..Default::default()
     });
 
     // === Green Creatures ===
@@ -359,6 +368,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -379,6 +389,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -399,6 +410,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {G}.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -419,6 +431,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -439,6 +452,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     // === White Creatures ===
@@ -460,6 +474,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -480,6 +495,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying, Vigilance".into(),
+        ..Default::default()
     });
 
     // === Instants / Sorceries ===
@@ -504,6 +520,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Lightning Bolt deals 3 damage to any target.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -527,6 +544,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Shock deals 2 damage to any target.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -550,6 +568,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Lava Spike deals 3 damage to target player or planeswalker.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -573,6 +592,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Rift Bolt deals 3 damage to any target.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -597,6 +617,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target creature gets +3/+3 until end of turn.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -620,6 +641,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Exile target creature. Its controller gains life equal to its power.".into(),
+        ..Default::default()
     });
 
     db.insert(CardDef {
@@ -642,6 +664,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Counter target spell.".into(),
+        ..Default::default()
     });
 
     // === Cards with Triggered Abilities ===
@@ -669,6 +692,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Elvish Visionary enters the battlefield, draw a card.".into(),
+        ..Default::default()
     });
 
     // Blade Splicer: 2W 1/1 Human Artificer — ETB create a 3/3 Golem with first strike
@@ -701,6 +725,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Blade Splicer enters the battlefield, create a 3/3 colorless Phyrexian Golem artifact creature token with first strike.".into(),
+        ..Default::default()
     });
 
     // Siege-Gang Commander: 3RR 2/2 Goblin — ETB create three 1/1 Goblin tokens
@@ -751,6 +776,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Siege-Gang Commander enters the battlefield, create three 1/1 red Goblin creature tokens.".into(),
+        ..Default::default()
     });
 
     // =====================================================================
@@ -785,6 +811,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
+        ..Default::default()
     });
 
     // Pyroclasm Elemental: 2R 3/1 Elemental
@@ -816,6 +843,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
+        ..Default::default()
     });
 
     // =====================================================================
@@ -843,6 +871,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Target creature you control gains protection from the color of your choice until end of turn.".into(),
+        ..Default::default()
     });
 
     // Elite Vanguard: W 2/1 Human Soldier
@@ -864,6 +893,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "".into(),
+        ..Default::default()
     });
 
     // White Knight: WW 2/2 Human Knight — First strike, protection from black (simplified)
@@ -885,6 +915,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "First strike, protection from black".into(),
+        ..Default::default()
     });
 
     // Leonin Skyhunter: WW 2/2 Cat Knight — Flying
@@ -906,6 +937,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying".into(),
+        ..Default::default()
     });
 
     // Baneslayer Angel: 3WW 5/5 Angel — Flying, first strike, lifelink
@@ -927,6 +959,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying, first strike, lifelink".into(),
+        ..Default::default()
     });
 
     // Thalia, Guardian of Thraben: 1W 2/1 Human Soldier (simplified — no taxing)
@@ -948,6 +981,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "First strike. Noncreature spells cost {1} more to cast.".into(),
+        ..Default::default()
     });
 
     // Brimaz, King of Oreskos: 1WW 3/4 Cat Soldier — Vigilance
@@ -969,6 +1003,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Vigilance".into(),
+        ..Default::default()
     });
 
     // Soldier of the Pantheon: W 2/1 Human Soldier
@@ -990,6 +1025,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Protection from multicolored.".into(),
+        ..Default::default()
     });
 
     // Hero of Bladehold: 2WW 3/4 Human Knight — Battle cry (simplified as vanilla)
@@ -1011,6 +1047,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Battle cry. Whenever Hero of Bladehold attacks, create two 1/1 white Soldier creature tokens that are tapped and attacking.".into(),
+        ..Default::default()
     });
 
     // Precinct Captain: WW 2/2 Human Soldier — First strike
@@ -1032,6 +1069,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "First strike. Whenever Precinct Captain deals combat damage to a player, create a 1/1 white Soldier creature token.".into(),
+        ..Default::default()
     });
 
     // --- White spells ---
@@ -1057,6 +1095,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Exile target creature. Its controller may search their library for a basic land card, put that card onto the battlefield tapped, then shuffle.".into(),
+        ..Default::default()
     });
 
     // Wrath of God: 2WW — Destroy all creatures
@@ -1078,6 +1117,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy all creatures. They can't be regenerated.".into(),
+        ..Default::default()
     });
 
     // Day of Judgment: 2WW — Destroy all creatures
@@ -1099,6 +1139,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy all creatures.".into(),
+        ..Default::default()
     });
 
     // Oblivion Ring: 2W — Exile target nonland permanent (simplified as destroy)
@@ -1126,6 +1167,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Oblivion Ring enters the battlefield, exile another target nonland permanent.".into(),
+        ..Default::default()
     });
 
     // Disenchant: 1W — Destroy target artifact or enchantment (simplified as destroy nonland permanent)
@@ -1149,6 +1191,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy target artifact or enchantment.".into(),
+        ..Default::default()
     });
 
     // --- White enchantments (layered effects) ---
@@ -1176,6 +1219,7 @@ pub fn build_sample_db() -> CardDatabase {
         }],
         enters_tapped: false,
         oracle_text: "Creatures you control get +1/+1.".into(),
+        ..Default::default()
     });
 
     // Honor of the Pure: 1W — White creatures you control get +1/+1 (simplified as creatures you control)
@@ -1201,6 +1245,7 @@ pub fn build_sample_db() -> CardDatabase {
         }],
         enters_tapped: false,
         oracle_text: "White creatures you control get +1/+1.".into(),
+        ..Default::default()
     });
 
     // Crusade: WW — White creatures get +1/+1 (simplified as all creatures)
@@ -1226,6 +1271,7 @@ pub fn build_sample_db() -> CardDatabase {
         }],
         enters_tapped: false,
         oracle_text: "White creatures get +1/+1.".into(),
+        ..Default::default()
     });
 
     // Humility: 2WW — All creatures lose all abilities and are 1/1
@@ -1256,6 +1302,7 @@ pub fn build_sample_db() -> CardDatabase {
         ],
         enters_tapped: false,
         oracle_text: "All creatures lose all abilities and have base power and toughness 1/1.".into(),
+        ..Default::default()
     });
 
     // --- Blue creatures ---
@@ -1279,6 +1326,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "At the beginning of your upkeep, look at the top card of your library. You may reveal that card. If an instant or sorcery card is revealed this way, transform Delver of Secrets.".into(),
+        ..Default::default()
     });
 
     // Snapcaster Mage: 1U 2/1 Human Wizard — Flash
@@ -1300,6 +1348,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flash. When Snapcaster Mage enters the battlefield, target instant or sorcery card in your graveyard gains flashback until end of turn.".into(),
+        ..Default::default()
     });
 
     // Vendilion Clique: 1UU 3/1 Faerie Wizard — Flash, flying
@@ -1321,6 +1370,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flash, flying. When Vendilion Clique enters the battlefield, look at target player's hand. You may choose a nonland card from it. If you do, that player reveals the chosen card, puts it on the bottom of their library, then draws a card.".into(),
+        ..Default::default()
     });
 
     // Man-o'-War: 2U 2/2 Jellyfish — ETB bounce a creature
@@ -1349,6 +1399,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Man-o'-War enters the battlefield, return target creature to its owner's hand.".into(),
+        ..Default::default()
     });
 
     // Serendib Efreet: 2U 3/4 Efreet — Flying
@@ -1370,6 +1421,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying. At the beginning of your upkeep, Serendib Efreet deals 1 damage to you.".into(),
+        ..Default::default()
     });
 
     // Phantasmal Bear: U 2/2 Bear Illusion
@@ -1391,6 +1443,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Phantasmal Bear becomes the target of a spell or ability, sacrifice it.".into(),
+        ..Default::default()
     });
 
     // --- Blue spells ---
@@ -1416,6 +1469,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Counter target spell unless its controller pays {3}.".into(),
+        ..Default::default()
     });
 
     // Remand: 1U — Counter target spell, draw a card (simplified as counter + draw)
@@ -1440,6 +1494,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Counter target spell. If that spell is countered this way, put it into its owner's hand instead of into that player's graveyard. Draw a card.".into(),
+        ..Default::default()
     });
 
     // Brainstorm: U — Draw 3, put 2 back (simplified as draw 1)
@@ -1461,6 +1516,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Draw three cards, then put two cards from your hand on top of your library in any order.".into(),
+        ..Default::default()
     });
 
     // Ponder: U — Look at top 3, may shuffle, draw (simplified as draw 1)
@@ -1482,6 +1538,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Look at the top three cards of your library, then put them back in any order. You may shuffle. Draw a card.".into(),
+        ..Default::default()
     });
 
     // Unsummon: U — Return target creature to its owner's hand
@@ -1506,6 +1563,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Return target creature to its owner's hand.".into(),
+        ..Default::default()
     });
 
     // --- Black creatures ---
@@ -1529,6 +1587,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "At the beginning of your upkeep, reveal the top card of your library and put that card into your hand. You lose life equal to its mana value.".into(),
+        ..Default::default()
     });
 
     // Hypnotic Specter: 1BB 2/2 Specter — Flying
@@ -1550,6 +1609,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying. Whenever Hypnotic Specter deals damage to an opponent, that player discards a card at random.".into(),
+        ..Default::default()
     });
 
     // Nantuko Shade: BB 2/1 Insect Shade
@@ -1571,6 +1631,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{B}: Nantuko Shade gets +1/+1 until end of turn.".into(),
+        ..Default::default()
     });
 
     // Vampire Nighthawk: 1BB 2/3 Vampire Shaman — Flying, deathtouch, lifelink
@@ -1592,6 +1653,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying, deathtouch, lifelink".into(),
+        ..Default::default()
     });
 
     // Gatekeeper of Malakir: BB 2/2 Vampire Warrior — Kicker B, ETB sacrifice if kicked (simplified)
@@ -1613,6 +1675,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Kicker {B}. When Gatekeeper of Malakir enters the battlefield, if it was kicked, target player sacrifices a creature.".into(),
+        ..Default::default()
     });
 
     // Bloodghast: BB 2/1 Vampire Spirit — can't block (simplified)
@@ -1634,6 +1697,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Bloodghast can't block. Landfall — Whenever a land enters the battlefield under your control, you may return Bloodghast from your graveyard to the battlefield.".into(),
+        ..Default::default()
     });
 
     // Geralf's Messenger: BBB 3/2 Zombie — ETB opponent loses 2 life
@@ -1662,6 +1726,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: true,
         oracle_text: "Geralf's Messenger enters the battlefield tapped. When Geralf's Messenger enters the battlefield, target opponent loses 2 life. Undying.".into(),
+        ..Default::default()
     });
 
     // Phyrexian Obliterator: BBBB 5/5 Phyrexian Horror — Trample
@@ -1683,6 +1748,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Trample. Whenever a source deals damage to Phyrexian Obliterator, that source's controller sacrifices that many permanents.".into(),
+        ..Default::default()
     });
 
     // Knight of the Ebon Legion: B 1/2 Vampire Knight
@@ -1704,6 +1770,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{2}{B}: Knight of the Ebon Legion gets +3/+3 and gains deathtouch until end of turn.".into(),
+        ..Default::default()
     });
 
     // --- Black spells ---
@@ -1729,6 +1796,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy target nonblack creature.".into(),
+        ..Default::default()
     });
 
     // Go for the Throat: 1B — Destroy target nonartifact creature (simplified as destroy creature)
@@ -1752,6 +1820,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy target nonartifact creature.".into(),
+        ..Default::default()
     });
 
     // Thoughtseize: B — Target player discards a card (simplified)
@@ -1776,6 +1845,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target player reveals their hand. You choose a nonland card from it. That player discards that card. You lose 2 life.".into(),
+        ..Default::default()
     });
 
     // Hymn to Tourach: BB — Target player discards 2 cards at random
@@ -1800,6 +1870,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target player discards two cards at random.".into(),
+        ..Default::default()
     });
 
     // Diabolic Edict: 1B — Target player sacrifices a creature
@@ -1824,6 +1895,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target player sacrifices a creature.".into(),
+        ..Default::default()
     });
 
     // Tragic Slip: B — Target creature gets -1/-1 until end of turn (simplified)
@@ -1849,6 +1921,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Target creature gets -1/-1 until end of turn. Morbid — That creature gets -13/-13 until end of turn instead if a creature died this turn.".into(),
+        ..Default::default()
     });
 
     // --- Red creatures ---
@@ -1872,6 +1945,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "First strike, haste".into(),
+        ..Default::default()
     });
 
     // Ember Hauler: RR 2/2 Goblin — sac: deal 2 damage (simplified as vanilla)
@@ -1893,6 +1967,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{1}, Sacrifice Ember Hauler: Ember Hauler deals 2 damage to any target.".into(),
+        ..Default::default()
     });
 
     // Hellrider: 2RR 3/3 Devil — Haste
@@ -1914,6 +1989,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste. Whenever a creature you control attacks, Hellrider deals 1 damage to the defending player.".into(),
+        ..Default::default()
     });
 
     // Jackal Pup: R 2/1 Hound
@@ -1935,6 +2011,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Whenever Jackal Pup is dealt damage, it deals that much damage to you.".into(),
+        ..Default::default()
     });
 
     // Keldon Marauders: 1R 3/3 Human Warrior — Vanishing 2 (simplified)
@@ -1963,6 +2040,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Vanishing 2. When Keldon Marauders enters or leaves the battlefield, it deals 1 damage to target player or planeswalker.".into(),
+        ..Default::default()
     });
 
     // Vexing Devil: R 4/3 Devil
@@ -1984,6 +2062,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Vexing Devil enters the battlefield, any opponent may have it deal 4 damage to them. If a player does, sacrifice Vexing Devil.".into(),
+        ..Default::default()
     });
 
     // Eidolon of the Great Revel: RR 2/2 Spirit
@@ -2005,6 +2084,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Whenever a player casts a spell with mana value 3 or less, Eidolon of the Great Revel deals 2 damage to that player.".into(),
+        ..Default::default()
     });
 
     // Young Pyromancer: 1R 2/1 Human Shaman
@@ -2026,6 +2106,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Whenever you cast an instant or sorcery spell, create a 1/1 red Elemental creature token.".into(),
+        ..Default::default()
     });
 
     // Goblin Chainwhirler: RRR 3/3 Goblin Warrior — First strike, ETB 1 damage to each opponent and each creature/planeswalker they control
@@ -2054,6 +2135,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "First strike. When Goblin Chainwhirler enters the battlefield, it deals 1 damage to each opponent and each creature and planeswalker they control.".into(),
+        ..Default::default()
     });
 
     // --- Red spells ---
@@ -2080,6 +2162,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Chain Lightning deals 3 damage to any target.".into(),
+        ..Default::default()
     });
 
     // Searing Blaze: RR — Deal 1 damage to target player and 1 to target creature (simplified as 3 to creature)
@@ -2104,6 +2187,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Searing Blaze deals 1 damage to target player or planeswalker and 1 damage to target creature that player or that planeswalker's controller controls. Landfall — If you had a land enter the battlefield under your control this turn, Searing Blaze deals 3 damage to that player or planeswalker and 3 damage to that creature instead.".into(),
+        ..Default::default()
     });
 
     // Skullcrack: 1R — Deal 3 damage to opponent, can't gain life
@@ -2128,6 +2212,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Players can't gain life this turn. Damage can't be prevented this turn. Skullcrack deals 3 damage to target player or planeswalker.".into(),
+        ..Default::default()
     });
 
     // Flames of the Blood Hand: 2R — Deal 4 to any player
@@ -2152,6 +2237,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flames of the Blood Hand deals 4 damage to target player or planeswalker. The damage can't be prevented, and if a player would gain life this turn, that player gains no life instead.".into(),
+        ..Default::default()
     });
 
     // Searing Blood: RR — Deal 2 damage to target creature, 3 to controller if it dies
@@ -2176,6 +2262,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Searing Blood deals 2 damage to target creature. When that creature dies this turn, Searing Blood deals 3 damage to the creature's controller.".into(),
+        ..Default::default()
     });
 
     // --- Green creatures ---
@@ -2199,6 +2286,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Tarmogoyf's power is equal to the number of card types among cards in all graveyards and its toughness is equal to that number plus 1.".into(),
+        ..Default::default()
     });
 
     // Scavenging Ooze: 1G 2/2 Ooze
@@ -2220,6 +2308,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{G}: Exile target card from a graveyard. If it was a creature card, put a +1/+1 counter on Scavenging Ooze and you gain 1 life.".into(),
+        ..Default::default()
     });
 
     // Strangleroot Geist: GG 2/1 Spirit — Haste, undying (simplified)
@@ -2241,6 +2330,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Haste. Undying.".into(),
+        ..Default::default()
     });
 
     // Wild Nacatl: G 1/1 Cat Warrior (simplified — no domain bonus)
@@ -2262,6 +2352,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Wild Nacatl gets +1/+1 as long as you control a Mountain. Wild Nacatl gets +1/+1 as long as you control a Plains.".into(),
+        ..Default::default()
     });
 
     // Experiment One: G 1/1 Human Ooze
@@ -2283,6 +2374,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Evolve. Remove two +1/+1 counters from Experiment One: Regenerate Experiment One.".into(),
+        ..Default::default()
     });
 
     // Dryad Militant: G/W 2/1 Dryad Soldier
@@ -2304,6 +2396,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "If an instant or sorcery card would be put into a graveyard from anywhere, exile it instead.".into(),
+        ..Default::default()
     });
 
     // Thrun, the Last Troll: 2GG 4/4 Troll Shaman — trample (simplified, no hexproof/regen)
@@ -2325,6 +2418,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "This spell can't be countered. Hexproof. {1}{G}: Regenerate Thrun, the Last Troll.".into(),
+        ..Default::default()
     });
 
     // Rancor Beast: 2G 3/2 Beast — Trample
@@ -2346,6 +2440,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Trample".into(),
+        ..Default::default()
     });
 
     // --- Green spells ---
@@ -2373,6 +2468,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Enchant creature. Enchanted creature gets +2/+0 and has trample. When Rancor is put into a graveyard from the battlefield, return Rancor to its owner's hand.".into(),
+        ..Default::default()
     });
 
     // Vines of Vastwood: G — Target creature can't be the target of spells, +4/+4 if kicked (simplified as buff)
@@ -2398,6 +2494,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Kicker {G}. Target creature can't be the target of spells or abilities your opponents control this turn. If Vines of Vastwood was kicked, that creature gets +4/+4 until end of turn.".into(),
+        ..Default::default()
     });
 
     // Collected Company: 3G — Look at top 6, put up to 2 creatures with MV 3 or less onto battlefield (simplified as draw 2)
@@ -2419,6 +2516,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Look at the top six cards of your library. Put up to two creature cards with mana value 3 or less from among them onto the battlefield. Put the rest on the bottom of your library in any random order.".into(),
+        ..Default::default()
     });
 
     // Gaea's Anthem: 1GG — Creatures you control get +1/+1
@@ -2444,6 +2542,7 @@ pub fn build_sample_db() -> CardDatabase {
         }],
         enters_tapped: false,
         oracle_text: "Creatures you control get +1/+1.".into(),
+        ..Default::default()
     });
 
     // --- Artifacts ---
@@ -2467,6 +2566,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Add {C}{C}.".into(),
+        ..Default::default()
     });
 
     // Signal Pest: 1 — 0/1 Artifact Creature — Flying
@@ -2488,6 +2588,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Battle cry. Signal Pest can't be blocked except by creatures with flying or reach.".into(),
+        ..Default::default()
     });
 
     // Vault Skirge: 1B/P — 1/1 Artifact Creature — Flying, lifelink
@@ -2509,6 +2610,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Flying, lifelink".into(),
+        ..Default::default()
     });
 
     // Cranial Plating: 2 — Equipment artifact (simplified as buff enchantment)
@@ -2530,6 +2632,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Equipped creature gets +1/+0 for each artifact you control. {B}{B}: Attach Cranial Plating to target creature you control. Equip {1}.".into(),
+        ..Default::default()
     });
 
     // Steel Overseer: 2 — 1/1 Artifact Creature
@@ -2551,6 +2654,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{T}: Put a +1/+1 counter on each artifact creature you control.".into(),
+        ..Default::default()
     });
 
     // --- Multicolor ---
@@ -2577,6 +2681,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Lightning Helix deals 3 damage to any target and you gain 3 life.".into(),
+        ..Default::default()
     });
 
     // Terminate: BR — Destroy target creature
@@ -2600,6 +2705,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Destroy target creature. It can't be regenerated.".into(),
+        ..Default::default()
     });
 
     // Geist of Saint Traft: 1WU 2/2 Spirit Cleric — Hexproof (simplified)
@@ -2621,6 +2727,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Hexproof. Whenever Geist of Saint Traft attacks, create a 4/4 white Angel creature token with flying that's tapped and attacking. Exile that token at end of combat.".into(),
+        ..Default::default()
     });
 
     // Fleecemane Lion: GW 3/3 Cat
@@ -2642,6 +2749,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "{3}{G}{W}: Monstrosity 1. As long as Fleecemane Lion is monstrous, it has hexproof and indestructible.".into(),
+        ..Default::default()
     });
 
     // Tidehollow Sculler: WB 2/2 Zombie — ETB exile a nonland card from opponent's hand (simplified as discard)
@@ -2670,6 +2778,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "When Tidehollow Sculler enters the battlefield, target opponent reveals their hand and you choose a nonland card from it. Exile that card. When Tidehollow Sculler leaves the battlefield, return the exiled card to its owner's hand.".into(),
+        ..Default::default()
     });
 
     // Dark Ritual: B — Add BBB
@@ -2684,13 +2793,14 @@ pub fn build_sample_db() -> CardDatabase {
         power: None,
         toughness: None,
         mana_abilities: vec![],
-        spell_effect: Some(Effect::Unimplemented("Add {B}{B}{B}.".into())),
+        spell_effect: Some(Effect::AddMana { color: Some(Color::Black), amount: 3 }),
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
         oracle_text: "Add {B}{B}{B}.".into(),
+        ..Default::default()
     });
 
     // Stomping Ground: dual land (simplified as tapped forest)
@@ -2712,6 +2822,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![],
         enters_tapped: true,
         oracle_text: "As Stomping Ground enters the battlefield, you may pay 2 life. If you don't, it enters the battlefield tapped. {T}: Add {R} or {G}.".into(),
+        ..Default::default()
     });
 
     db

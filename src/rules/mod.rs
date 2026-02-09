@@ -1,8 +1,10 @@
 use rand::seq::SliceRandom;
 use rand::Rng;
 
+use std::sync::Arc;
+
 use crate::action::Action;
-use crate::card::{CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TriggerCondition, ZoneType};
+use crate::card::{CardDef, CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TokenDef, TriggerCondition, ZoneType};
 use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, StackSource, Target};
 
@@ -387,6 +389,11 @@ fn resolve_spell(
         // If flush pauses (controller has >1 ETB trigger), pending_triggers stays
         // populated and the game loop will offer OrderTriggers.
         let _ = fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+        // Fire "whenever a creature enters" watcher triggers on other permanents
+        if def.is_creature() {
+            check_triggers(state, TriggerCondition::ACreatureEnters, None);
+            let _ = flush_triggers(state);
+        }
     } else {
         if let Some(ref effect) = def.spell_effect {
             resolve_effect(state, effect, controller, targets);
@@ -596,10 +603,8 @@ fn resolve_effect(
             }
         }
 
-        Effect::CreateToken(_token_def) => {
-            // Create a token on the battlefield
-            // Tokens need a synthetic CardDef — simplified for now
-            // TODO: proper token creation
+        Effect::CreateToken(token_def) => {
+            create_token(state, token_def, controller);
         }
 
         Effect::Counter { .. } => {
@@ -743,6 +748,23 @@ fn resolve_effect(
             // Not yet implemented — no cards in the current pool use this effect.
             // When added, this should set a flag on GameState that is checked
             // during resolve_combat_damage() to skip damage assignment.
+        }
+
+        Effect::AddMana { color, amount } => {
+            for _ in 0..*amount {
+                match color {
+                    Some(c) => state.players[controller].mana_pool.add_color(*c, 1),
+                    None => state.players[controller].mana_pool.colorless += 1,
+                }
+            }
+        }
+
+        Effect::ExtraTurn => {
+            state.extra_turns.push_back(controller);
+        }
+
+        Effect::SkipPhase(phase) => {
+            state.skip_phases.insert(*phase);
         }
 
         Effect::Multiple(effects) => {
@@ -971,6 +993,42 @@ fn resolve_triggered_ability(
 /// loop will present `Action::OrderTriggers`, and after the player
 /// orders, the next call to `check_state_based_actions` will resume
 /// the outer loop.
+/// Find duplicate permanents to remove based on a predicate.
+/// Used by both the legendary rule (CR 704.5j) and planeswalker uniqueness
+/// rule (CR 704.5i). For each (controller, name) group with >1 match, keeps
+/// the newest (highest ObjectId) and returns the rest.
+fn find_duplicates_to_remove(
+    state: &GameState,
+    predicate: impl Fn(&CardDef) -> bool,
+) -> Vec<ObjectId> {
+    let db = state.card_db();
+    let mut name_map: std::collections::HashMap<(usize, String), Vec<ObjectId>> =
+        std::collections::HashMap::new();
+    for &id in &state.battlefield {
+        let inst = &state.objects[&id];
+        if let Some(def) = db.get(inst.card_def_id) {
+            if predicate(def) {
+                name_map
+                    .entry((inst.controller, def.name.clone()))
+                    .or_default()
+                    .push(id);
+            }
+        }
+    }
+    let mut to_remove = Vec::new();
+    for (_, ids) in name_map {
+        if ids.len() > 1 {
+            let keep = *ids.iter().max().unwrap();
+            for &id in &ids {
+                if id != keep {
+                    to_remove.push(id);
+                }
+            }
+        }
+    }
+    to_remove
+}
+
 pub fn check_state_based_actions(state: &mut GameState) {
     // Outer CR 704.3 loop: interleave SBA checks with trigger checks
     loop {
@@ -987,6 +1045,52 @@ pub fn check_state_based_actions(state: &mut GameState) {
                     state.players[i].has_lost = true;
                     any_action = true;
                 }
+            }
+
+            // CR 704.5d: +1/+1 and -1/-1 counter cancellation
+            for &obj_id in &state.battlefield.clone() {
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    if inst.plus_counters > 0 && inst.minus_counters > 0 {
+                        let cancel = inst.plus_counters.min(inst.minus_counters);
+                        inst.plus_counters -= cancel;
+                        inst.minus_counters -= cancel;
+                        any_action = true;
+                    }
+                }
+            }
+            if any_action {
+                state.invalidate_characteristics_cache();
+            }
+
+            // CR 704.5j: Legendary rule — if a player controls two or more
+            // legendary permanents with the same name, keep the newest.
+            let legendary_dupes: Vec<ObjectId> =
+                find_duplicates_to_remove(state, |def| {
+                    def.supertypes.contains(&crate::card::Supertype::Legendary)
+                });
+            for &id in &legendary_dupes {
+                state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                any_action = true;
+            }
+            if !legendary_dupes.is_empty() {
+                state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
+                died_this_round.extend(legendary_dupes);
+            }
+
+            // CR 704.5i: Planeswalker uniqueness rule — keep newest per name.
+            let pw_dupes: Vec<ObjectId> =
+                find_duplicates_to_remove(state, |def| {
+                    def.card_types.contains(&CardType::Planeswalker)
+                });
+            for &id in &pw_dupes {
+                state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                any_action = true;
+            }
+            if !pw_dupes.is_empty() {
+                state.refresh_continuous_effects();
+                state.refresh_replacement_effects();
+                died_this_round.extend(pw_dupes);
             }
 
             // CR 704.5f/g: Creature with toughness <= 0 or lethal damage
@@ -1051,14 +1155,11 @@ pub fn check_state_based_actions(state: &mut GameState) {
         let triggers_before = state.pending_triggers.len();
         for &obj_id in &died_this_round {
             // Check the dying creature's own "when ~ dies" triggers.
-            // Note: we intentionally do NOT call check_triggers with None here.
-            // The Dies condition is self-referential ("when THIS creature dies"),
-            // not a watcher ("when ANY creature dies"). Scanning all battlefield
-            // permanents would incorrectly fire other creatures' "when ~ dies"
-            // triggers even though they're still alive. When we add "when a
-            // creature dies" watchers (e.g., Blood Artist), they'll use a
-            // separate ACreatureDies trigger condition checked with None.
             check_triggers(state, TriggerCondition::Dies, Some(obj_id));
+        }
+        // Check "whenever a creature dies" watcher triggers on surviving permanents.
+        if !died_this_round.is_empty() {
+            check_triggers(state, TriggerCondition::ACreatureDies, None);
         }
         let triggers_queued = state.pending_triggers.len() > triggers_before;
 
@@ -1095,8 +1196,19 @@ fn advance_phase(state: &mut GameState) {
         .position(|&p| p == state.phase)
         .unwrap_or(0);
 
-    if current_idx + 1 < Phase::TURN_ORDER.len() {
-        state.phase = Phase::TURN_ORDER[current_idx + 1];
+    // Find the next non-skipped phase
+    let mut next_idx = current_idx + 1;
+    while next_idx < Phase::TURN_ORDER.len() {
+        let candidate = Phase::TURN_ORDER[next_idx];
+        if state.skip_phases.contains(&candidate) {
+            next_idx += 1;
+            continue;
+        }
+        break;
+    }
+
+    if next_idx < Phase::TURN_ORDER.len() {
+        state.phase = Phase::TURN_ORDER[next_idx];
     } else {
         // End of turn — go to next turn
         next_turn(state);
@@ -1239,7 +1351,16 @@ fn finalize_cleanup(state: &mut GameState) {
 
 /// Move to the next turn.
 fn next_turn(state: &mut GameState) {
-    state.active_player = state.opponent(state.active_player);
+    // Clear skip_phases from the ending turn
+    state.skip_phases.clear();
+
+    // Check for extra turns (Phase 3A)
+    if let Some(extra_turn_player) = state.extra_turns.pop_front() {
+        state.active_player = extra_turn_player;
+    } else {
+        state.active_player = state.opponent(state.active_player);
+    }
+
     state.priority_player = state.active_player;
     state.turn_number += 1;
     state.phase = Phase::TURN_ORDER[0]; // Untap
@@ -1291,6 +1412,94 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
         let obj_id = state.players[player].hand.remove(idx);
         state.players[player].graveyard.push(obj_id);
     }
+}
+
+/// Compute a stable CardId for a token type based on its properties.
+/// Uses the high bit to avoid collisions with regular card IDs.
+/// Uses FNV-1a hash for stability across Rust versions (DefaultHasher is not
+/// guaranteed to be stable).
+fn token_card_id(token_def: &TokenDef) -> u64 {
+    // FNV-1a 64-bit constants
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in token_def.name.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for byte in token_def.power.to_le_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for byte in token_def.toughness.to_le_bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for color in &token_def.colors {
+        let disc = *color as u8;
+        hash ^= disc as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    for kw in &token_def.keywords {
+        let disc = *kw as u8;
+        hash ^= disc as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash | (1u64 << 63)
+}
+
+/// Convert a TokenDef into a CardDef suitable for the card database.
+fn token_to_card_def(token_def: &TokenDef, card_id: u64) -> CardDef {
+    CardDef {
+        id: card_id,
+        name: token_def.name.clone(),
+        card_types: vec![CardType::Creature],
+        subtypes: token_def.subtypes.clone(),
+        keywords: token_def.keywords.clone(),
+        power: Some(token_def.power as i32),
+        toughness: Some(token_def.toughness as i32),
+        oracle_text: format!("{}/{} {} Token", token_def.power, token_def.toughness, token_def.name),
+        ..Default::default()
+    }
+}
+
+/// Create a token on the battlefield (CR 111.1).
+///
+/// Registers the token's CardDef in the card database (via Arc::make_mut,
+/// which clones only if needed) and creates a CardInstance marked as a token.
+/// Fires ETB triggers for the token.
+fn create_token(state: &mut GameState, token_def: &TokenDef, controller: PlayerIndex) {
+    let card_id = token_card_id(token_def);
+
+    // Register token CardDef in the database if not already present
+    let needs_registration = state.card_db().get(card_id).is_none();
+    if needs_registration {
+        let def = token_to_card_def(token_def, card_id);
+        if let Some(ref mut arc) = state.card_db {
+            let db = Arc::make_mut(arc);
+            if db.get(card_id).is_none() {
+                db.insert(def);
+            }
+        }
+    }
+
+    // Create the token instance on the battlefield
+    let obj_id = state.create_card_in_zone(card_id, controller, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&obj_id) {
+        inst.controller = controller;
+        inst.is_token = true;
+        inst.summoning_sick = true;
+    }
+
+    // Refresh continuous effects for any static abilities on the token
+    state.refresh_continuous_effects();
+
+    // Fire ETB triggers (self-ETB for the token, and watcher ETBs for other permanents)
+    let _ = fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+    // Fire "whenever a creature enters" watcher triggers on other permanents
+    check_triggers(state, TriggerCondition::ACreatureEnters, None);
+    let _ = flush_triggers(state);
 }
 
 /// Check if any creature in combat has first strike or double strike.
