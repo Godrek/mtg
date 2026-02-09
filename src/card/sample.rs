@@ -2673,7 +2673,7 @@ pub fn build_sample_db() -> CardDatabase {
         keywords: vec![],
         power: None,
         toughness: None,
-        mana_abilities: vec![],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(2)],
         spell_effect: None,
         activated_abilities: vec![],
         triggered_abilities: vec![],
@@ -2950,7 +2950,7 @@ pub fn build_sample_db() -> CardDatabase {
         id: ids::ANCIENT_TOMB,
         name: "Ancient Tomb".into(),
         card_types: vec![CardType::Land],
-        mana_abilities: vec![ManaAbility::TapForColorless],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(2)],
         oracle_text: "{T}: Add {C}{C}. Ancient Tomb deals 2 damage to you.".into(),
         ..Default::default()
     });
@@ -2988,7 +2988,12 @@ pub fn build_sample_db() -> CardDatabase {
         id: ids::FLOODED_STRAND,
         name: "Flooded Strand".into(),
         card_types: vec![CardType::Land],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
+        }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3037,7 +3042,12 @@ pub fn build_sample_db() -> CardDatabase {
         id: ids::MISTY_RAINFOREST,
         name: "Misty Rainforest".into(),
         card_types: vec![CardType::Land],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
+        }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3142,7 +3152,12 @@ pub fn build_sample_db() -> CardDatabase {
         id: ids::WINDSWEPT_HEATH,
         name: "Windswept Heath".into(),
         card_types: vec![CardType::Land],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            description: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
+        }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3173,8 +3188,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Basalt Monolith".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
-        mana_abilities: vec![ManaAbility::TapForColorless],
-        enters_tapped: true,
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(3, 0, 0, 0, 0, 0),
             requires_tap: false,
@@ -3210,7 +3224,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Grim Monolith".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
-        mana_abilities: vec![ManaAbility::TapForColorless],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(4, 0, 0, 0, 0, 0),
             requires_tap: false,
@@ -3236,7 +3250,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Mana Vault".into(),
         mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
-        mana_abilities: vec![ManaAbility::TapForColorless],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(4, 0, 0, 0, 0, 0),
             requires_tap: false,
@@ -3988,7 +4002,7 @@ pub fn build_sample_db() -> CardDatabase {
         mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Enchantment],
         triggered_abilities: vec![TriggeredAbility {
-            trigger: TriggerCondition::OpponentCastsNoncreatureSpell,
+            trigger: TriggerCondition::OpponentCastsSpell,
             effect: Effect::DrawCards { count: 1 },
             description: "Whenever an opponent casts a spell, you may draw a card unless that player pays {1}.".into(),
         }],

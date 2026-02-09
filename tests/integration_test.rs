@@ -4064,3 +4064,206 @@ fn test_goldfish_strategy_name() {
     let goldfish = GoldfishStrategy;
     assert_eq!(goldfish.name(), "Goldfish");
 }
+
+// =====================================================================
+// Kinnan commander deck and new card definition tests
+// =====================================================================
+
+#[test]
+fn test_kinnan_commander_deck_builder() {
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::kinnan_commander_deck();
+
+    // Deck should be exactly 100 cards (including commander)
+    assert_eq!(deck.len(), 100);
+
+    // Commander is Kinnan, Bonder Prodigy
+    assert_eq!(commander, sample::ids::KINNAN_BONDER_PRODIGY);
+
+    // Commander should be in the deck
+    assert!(deck.contains(&commander));
+
+    // All cards should be in the database
+    for &card_id in &deck {
+        assert!(
+            db.get(card_id).is_some(),
+            "Card ID {} not found in database",
+            card_id
+        );
+    }
+
+    // Singleton: no duplicates (except basics)
+    let mut seen = std::collections::HashMap::new();
+    for &card_id in &deck {
+        *seen.entry(card_id).or_insert(0u32) += 1;
+    }
+    for (&card_id, &count) in &seen {
+        let def = db.get(card_id).unwrap();
+        if !def.is_basic_land() {
+            assert_eq!(
+                count, 1,
+                "{} appears {} times but deck is singleton",
+                def.name, count
+            );
+        }
+    }
+}
+
+#[test]
+fn test_mana_rocks_produce_correct_amounts() {
+    let db = sample::build_sample_db();
+
+    // Sol Ring produces 2 colorless
+    let sol_ring = db.get(sample::ids::SOL_RING).unwrap();
+    assert_eq!(
+        sol_ring.mana_abilities,
+        vec![mtg_gto::card::ManaAbility::TapForColorlessAmount(2)]
+    );
+
+    // Basalt Monolith produces 3 colorless
+    let basalt = db.get(sample::ids::BASALT_MONOLITH).unwrap();
+    assert_eq!(
+        basalt.mana_abilities,
+        vec![mtg_gto::card::ManaAbility::TapForColorlessAmount(3)]
+    );
+    // Basalt Monolith should NOT enter tapped
+    assert!(!basalt.enters_tapped);
+
+    // Grim Monolith produces 3 colorless
+    let grim = db.get(sample::ids::GRIM_MONOLITH).unwrap();
+    assert_eq!(
+        grim.mana_abilities,
+        vec![mtg_gto::card::ManaAbility::TapForColorlessAmount(3)]
+    );
+
+    // Mana Vault produces 3 colorless
+    let vault = db.get(sample::ids::MANA_VAULT).unwrap();
+    assert_eq!(
+        vault.mana_abilities,
+        vec![mtg_gto::card::ManaAbility::TapForColorlessAmount(3)]
+    );
+
+    // Ancient Tomb produces 2 colorless
+    let tomb = db.get(sample::ids::ANCIENT_TOMB).unwrap();
+    assert_eq!(
+        tomb.mana_abilities,
+        vec![mtg_gto::card::ManaAbility::TapForColorlessAmount(2)]
+    );
+}
+
+#[test]
+fn test_rhystic_study_triggers_on_any_spell() {
+    let db = sample::build_sample_db();
+    let rhystic = db.get(sample::ids::RHYSTIC_STUDY).unwrap();
+    assert_eq!(rhystic.triggered_abilities.len(), 1);
+    assert_eq!(
+        rhystic.triggered_abilities[0].trigger,
+        mtg_gto::card::TriggerCondition::OpponentCastsSpell
+    );
+}
+
+#[test]
+fn test_fetchlands_use_activated_abilities() {
+    let db = sample::build_sample_db();
+
+    for &fetch_id in &[
+        sample::ids::FLOODED_STRAND,
+        sample::ids::MISTY_RAINFOREST,
+        sample::ids::WINDSWEPT_HEATH,
+    ] {
+        let fetch = db.get(fetch_id).unwrap();
+        // Fetchlands should NOT use spell_effect (lands aren't cast)
+        assert!(
+            fetch.spell_effect.is_none(),
+            "{} should not have spell_effect",
+            fetch.name
+        );
+        // Should have an activated ability with SearchLibrary
+        assert!(
+            !fetch.activated_abilities.is_empty(),
+            "{} should have activated_abilities",
+            fetch.name
+        );
+        match &fetch.activated_abilities[0].effect {
+            mtg_gto::card::Effect::SearchLibrary { destination } => {
+                assert_eq!(*destination, ZoneType::Battlefield);
+            }
+            other => panic!(
+                "{} activated ability should be SearchLibrary, got {:?}",
+                fetch.name, other
+            ),
+        }
+    }
+}
+
+#[test]
+fn test_tap_for_colorless_amount_mana_resolution() {
+    // Test that TapForColorlessAmount actually adds the right amount of mana
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+
+    // Give libraries so no one decks
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::ISLAND, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::ISLAND, 1, ZoneType::Library);
+    }
+
+    // Put Sol Ring on the battlefield for player 0
+    let sol_ring_obj = state.create_card_in_zone(sample::ids::SOL_RING, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Activate Sol Ring's mana ability
+    let action = Action::ActivateManaAbility {
+        object_id: sol_ring_obj,
+        ability_index: 0,
+    };
+    rules::apply_action(&mut state, &action);
+
+    // Sol Ring should produce 2 colorless mana
+    assert_eq!(state.players[0].mana_pool.colorless, 2);
+}
+
+#[test]
+fn test_kinnan_card_definition() {
+    let db = sample::build_sample_db();
+    let kinnan = db.get(sample::ids::KINNAN_BONDER_PRODIGY).unwrap();
+
+    assert!(kinnan.supertypes.contains(&mtg_gto::card::Supertype::Legendary));
+    assert!(kinnan.card_types.contains(&mtg_gto::card::CardType::Creature));
+    assert_eq!(kinnan.power, Some(2));
+    assert_eq!(kinnan.toughness, Some(2));
+    // Should have an activated ability (5GU: look at top 5)
+    assert!(!kinnan.activated_abilities.is_empty());
+}
+
+#[test]
+fn test_new_kinnan_deck_cards_in_db() {
+    let db = sample::build_sample_db();
+
+    // Spot-check key cards from the Kinnan deck exist and have correct types
+    let consecrated = db.get(sample::ids::CONSECRATED_SPHINX).unwrap();
+    assert!(consecrated.card_types.contains(&mtg_gto::card::CardType::Creature));
+
+    let cyclonic = db.get(sample::ids::CYCLONIC_RIFT).unwrap();
+    assert!(cyclonic.card_types.contains(&mtg_gto::card::CardType::Instant));
+
+    let force = db.get(sample::ids::FORCE_OF_WILL).unwrap();
+    assert!(force.card_types.contains(&mtg_gto::card::CardType::Instant));
+
+    let hullbreaker = db.get(sample::ids::HULLBREAKER_HORROR).unwrap();
+    assert!(hullbreaker.card_types.contains(&mtg_gto::card::CardType::Creature));
+    assert!(hullbreaker.keywords.contains(&KeywordAbility::Flash));
+
+    let mystic_remora = db.get(sample::ids::MYSTIC_REMORA).unwrap();
+    assert!(mystic_remora.card_types.contains(&mtg_gto::card::CardType::Enchantment));
+    assert!(!mystic_remora.triggered_abilities.is_empty());
+
+    let tezzeret = db.get(sample::ids::TEZZERET_THE_SEEKER).unwrap();
+    assert!(tezzeret.card_types.contains(&mtg_gto::card::CardType::Planeswalker));
+    assert_eq!(tezzeret.starting_loyalty, Some(4));
+}

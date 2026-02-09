@@ -133,6 +133,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                             state.players[player].mana_pool.add_color(color, 1);
                         }
                     }
+                    ManaAbility::TapForColorlessAmount(n) => {
+                        state.players[player].mana_pool.colorless += n;
+                    }
                 }
             }
 
@@ -1942,7 +1945,9 @@ pub fn auto_tap_lands(
                         ManaAbility::TapForColor(c) => {
                             decisions.push(TapDecision::Color(land_id, *c));
                         }
-                        ManaAbility::TapForColorless | ManaAbility::TapForAny => {
+                        ManaAbility::TapForColorless
+                        | ManaAbility::TapForAny
+                        | ManaAbility::TapForColorlessAmount(_) => {
                             decisions.push(TapDecision::Colorless(land_id));
                         }
                         ManaAbility::TapForChoice(colors) => {

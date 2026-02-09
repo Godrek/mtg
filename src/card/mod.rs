@@ -75,6 +75,8 @@ pub enum ManaAbility {
     TapForAny,
     /// Tap for one of several colors (e.g., dual lands).
     TapForChoice(Vec<Color>),
+    /// Tap to add N colorless mana (e.g., Sol Ring → 2, Basalt Monolith → 3).
+    TapForColorlessAmount(u32),
 }
 
 /// An activated ability (non-mana).
@@ -116,6 +118,8 @@ pub enum TriggerCondition {
     YouCastSpell,
     /// Whenever an opponent casts a noncreature spell (e.g., Mystic Remora, Nezahal).
     OpponentCastsNoncreatureSpell,
+    /// Whenever an opponent casts any spell (e.g., Rhystic Study).
+    OpponentCastsSpell,
     /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
     OpponentDrawsCard,
 }
