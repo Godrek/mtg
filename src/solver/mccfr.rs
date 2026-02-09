@@ -940,15 +940,17 @@ pub fn collect_policy_snapshots(
 
 /// Train MCCFR for goldfish (solitaire) mode.
 ///
-/// In goldfish mode, player 1 is completely passive (uses `GoldfishStrategy`),
+/// In goldfish mode, the opponent is completely passive (uses `GoldfishStrategy`),
 /// so this is a single-agent optimization problem. Key differences from
 /// standard 2-player MCCFR:
 ///
-/// - Only traverses for player 0 (the pilot). Player 1's strategy is fixed.
-/// - When player 1 has priority, `GoldfishStrategy` chooses the action
+/// - Only traverses for the `pilot` player. The opponent's strategy is fixed.
+/// - When the opponent has priority, `GoldfishStrategy` chooses the action
 ///   directly — no regret table lookup or strategy sampling needed.
-/// - Returns only player 0's regret table (wrapped in the 2-element array
-///   for API compatibility; player 1's table will be empty).
+/// - Returns the pilot's regret table (wrapped in the 2-element array
+///   for API compatibility; the opponent's table will be empty).
+///
+/// `pilot` selects which player is optimized (typically 0).
 ///
 /// This converges faster than standard MCCFR because the opponent's
 /// action space is collapsed to a single deterministic choice at each node.
@@ -962,69 +964,79 @@ pub fn train_goldfish(
         num_iterations,
         config,
         &IdentityAbstraction,
+        0,
     )
 }
 
 /// Train goldfish MCCFR with information set abstraction.
+///
+/// `pilot` selects which player is optimized (typically 0).
 pub fn train_goldfish_with_abstraction(
     initial_state: &GameState,
     num_iterations: u32,
     config: &McfrConfig,
     abstraction: &dyn InfoSetAbstraction,
+    pilot: PlayerIndex,
 ) -> [RegretTable; 2] {
     let mut regret_tables = [RegretTable::new(), RegretTable::new()];
     let goldfish = crate::strategy::GoldfishStrategy;
 
     for _ in 0..num_iterations {
-        // Only traverse for player 0 — player 1 is the goldfish
         let state = initial_state.clone();
-        let mut rng = rand::thread_rng();
         traverse_goldfish(
             state,
-            &mut regret_tables[0],
+            &mut regret_tables[pilot as usize],
             config,
             abstraction,
             &goldfish,
+            pilot,
             0,
             0,
-            &mut rng,
         );
     }
 
     regret_tables
 }
 
-/// Recursive goldfish MCCFR traversal for player 0.
+/// Recursive goldfish MCCFR traversal for the pilot player.
 ///
-/// When it's player 0's turn: explore all actions and accumulate regrets
+/// When it's the pilot's turn: explore all actions and accumulate regrets
 /// (same as standard MCCFR traverser node).
-/// When it's player 1's turn: use GoldfishStrategy deterministically
+/// When it's the opponent's turn: use GoldfishStrategy deterministically
 /// (no sampling, no regret tracking).
+///
+/// Unlike the standard `traverse`, the depth limit falls back to
+/// `heuristic_utility` unconditionally. Rollout support is intentionally
+/// omitted: goldfish games have much lower branching on the opponent
+/// side, so the shallow search reaches meaningful terminal states without
+/// needing strategy-based rollouts. Adding rollouts here would be
+/// straightforward (accept a `RolloutMode` parameter and call
+/// `rollout_utility` at the depth limit) if deeper search is ever needed.
 fn traverse_goldfish(
     state: GameState,
     regret_table: &mut RegretTable,
     config: &McfrConfig,
     abstraction: &dyn InfoSetAbstraction,
     goldfish: &dyn Strategy,
+    pilot: PlayerIndex,
     depth: u32,
     actions_taken: u32,
-    rng: &mut impl Rng,
 ) -> f64 {
     // Terminal check
     if state.game_over {
-        return terminal_utility(&state, 0);
+        return terminal_utility(&state, pilot);
     }
 
     // Action limit
     if actions_taken >= config.max_actions {
-        return heuristic_utility(&state, 0);
+        return heuristic_utility(&state, pilot);
     }
 
     let player = state.priority_player;
 
-    // Player 1 (goldfish): deterministic, no regret tracking
-    if player == 1 {
-        let action = goldfish.choose_action(&state, 1);
+    // Opponent (goldfish): deterministic, no regret tracking
+    if player != pilot {
+        let action = goldfish.choose_action(&state, player);
         let mut next_state = state;
         rules::apply_action(&mut next_state, &action);
         return traverse_goldfish(
@@ -1033,13 +1045,13 @@ fn traverse_goldfish(
             config,
             abstraction,
             goldfish,
+            pilot,
             depth, // don't increment depth for opponent actions
             actions_taken + 1,
-            rng,
         );
     }
 
-    // Player 0: MCCFR decision node
+    // Pilot: MCCFR decision node
     let actions = legal_actions_abstracted(&state);
 
     // No actions — pass
@@ -1052,9 +1064,9 @@ fn traverse_goldfish(
             config,
             abstraction,
             goldfish,
+            pilot,
             depth,
             actions_taken + 1,
-            rng,
         );
     }
 
@@ -1068,15 +1080,16 @@ fn traverse_goldfish(
             config,
             abstraction,
             goldfish,
+            pilot,
             depth,
             actions_taken + 1,
-            rng,
         );
     }
 
-    // Depth limit
+    // Depth limit — uses heuristic_utility directly; see doc comment above
+    // for rationale on omitting rollout support.
     if config.max_depth > 0 && depth >= config.max_depth {
-        return heuristic_utility(&state, 0);
+        return heuristic_utility(&state, pilot);
     }
 
     // Canonicalize actions
@@ -1086,7 +1099,7 @@ fn traverse_goldfish(
         .collect();
 
     // Compute info set
-    let view = state.visible_state(0);
+    let view = state.visible_state(pilot);
     let info_set = InformationSet::from_view(&view, state.card_db());
     let info_hash = abstraction.abstract_info_set(&info_set);
 
@@ -1109,9 +1122,9 @@ fn traverse_goldfish(
             config,
             abstraction,
             goldfish,
+            pilot,
             depth + 1,
             actions_taken + 1,
-            rng,
         );
     }
 

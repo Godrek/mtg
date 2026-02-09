@@ -823,7 +823,7 @@ fn test_goldfish_mccfr_training_runs() {
     let p1_info_sets = tables[1].num_info_sets();
 
     eprintln!(
-        "Goldfish MCCFR (20 iters): P0 info sets = {}, P1 info sets = {}",
+        "Goldfish MCCFR (10 iters): P0 info sets = {}, P1 info sets = {}",
         p0_info_sets, p1_info_sets,
     );
 
@@ -978,7 +978,7 @@ fn test_goldfish_mccfr_with_abstraction() {
     let bucketed = BucketedAbstraction;
     let config = McfrConfig { max_depth: 6, max_actions: 500 };
     let tables = mccfr::train_goldfish_with_abstraction(
-        &state, 30, &config, &bucketed,
+        &state, 30, &config, &bucketed, 0,
     );
 
     let strat = AbstractedMcfrStrategy::new(
