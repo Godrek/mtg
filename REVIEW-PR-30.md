@@ -1,78 +1,106 @@
-# PR #30 Review: Parallelize MCCFR training with rayon sharding
+# PR #30 Review (Round 2): Parallelize MCCFR training with rayon sharding
 
 **Branch:** `claude/parallelize-mccfr-training-5BjNT`
-**Commit:** `1a2ed84` — "Parallelize MCCFR training with rayon sharding"
-**Files changed:** `src/main.rs` (+6/-2), `src/solver/mccfr.rs` (+207)
+**Commits:** `1a2ed84` + `228a71d` (address review feedback)
+**Files changed:** `src/main.rs`, `src/solver/mccfr.rs`, `src/bin/commander_goldfish.rs`
 
 ## Summary
 
-Adds two new parallel training entry points:
-- `train_goldfish_parallel` / `train_goldfish_parallel_with_abstraction` — parallel goldfish (solitaire) MCCFR
-- `train_parallel_basic` — parallel 2-player MCCFR with default settings
+Adds parallel goldfish MCCFR training with rayon sharding, progress reporting,
+and checkpointing. Also adds a `train_parallel_basic` wrapper for 2-player
+MCCFR. Updates both `main.rs` and `commander_goldfish` to use parallel training.
 
-Each distributes iterations across rayon thread-pool shards with independent `RegretTable` instances, then merges by summing cumulative regret/strategy values. Updates `main.rs` to use parallel goldfish training with auto-detected thread count.
+## Verdict: Approve
 
-Includes three unit tests covering the happy path, 2-player variant, and the edge case where `num_shards > num_iterations`.
+All five review items from Round 1 have been addressed. The code is clean,
+tests pass (67/67), and the API layering is well-designed. Two minor nits below
+that are non-blocking.
 
-## Verdict: Request Changes
+## Review of addressed items
 
-The implementation is structurally sound and follows the established `train_parallel` pattern correctly. The math for merging independent CFR shards is valid. However, there are several issues ranging from code duplication to a missing update in the `commander_goldfish` binary.
+### 1. commander_goldfish binary updated — Good
 
-## Issues
+Now uses `train_goldfish_parallel_with_progress` with `AtomicU32`-based progress
+reporting and 2-second throttling. The old `Cell<Instant>` approach was correctly
+replaced with `AtomicU32` seconds tracking that works across threads.
 
-### 1. `commander_goldfish` binary not updated (Medium)
+Note: The old progress callback reported `info_sets` and `exploit` mid-training.
+The new parallel callback can't access shard-private tables, so those are
+omitted. This is the right trade-off — the doc comment on
+`train_goldfish_parallel_with_progress` (line 712-713) explicitly calls this out:
+"Because tables are shard-private, the callback cannot inspect regret tables
+mid-training — use checkpointing for intermediate snapshots."
 
-`src/bin/commander_goldfish.rs:81` still uses `train_goldfish_with_progress` (sequential). If the goal is to parallelize goldfish training, this is the most computationally expensive user-facing entry point and should benefit from parallelism too. At minimum, document why it was intentionally left sequential (e.g., progress callback incompatibility), or add a parallel variant with progress support.
+### 2. train_parallel_basic deduplication — Good
 
-### 2. `train_parallel_basic` largely duplicates `train_parallel` (Medium)
-
-`train_parallel_basic` (new, lines 735-776 in the PR) duplicates the shard-distribution and merge pattern from the existing `train_parallel` (lines 506-564). The only difference is that `train_parallel_basic` calls `run_iteration` with default settings while `train_parallel` takes a `TrainConfig`.
-
-This could be a one-liner wrapper:
-
+Reduced from ~40 lines of duplicated shard logic to a 5-line wrapper:
 ```rust
-pub fn train_parallel_basic(
-    initial_state: &GameState,
-    num_iterations: u32,
-    num_shards: u32,
-    config: &McfrConfig,
-) -> [RegretTable; 2] {
-    train_parallel(initial_state, num_iterations, num_shards, &TrainConfig::from_mccfr(config))
-}
+let train_config = TrainConfig {
+    mccfr: config.clone(),
+    ..TrainConfig::default()
+};
+train_parallel(initial_state, num_iterations, num_shards, &train_config)
+```
+Clean delegation. `McfrConfig` derives `Clone` so `config.clone()` is fine.
+
+### 3. Progress reporting in parallel goldfish — Good
+
+`train_goldfish_parallel_with_progress` uses a shared `AtomicU32` with
+`Ordering::Relaxed` (line 777). `Relaxed` is appropriate here — the counter is
+advisory for progress display, not used for synchronization. The callback
+signature `Fn(u32, u32, &AtomicU32) + Send + Sync` is correct.
+
+### 4. Encapsulated rayon dependency — Good
+
+`default_num_shards()` (line 84-89) encapsulates `rayon::current_num_threads()`
+in the solver module. Both callers use `mccfr::default_num_shards()` now.
+
+### 5. Checkpoint support in parallel goldfish — Good
+
+Per-shard checkpointing via `checkpoint_interval: Option<u32>` and
+`checkpoint_dir: Option<&str>`. Consistent with the existing `train_parallel`
+approach. Silently ignores checkpoint errors (`let _ = save_checkpoint(...)`) —
+matches existing convention.
+
+## API layering
+
+The function hierarchy is clean:
+
+```
+train_goldfish_parallel                           (simple entry point)
+  -> train_goldfish_parallel_with_progress        (full-featured, 9 params)
+
+train_goldfish_parallel_with_abstraction          (mid-level convenience)
+  -> train_goldfish_parallel_with_progress
+
+train_parallel_basic                              (simple 2-player)
+  -> train_parallel                               (existing, full-featured)
 ```
 
-If `TrainConfig` doesn't have a convenient constructor from `McfrConfig`, adding one would be cleaner than duplicating ~40 lines of parallel iteration logic.
+## Minor nits (non-blocking)
 
-### 3. No progress reporting in parallel goldfish (Low-Medium)
+### Nit 1: Progress callback race in commander_goldfish — cosmetic only
 
-The sequential `train_goldfish_with_progress` supports a progress callback that reports iteration count, elapsed time, and exploitability. The parallel variant has no equivalent. For long training runs (which is the primary use case for parallelism), the user gets no feedback until completion. Consider adding an `AtomicU32` iteration counter with periodic progress reporting, similar to how other parallel MCCFR frameworks handle this.
+In `commander_goldfish.rs:91-113`, multiple threads may concurrently evaluate
+`should_print` and both pass the throttle check before either stores the
+updated `last_print_secs`. This means occasionally 2-3 threads may print
+within the same second window. This is purely cosmetic (interleaved `eprint!`
+output) and not worth fixing with a `compare_exchange` — the output is
+human-readable status, not correctness-critical.
 
-### 4. `main.rs` change leaks rayon dependency into caller (Low)
+### Nit 2: `train_goldfish_parallel_with_progress` has 9 parameters
 
-In `src/main.rs:21`, the `goldfish_mccfr_report` function now calls `rayon::current_num_threads()` directly:
+The function takes 9 positional parameters. A builder or config struct could
+improve ergonomics, but this matches the existing codebase style (e.g.,
+`traverse_goldfish` takes 8 params) and the convenience wrappers
+(`train_goldfish_parallel`, `train_goldfish_parallel_with_abstraction`) mitigate
+the usability concern. Fine as-is for an internal solver API.
 
-```rust
-let num_shards = rayon::current_num_threads() as u32;
-```
+## Tests
 
-This couples the caller to rayon. A cleaner approach would be to either:
-- Have `train_goldfish_parallel` accept `num_shards: Option<u32>` and default to `rayon::current_num_threads()` internally, or
-- Add a `train_goldfish_parallel_auto` that picks shard count automatically
+All 67 unit tests pass with the PR applied. The three new tests cover:
+- `test_train_goldfish_parallel` — happy path, validates info sets and visit counts
+- `test_train_parallel_basic` — 2-player parallel with default config
+- `test_train_goldfish_parallel_more_shards_than_iterations` — edge case
 
-This keeps rayon as an implementation detail of the solver module.
-
-### 5. No checkpoint support in parallel goldfish (Low)
-
-The existing `train_parallel` function supports per-shard checkpointing via `TrainConfig`. The new `train_goldfish_parallel_with_abstraction` does not. For consistency, consider whether goldfish parallel training should also support checkpointing, especially given that goldfish training at scale is the motivating use case.
-
-## Positives
-
-- **Correct parallelism model**: Independent shards with post-hoc merge is the right approach for MCCFR — cumulative regret/strategy sums are order-independent, so merging is mathematically sound.
-- **Proper iteration distribution**: The `iterations_per_shard + remainder` logic correctly handles uneven division and the edge case where shards exceed iterations.
-- **Good test coverage**: Tests the happy path, 2-player variant, and the `num_shards > num_iterations` edge case.
-- **Clean integration**: Reuses `traverse_goldfish`, `run_iteration`, and `merge_regret_tables` without modification.
-- **Build and tests pass**: All 67 unit tests pass with the PR applied. No warnings.
-
-## Recommendation
-
-Address issue #1 (commander_goldfish binary) and #2 (code duplication) before merging. The other issues are lower priority and could be follow-ups.
+Build succeeds with no warnings.
