@@ -1,164 +1,87 @@
-# PR #32 Review: Reshuffle Opening Hands + London Mulligan
+# PR #32 Re-Review: Reshuffle Opening Hands + London Mulligan
 
 ## Summary
 
-Two commits: (1) fix the 0% win rate bug by reshuffling between MCCFR iterations, (2) add London Mulligan support for Commander games. Both are well-motivated and correctly structured. Several issues below, ranging from a potential game-breaking bug to minor suggestions.
+Four commits total. Commits 1-2 were reviewed previously; commits 3-4 address the feedback. All 146 tests pass. One new low-severity issue introduced by the fix-up; otherwise the feedback has been addressed well.
 
 ---
 
-## Commit 1: Reshuffle Opening Hands (`6dd8ae2`)
+## Previous Issues — Resolution Status
 
-### Verdict: Approve with comments
+### [Bug / High] PassPriority fallback in Mulligan → **FIXED** (commit `e1587d4`)
 
-The diagnosis is correct — training on a single fixed shuffle means canonical actions only cover one set of 7 cards, making the learned strategy useless on any other draw. The fix is targeted and applied consistently across all three training entry points (single-threaded `train_goldfish_with_progress`, parallel shards, and `warm_start_from_greedy`).
+Replaced `return vec![Action::PassPriority]` with a descriptive `unreachable!()`. Good — this both prevents the silent corruption and serves as documentation.
 
-### Issues
+### [Medium] `MulliganMulligan` doesn't check `MAX_MULLIGANS` → **FIXED** (commit `cf82923`)
 
-#### [Medium] `reshuffle_opening_hand` doesn't clear the battlefield, graveyard, exile, stack, or game event state
+Added `debug_assert!` in `apply_action` guarding against exceeding `MAX_MULLIGANS`. `MAX_MULLIGANS` was also made `pub` so the assert can reference it. Clean fix.
 
-`reshuffle_opening_hand` resets hands, libraries, mana, and phase/turn, but doesn't touch:
-- `state.battlefield` / `state.objects` (permanents from a prior iteration would persist)
-- `state.graveyard` / `state.exile`
-- `state.stack`
-- `state.game_over` / `state.players[*].has_lost`
-- `state.consecutive_passes`
-- `state.players[*].life`
+### [Medium] `GoldfishStrategy` had no bottom-card handling → **FIXED** (commit `cf82923`)
 
-This is currently safe **only** because the function is called immediately after `initial_state.clone()` (before any game actions modify the state). But the function's doc comment says "Resets turn/phase/mana state so the game starts cleanly from Turn 1" — which is misleading. If anyone ever calls `reshuffle_opening_hand` on a mid-game state, it would produce a corrupt game.
+`GoldfishStrategy` now checks for `MulliganBottomCard` actions before falling back to `MulliganKeep`. The comment correctly explains the defensive reasoning. Good.
 
-**Suggestion:** Either:
-1. Add a doc-comment caveat: "Must only be called on a freshly-cloned initial state (before any game actions)." — or
-2. Also reset `game_over`, `has_lost`, life totals, battlefield, graveyard, exile, stack, and consecutive_passes for robustness.
+### [Low] `MulliganBottomCard` canonical action included `hand_index` → **Changed** (commit `cf82923`)
 
-#### [Low] Hardcoded player count = 2
+`hand_index` was removed from `CanonicalAction::MulliganBottomCard`, leaving only `card_id`. The `resolve()` function now always resolves to the first matching instance via `find_in_hand_by_index(state, player, *card_id, 0)`.
 
-```rust
-draw_cards(state, 0, 7);
-draw_cards(state, 1, 7);
-```
+This works correctly in practice because:
+- **MCCFR traversal** (`traverse`, `traverse_goldfish`) applies concrete `Action`s directly — not via `resolve()`. Canonical actions are only keys in the regret table.
+- **`AbstractedMcfrStrategy::choose_action`** samples an index into the concrete action list, not via resolve.
+- **Commander decks are singleton** (1 copy of each non-basic), so duplicates only arise for basic lands.
 
-The hand-drain loop correctly iterates `0..state.players.len()`, but redrawing is hardcoded to players 0 and 1. This is fine for the current 1v1 goldfish use case but inconsistent within the same function.
+However, this does introduce a **subtle MCCFR strategy skew** when duplicate cards exist (see new issue below).
 
-**Suggestion:** Use a loop:
-```rust
-for player in 0..state.players.len() {
-    draw_cards(state, player, 7);
-}
-```
+### [Medium] `reshuffle_opening_hand` safety / doc-comment → **Not addressed**
 
----
+Still only safe when called on a freshly-cloned initial state. The doc comment still reads "Resets turn/phase/mana state so the game starts cleanly from Turn 1" without the caveat. Low-risk since usage is correct, but would be nice to document.
 
-## Commit 2: London Mulligan (`ec5c478`)
+### [Low] Hardcoded player count / Greedy heuristic / TURN_ORDER comment → **Not addressed**
 
-### Verdict: Request changes (one bug, rest are suggestions)
+These were low-priority suggestions and are fine to skip.
 
-The overall architecture is clean — `Phase::Mulligan` as a pre-game state machine with `advance_mulligan()` handling transitions is the right design. The canonical action support, info set integration, and strategy implementations are all well done.
+### [Weak test coverage] → **FIXED** (commit `cf82923`)
 
-### Issues
+Excellent test coverage added — 7 new tests in `tests/commander_test.rs`:
 
-#### [Bug / High] `advance_phase` will panic if `PassPriority` is ever issued during Mulligan phase
+| Test | What it verifies |
+|------|-----------------|
+| `test_commander_starts_in_mulligan_phase` | Setup puts game in Mulligan phase with 7-card hands |
+| `test_mulligan_keep_advances_to_next_player` | P0 keep → priority moves to P1 |
+| `test_mulligan_both_keep_transitions_to_untap` | Both keep → exits Mulligan to Untap |
+| `test_mulligan_once_then_keep_requires_bottom_one` | Mulligan 1 → keep → bottom 1 → hand=6 |
+| `test_mulligan_twice_bottoms_two` | Mulligan 2 → keep → bottom 2 → hand=5 |
+| `test_mulligan_full_game_with_greedy` | Full game completes with mulligan phase active |
 
-`legal_actions_with` has a fallback `return vec![Action::PassPriority]` at the end of the Mulligan branch (line ~186 in the diff). If this path is ever hit, `handle_priority_pass` → `advance_phase` is called, which does:
-
-```rust
-fn advance_phase(state: &mut GameState) {
-    let current_idx = Phase::TURN_ORDER
-        .iter()
-        .position(|&p| p == state.phase)
-        .unwrap_or(0);  // ← returns 0 (Untap) since Mulligan isn't in TURN_ORDER
-    ...
-}
-```
-
-`Phase::Mulligan` is not in `TURN_ORDER`, so `position()` returns `None`, `.unwrap_or(0)` maps it to index 0 (Untap), and the game would skip the mulligan entirely and jump to Upkeep. This is a silent correctness bug.
-
-While the comment says "should not reach here," defensive code should not silently break the game state.
-
-**Fix:** Replace the `PassPriority` fallback with either `unreachable!("mulligan advance_mulligan should handle all transitions")` or add a guard in `advance_phase`/`handle_priority_pass` to not advance from Mulligan.
-
-#### [Medium] `Phase::Mulligan` not in `TURN_ORDER` — could cause issues in other code paths
-
-`Phase::TURN_ORDER` is a `[Phase; 13]` constant that doesn't include `Mulligan`. This is intentional (Mulligan isn't a turn phase), but any code that iterates `TURN_ORDER` to check "is this phase valid" or "what's the next phase" will silently ignore Mulligan. The `advance_phase` issue above is one consequence.
-
-Consider adding a comment to `TURN_ORDER` noting that `Mulligan` is intentionally excluded as a pre-game phase.
-
-#### [Medium] `MulliganMulligan` action doesn't check `MAX_MULLIGANS`
-
-In `apply_action` for `Action::MulliganMulligan`:
-```rust
-state.players[player].mulligan_count += 1;
-```
-
-There's no guard against exceeding `MAX_MULLIGANS`. The guard exists in `legal_actions_with` (line ~170: `if ps.mulligan_count < MAX_MULLIGANS`), but `apply_action` trusts the caller. This is fine for the solver (which only picks from legal actions), but if `apply_action` is ever called directly with a crafted action, it would allow infinite mulligans.
-
-**Suggestion:** Add a debug_assert or comment noting that the caller is responsible for checking legality.
-
-#### [Medium] `GoldfishStrategy` always keeps — no bottom-card handling
-
-`GoldfishStrategy::choose_action` returns `MulliganKeep` when `phase == Mulligan`, but since the goldfish opponent never mulligans, it will never need to bottom cards. This is correct for goldfish mode. However, if `GoldfishStrategy` is ever used as a real opponent strategy (not just goldfish), a mulligan-then-keep path would hit the bottom-card phase with no handling.
-
-The current code would fall through to the "Handle mandatory actions" section and likely pick a wrong action.
-
-**Suggestion:** Add a `MulliganBottomCard` handler in `GoldfishStrategy` (e.g., bottom the first card in hand) for defensive completeness, or add a comment noting this is goldfish-only.
-
-#### [Low] `GreedyStrategy` mulligan heuristic hardcodes 7-card hand assumption
-
-```rust
-if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
-    return Action::MulliganKeep;
-}
-```
-
-The 2-5 land range is reasonable for a 7-card hand but becomes increasingly permissive for 5-6 card hands after mulligans. After 1 mulligan (keeping 6 cards), keeping with 2 lands means 33% lands which is low. After 2 mulligans it auto-keeps regardless.
-
-This is a minor heuristic concern, not a bug — the MCCFR solver will learn its own policy. But worth noting for baseline accuracy.
-
-#### [Low] `MulliganBottomCard` canonical action includes `hand_index`
-
-```rust
-CanonicalAction::MulliganBottomCard {
-    card_id: CardId,
-    hand_index: usize,
-}
-```
-
-Including `hand_index` in the canonical action means two identical cards at different hand positions produce different canonical actions. This is consistent with how other hand-based canonical actions work in this codebase (e.g., `PlayLand`), but for mulligan bottoming, the position in hand is typically irrelevant — only the card identity matters.
-
-This inflates the info set space slightly. Not a bug, but worth considering whether `hand_index` is needed here.
-
-#### [Low] `reshuffle_opening_hand` updated to be mulligan-aware — good
-
-The second commit correctly updates `reshuffle_opening_hand` to reset `mulligan_count` and `mulligan_decided`, and routes Commander games through `Phase::Mulligan` while non-Commander goes straight to `Phase::Untap`. This is well-handled.
-
-#### [Nit] `setup_commander_game` no longer calls `execute_phase_entry`
-
-Before this PR, `setup_commander_game` ended with `execute_phase_entry(state)` which auto-advanced through Untap → Upkeep → Draw. Now it sets `phase = Phase::Mulligan` and returns. The mulligan phase entry in `execute_phase_entry` just sets `priority_player = active` — but `setup_commander_game` already sets both `active_player` and `priority_player` to 0 on the lines above. So not calling `execute_phase_entry` is fine, but it's a subtle behavioral change worth noting in the commit message.
+These cover the state machine transitions, hand size math, and end-to-end integration. Solid.
 
 ---
 
-## Testing
+## New Issue from Fix-Up Commits
 
-The integration test is updated to include `my_mulligan_count: 0` in the `InformationSet` constructor. However, there are no new tests for the mulligan mechanics themselves:
+### [Low] Duplicate canonical actions skew MCCFR strategy probabilities
 
-- No test for the keep → bottom N cards flow
-- No test for mulligan → redraw → keep flow
-- No test for `advance_mulligan` transitioning to Turn 1 after all players decide
-- No test for `GoldfishStrategy` / `GreedyStrategy` mulligan behavior
-- No test verifying `reshuffle_opening_hand` resets mulligan fields
+Removing `hand_index` from `MulliganBottomCard` means two copies of the same card (e.g., 2 Forests) produce identical canonical actions. In `current_strategy()`, both entries look up the same regret value, so the combined probability mass for "bottom a Forest" is inflated relative to unique cards.
 
-**Recommendation:** Add at least a basic integration test that exercises the full mulligan flow (mulligan once → keep → bottom 1 card → verify hand size = 6 and game advances to Untap).
+**Example:** Hand = [Forest, Forest, Island], must bottom 1.
+- Canonical actions: `[Bottom(Forest), Bottom(Forest), Bottom(Island)]`
+- `current_strategy` with uniform regrets: `[1/3, 1/3, 1/3]`
+- Effective probability: Forest gets 2/3, Island gets 1/3 — should be 1/2 each
+
+This doesn't affect gameplay correctness (whichever Forest is bottomed, the outcome is identical), and Commander singleton decks rarely have duplicates beyond basic lands. The prior approach with `hand_index` was consistent with `PlayLand`/`CastSpell`/`Discard` canonicalization but inflated the info set space. This is a reasonable trade-off.
+
+**Suggestion (non-blocking):** If this becomes a concern, deduplicating canonical actions before passing to `current_strategy` would be the clean fix — but it's not worth the complexity for the current use case.
 
 ---
 
-## Overall Assessment
+## Overall Assessment (Re-Review)
 
-| Aspect | Rating |
-|--------|--------|
-| Correctness | Good (1 bug in PassPriority/advance_phase interaction) |
-| Architecture | Strong — Mulligan as a Phase with state machine is clean |
-| MCCFR integration | Thorough — info sets, canonical actions, both abstractions updated |
-| Strategy support | Good — GreedyStrategy heuristic is reasonable, MCCFR learns from training |
-| Test coverage | Weak — no mulligan-specific tests |
-| Code clarity | Good — comments and doc strings are helpful |
+| Aspect | Rating | Change |
+|--------|--------|--------|
+| Correctness | Strong | Improved — bug fixed, debug_assert added |
+| Architecture | Strong | Unchanged |
+| MCCFR integration | Strong | Minor strategy skew on duplicates (acceptable) |
+| Strategy support | Strong | Improved — GoldfishStrategy now defensive |
+| Test coverage | Strong | Improved — 7 targeted mulligan tests |
+| Code clarity | Good | Unchanged |
 
-**Recommendation:** Fix the `PassPriority` bug in the Mulligan fallback path, add mulligan integration tests, and this is ready to merge.
+**Verdict: Approve.** The high-severity bug is fixed, test coverage is solid, and the remaining items are non-blocking nits. The duplicate canonical action skew is theoretical and acceptable for singleton Commander decks.
