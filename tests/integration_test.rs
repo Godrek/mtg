@@ -4077,13 +4077,27 @@ fn test_goldfish_strategy_name() {
 #[test]
 fn test_kinnan_commander_deck_builder() {
     let db = sample::build_sample_db();
-    let (deck, commander) = sample::kinnan_commander_deck();
+    let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
 
     // Deck should be exactly 100 cards (including commander)
     assert_eq!(deck.len(), 100);
 
     // Commander is Kinnan, Bonder Prodigy
     assert_eq!(commander, sample::ids::KINNAN_BONDER_PRODIGY);
+
+    // Tutor targets should be non-empty and all present in the deck
+    assert!(!tutor_targets.is_empty(), "Kinnan deck should have tutor targets");
+    assert!(
+        tutor_targets.contains(&sample::ids::BASALT_MONOLITH),
+        "Basalt Monolith should be a tutor target"
+    );
+    for &target in &tutor_targets {
+        assert!(
+            deck.contains(&target),
+            "Tutor target {} should be in the deck",
+            target
+        );
+    }
 
     // Commander should be in the deck
     assert!(deck.contains(&commander));

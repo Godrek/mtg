@@ -101,3 +101,16 @@
 1 Windswept Heath
 1 Worldly Tutor
 1 Yavimaya Coast
+
+~~Tutor Targets~~
+1 Basalt Monolith
+1 Grim Monolith
+1 Thrasios, Triton Hero
+1 Tidespout Tyrant
+1 Hullbreaker Horror
+1 Consecrated Sphinx
+1 Nyxbloom Ancient
+1 Seedborn Muse
+1 Sol Ring
+1 Trophy Mage
+1 The One Ring

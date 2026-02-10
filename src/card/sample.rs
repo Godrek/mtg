@@ -4353,8 +4353,10 @@ pub fn thrun_commander_deck() -> (Vec<CardId>, CardId) {
 
 /// Build the Kinnan, Bonder Prodigy Commander deck (100-card singleton).
 ///
-/// Returns (deck, commander_id).
-pub fn kinnan_commander_deck() -> (Vec<CardId>, CardId) {
+/// Returns (deck, commander_id, tutor_targets).
+/// Tutor targets are the priority cards that tutors should search for,
+/// ordered by strategic importance (Basalt Monolith first for infinite mana).
+pub fn kinnan_commander_deck() -> (Vec<CardId>, CardId, Vec<CardId>) {
     let commander = ids::KINNAN_BONDER_PRODIGY;
     let mut deck = Vec::new();
 
@@ -4479,5 +4481,22 @@ pub fn kinnan_commander_deck() -> (Vec<CardId>, CardId) {
     deck.push(ids::SINK_INTO_STUPOR);
 
     assert_eq!(deck.len(), 100);
-    (deck, commander)
+
+    // Priority tutor targets: combo pieces and high-impact cards.
+    // Basalt Monolith is #1 — infinite mana with Kinnan's static ability.
+    let tutor_targets = vec![
+        ids::BASALT_MONOLITH,      // Infinite mana combo with Kinnan
+        ids::GRIM_MONOLITH,        // Fast mana, doubles with Kinnan
+        ids::THRASIOS_TRITON_HERO, // Mana sink to win with infinite mana
+        ids::TIDESPOUT_TYRANT,     // Bounce engine, wins with infinite mana
+        ids::HULLBREAKER_HORROR,   // Bounce engine, flash
+        ids::CONSECRATED_SPHINX,   // Card advantage engine
+        ids::NYXBLOOM_ANCIENT,     // Mana tripler
+        ids::SEEDBORN_MUSE,        // Untap engine for Kinnan activations
+        ids::SOL_RING,             // Best mana rock
+        ids::TROPHY_MAGE,          // Tutors for Basalt Monolith (CMC 3)
+        ids::THE_ONE_RING,         // Protection + card draw
+    ];
+
+    (deck, commander, tutor_targets)
 }

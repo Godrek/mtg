@@ -1193,7 +1193,7 @@ fn test_commander_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
 fn test_commander_goldfish_kinnan_deck() {
     // Test with the Kinnan, Bonder Prodigy commander deck (Simic mana ramp).
     let db = sample::build_sample_db();
-    let (deck, commander) = sample::kinnan_commander_deck();
+    let (deck, commander, _tutor_targets) = sample::kinnan_commander_deck();
     let state = setup_commander_goldfish_game(&deck, commander);
 
     let bucketed = BucketedAbstraction;

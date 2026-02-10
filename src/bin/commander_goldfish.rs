@@ -52,8 +52,11 @@ fn main() {
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "kinnan".to_string());
 
     let db = sample::build_sample_db();
-    let (deck, commander) = match deck_name.as_str() {
-        "brimaz" => sample::brimaz_commander_deck(),
+    let (deck, commander, tutor_targets) = match deck_name.as_str() {
+        "brimaz" => {
+            let (d, c) = sample::brimaz_commander_deck();
+            (d, c, Vec::new())
+        }
         _ => sample::kinnan_commander_deck(),
     };
 
@@ -77,6 +80,8 @@ fn main() {
     let mut state = GameState::new_commander(2);
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+    rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+    rules::set_tutor_targets(&mut state, 1, &tutor_targets);
 
     let config = McfrConfig {
         max_depth,
