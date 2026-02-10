@@ -14,7 +14,7 @@
 //!   ITERATIONS=100    Number of MCCFR training iterations (default: 100)
 //!   DEPTH=10          Max tree depth per traversal (default: 10)
 //!   GAMES=1000        Number of simulation games (default: 1000)
-//!   DECK=brimaz       Deck to use: "brimaz" or "thrun" (default: brimaz)
+//!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -43,12 +43,12 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1000);
-    let deck_name = std::env::var("DECK").unwrap_or_else(|_| "brimaz".to_string());
+    let deck_name = std::env::var("DECK").unwrap_or_else(|_| "kinnan".to_string());
 
     let db = sample::build_sample_db();
     let (deck, commander) = match deck_name.as_str() {
-        "thrun" => sample::thrun_commander_deck(),
-        _ => sample::brimaz_commander_deck(),
+        "brimaz" => sample::brimaz_commander_deck(),
+        _ => sample::kinnan_commander_deck(),
     };
 
     let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
