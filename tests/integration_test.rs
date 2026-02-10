@@ -3322,7 +3322,7 @@ fn test_policy_snapshot_collection() {
 
     let abstraction = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 6, max_actions: 100 },
+        mccfr: McfrConfig { max_depth: 6, max_actions: 100, max_nodes_per_iteration: 0 },
         abstraction: &abstraction,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,

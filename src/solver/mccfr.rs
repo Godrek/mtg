@@ -75,6 +75,10 @@ pub struct McfrConfig {
     pub max_depth: u32,
     /// Maximum actions before declaring a draw (prevents infinite loops).
     pub max_actions: u32,
+    /// Maximum recursive nodes explored per iteration in goldfish traversal.
+    /// When exceeded, remaining branches fall back to heuristic evaluation.
+    /// 0 = unlimited. Prevents exponential blowup with high-branching hands.
+    pub max_nodes_per_iteration: u32,
 }
 
 /// Default maximum actions before declaring a draw in MCCFR training.
@@ -94,6 +98,7 @@ impl Default for McfrConfig {
         McfrConfig {
             max_depth: 0, // unlimited
             max_actions: DEFAULT_MAX_ACTIONS,
+            max_nodes_per_iteration: 0, // unlimited
         }
     }
 }
@@ -766,6 +771,7 @@ where
                 // Reshuffle opening hand each iteration so the solver trains on diverse
                 // starting hands rather than memorizing one fixed deal.
                 rules::reshuffle_opening_hand(&mut state);
+                let mut nodes_visited = 0u32;
                 traverse_goldfish(
                     state,
                     &mut regret_tables[pilot as usize],
@@ -775,6 +781,7 @@ where
                     pilot,
                     0,
                     0,
+                    &mut nodes_visited,
                 );
 
                 let completed = progress.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1212,6 +1219,7 @@ where
         // Reshuffle opening hand each iteration so the solver trains on diverse
         // starting hands rather than memorizing one fixed deal.
         rules::reshuffle_opening_hand(&mut state);
+        let mut nodes_visited = 0u32;
         traverse_goldfish(
             state,
             &mut regret_tables[pilot as usize],
@@ -1221,6 +1229,7 @@ where
             pilot,
             0,
             0,
+            &mut nodes_visited,
         );
         on_progress(i + 1, num_iterations, &regret_tables);
     }
@@ -1251,6 +1260,7 @@ fn traverse_goldfish(
     pilot: PlayerIndex,
     depth: u32,
     actions_taken: u32,
+    nodes_visited: &mut u32,
 ) -> f64 {
     // Terminal check
     if state.game_over {
@@ -1259,6 +1269,13 @@ fn traverse_goldfish(
 
     // Action limit
     if actions_taken >= config.max_actions {
+        return heuristic_utility(&state, pilot);
+    }
+
+    // Node budget: fall back to heuristic when iteration budget is exhausted.
+    // This prevents exponential blowup with high-branching hands.
+    *nodes_visited += 1;
+    if config.max_nodes_per_iteration > 0 && *nodes_visited >= config.max_nodes_per_iteration {
         return heuristic_utility(&state, pilot);
     }
 
@@ -1278,6 +1295,7 @@ fn traverse_goldfish(
             pilot,
             depth, // don't increment depth for opponent actions
             actions_taken + 1,
+            nodes_visited,
         );
     }
 
@@ -1297,6 +1315,7 @@ fn traverse_goldfish(
             pilot,
             depth,
             actions_taken + 1,
+            nodes_visited,
         );
     }
 
@@ -1313,6 +1332,7 @@ fn traverse_goldfish(
             pilot,
             depth,
             actions_taken + 1,
+            nodes_visited,
         );
     }
 
@@ -1355,6 +1375,7 @@ fn traverse_goldfish(
             pilot,
             depth + 1,
             actions_taken + 1,
+            nodes_visited,
         );
     }
 
@@ -1576,7 +1597,7 @@ mod tests {
 
         let abstraction = BucketedAbstraction;
         let train_cfg = TrainConfig {
-            mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+            mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
             abstraction: &abstraction,
             rollout_mode: RolloutMode::Heuristic,
             rollout_strategies: None,
@@ -1628,7 +1649,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200 };
+        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
         let tables = train(&state, 5, &config);
 
         let stats = training_stats(&tables);
@@ -1650,7 +1671,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
         let tables = train_goldfish_parallel(&state, 8, 4, &config);
 
         // Pilot's table should have entries
@@ -1674,7 +1695,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200 };
+        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
         let tables = train_parallel_basic(&state, 8, 4, &config);
 
         // Both players should have info set entries
@@ -1694,7 +1715,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
         // 2 iterations spread across 8 shards: should not panic
         let tables = train_goldfish_parallel(&state, 2, 8, &config);
         assert!(tables[0].num_info_sets() > 0);

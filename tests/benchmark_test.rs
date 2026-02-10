@@ -123,7 +123,7 @@ fn benchmark_mccfr_training_throughput() {
 
     let abstraction = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
         abstraction: &abstraction,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -168,7 +168,7 @@ fn benchmark_warm_start_vs_cold_start() {
 
     let abstraction = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
         abstraction: &abstraction,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,

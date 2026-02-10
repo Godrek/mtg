@@ -98,7 +98,7 @@ fn main() {
     println!("MCCFR Goldfish Training");
     println!("==================\n");
 
-    let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+    let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
 
     goldfish_mccfr_report(&db, &red_deck, "Red Aggro", &config, 50, 1000, &greedy_red);
 

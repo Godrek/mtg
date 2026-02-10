@@ -13,6 +13,7 @@
 //! Options (via environment variables):
 //!   ITERATIONS=100    Number of MCCFR training iterations (default: 100)
 //!   DEPTH=10          Max tree depth per traversal (default: 10)
+//!   NODES=100000      Max nodes per iteration, 0=unlimited (default: 100000)
 //!   GAMES=1000        Number of simulation games (default: 1000)
 //!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
 
@@ -40,6 +41,10 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
+    let max_nodes: u32 = std::env::var("NODES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100_000);
     let num_games: u64 = std::env::var("GAMES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -59,6 +64,7 @@ fn main() {
     println!("Deck:       {} ({})", deck_name, commander_name);
     println!("Iterations: {}", iterations);
     println!("Depth:      {}", max_depth);
+    println!("Node budget:{}", if max_nodes == 0 { "unlimited".to_string() } else { format!("{}", max_nodes) });
     println!("Sim games:  {}", num_games);
     println!();
 
@@ -75,6 +81,7 @@ fn main() {
     let config = McfrConfig {
         max_depth,
         max_actions: 2000,
+        max_nodes_per_iteration: max_nodes,
     };
     let abstraction = BucketedAbstraction;
 
