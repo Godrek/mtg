@@ -1183,10 +1183,10 @@ fn test_commander_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
 }
 
 #[test]
-fn test_commander_goldfish_thrun_deck() {
-    // Test with a different commander deck (Thrun, green creatures).
+fn test_commander_goldfish_kinnan_deck() {
+    // Test with the Kinnan, Bonder Prodigy commander deck (Simic mana ramp).
     let db = sample::build_sample_db();
-    let (deck, commander) = sample::thrun_commander_deck();
+    let (deck, commander) = sample::kinnan_commander_deck();
     let state = setup_commander_goldfish_game(&deck, commander);
 
     let bucketed = BucketedAbstraction;
@@ -1204,7 +1204,7 @@ fn test_commander_goldfish_thrun_deck() {
     let greedy_results = simulate_commander_goldfish(&db, &deck, commander, &GreedyStrategy, num_games);
     let mccfr_results = simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
 
-    eprintln!("\n=== Commander Goldfish (Thrun, {} games) ===", num_games);
+    eprintln!("\n=== Commander Goldfish (Kinnan, {} games) ===", num_games);
     eprintln!(
         "Greedy:  win={:.0}%  avg_kill=T{:.2}",
         greedy_results.win_rate() * 100.0,
