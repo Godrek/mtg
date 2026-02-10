@@ -2316,9 +2316,72 @@ pub fn reshuffle_opening_hand(state: &mut GameState) {
     // Commander games start in Mulligan phase; non-commander skip straight to Turn 1
     if state.is_commander_format() {
         state.phase = Phase::Mulligan;
+        // Resolve mulligans immediately using a greedy heuristic so the MCCFR
+        // traversal starts from a post-mulligan state. Full-width exploration
+        // of the mulligan tree (especially N sequential bottom-card decisions
+        // from 7 cards) causes combinatorial explosion in traverse_goldfish.
+        // Training still sees mulliganed hands because the heuristic will
+        // mulligan bad hands, producing starting positions with 6 or fewer cards.
+        resolve_mulligans_with_heuristic(state);
     } else {
         state.phase = Phase::Untap;
         execute_phase_entry(state);
+    }
+}
+
+/// Resolve the Mulligan phase using a simple land-count heuristic.
+///
+/// Uses the same logic as `GreedyStrategy`: keep hands with 2-5 lands,
+/// mulligan otherwise (up to 2 mulligans), bottom highest-CMC non-lands.
+///
+/// This is separate from `GreedyStrategy` to avoid a dependency from
+/// `rules` on `strategy` and to keep the logic self-contained.
+fn resolve_mulligans_with_heuristic(state: &mut GameState) {
+    while state.phase == Phase::Mulligan {
+        let player = state.priority_player;
+        let ps = &state.players[player];
+
+        if !ps.mulligan_decided {
+            // Keep/mulligan decision: count lands in hand
+            let land_count = ps.hand.iter().filter(|&&obj_id| {
+                state.objects.get(&obj_id).map_or(false, |inst| {
+                    state.card_db().get(inst.card_def_id).map_or(false, |d| d.is_land())
+                })
+            }).count();
+
+            let action = if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
+                Action::MulliganKeep
+            } else {
+                Action::MulliganMulligan
+            };
+            apply_action(state, &action);
+            continue;
+        }
+
+        // Bottom-card decision: bottom the highest-CMC non-land
+        let target_hand_size = 7u32.saturating_sub(ps.mulligan_count) as usize;
+        if ps.hand.len() > target_hand_size {
+            let mut worst_obj = ps.hand[0];
+            let mut worst_score = -1i32;
+            for &obj_id in &ps.hand {
+                if let Some(inst) = state.objects.get(&obj_id) {
+                    let def = state.card_db().get(inst.card_def_id);
+                    let score = if def.map_or(false, |d| d.is_land()) {
+                        0 // keep lands
+                    } else {
+                        def.map_or(5, |d| d.cmc() as i32)
+                    };
+                    if score > worst_score {
+                        worst_score = score;
+                        worst_obj = obj_id;
+                    }
+                }
+            }
+            apply_action(state, &Action::MulliganBottomCard { object_id: worst_obj });
+        } else {
+            // Should not happen — advance_mulligan transitions out
+            break;
+        }
     }
 }
 
