@@ -55,6 +55,7 @@
 //! - **Checkpointing** — serialize regret tables to disk every N iterations
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use rand::Rng;
 
@@ -79,6 +80,14 @@ pub struct McfrConfig {
 /// Default maximum actions before declaring a draw in MCCFR training.
 /// Prevents infinite loops while being high enough for realistic games.
 pub const DEFAULT_MAX_ACTIONS: u32 = 10_000;
+
+/// Returns the number of threads in the rayon thread pool.
+///
+/// Use this as the default `num_shards` for parallel training functions,
+/// rather than calling `rayon::current_num_threads()` directly from callers.
+pub fn default_num_shards() -> u32 {
+    rayon::current_num_threads() as u32
+}
 
 impl Default for McfrConfig {
     fn default() -> Self {
@@ -625,6 +634,194 @@ pub fn load_checkpoint(
     }
 
     Ok(tables)
+}
+
+// =========================================================================
+// Parallel Goldfish MCCFR Training
+// =========================================================================
+
+/// Train goldfish MCCFR in parallel using rayon.
+///
+/// Each thread runs independent iterations on its own sharded regret table.
+/// After all iterations complete, the sharded tables are merged by summing
+/// cumulative regret and cumulative strategy values — the same approach
+/// used by `train_parallel` for 2-player MCCFR.
+///
+/// # Arguments
+///
+/// * `initial_state` — Starting game state for each iteration.
+/// * `num_iterations` — Total iterations to run across all threads.
+/// * `num_shards` — Number of independent table shards (typically = number of CPU cores).
+/// * `config` — MCCFR configuration.
+pub fn train_goldfish_parallel(
+    initial_state: &GameState,
+    num_iterations: u32,
+    num_shards: u32,
+    config: &McfrConfig,
+) -> [RegretTable; 2] {
+    train_goldfish_parallel_with_progress(
+        initial_state,
+        num_iterations,
+        num_shards,
+        config,
+        &IdentityAbstraction,
+        0,
+        None,
+        None,
+        |_, _, _| {},
+    )
+}
+
+/// Train goldfish MCCFR in parallel with information set abstraction.
+///
+/// # Arguments
+///
+/// * `initial_state` — Starting game state for each iteration.
+/// * `num_iterations` — Total iterations to run across all threads.
+/// * `num_shards` — Number of independent table shards (typically = number of CPU cores).
+/// * `config` — MCCFR configuration.
+/// * `abstraction` — Information set abstraction to use.
+/// * `pilot` — Which player is optimized (typically 0).
+pub fn train_goldfish_parallel_with_abstraction(
+    initial_state: &GameState,
+    num_iterations: u32,
+    num_shards: u32,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    pilot: PlayerIndex,
+) -> [RegretTable; 2] {
+    train_goldfish_parallel_with_progress(
+        initial_state,
+        num_iterations,
+        num_shards,
+        config,
+        abstraction,
+        pilot,
+        None,
+        None,
+        |_, _, _| {},
+    )
+}
+
+/// Train goldfish MCCFR in parallel with progress reporting and checkpointing.
+///
+/// An `AtomicU32` progress counter is shared across all shards. Each thread
+/// increments the counter after completing an iteration, so the callback can
+/// report aggregate progress without lock contention.
+///
+/// The callback receives `(completed_iterations, total_iterations, &progress_counter)`.
+/// Because tables are shard-private, the callback cannot inspect regret tables
+/// mid-training — use checkpointing for intermediate snapshots.
+///
+/// # Arguments
+///
+/// * `initial_state` — Starting game state for each iteration.
+/// * `num_iterations` — Total iterations to run across all threads.
+/// * `num_shards` — Number of independent table shards.
+/// * `config` — MCCFR configuration.
+/// * `abstraction` — Information set abstraction to use.
+/// * `pilot` — Which player is optimized (typically 0).
+/// * `checkpoint_interval` — If `Some(n)`, save per-shard checkpoints every n iterations.
+/// * `checkpoint_dir` — Directory for checkpoints.
+/// * `on_progress` — Called from each shard after each iteration with
+///   `(completed_globally, total, &AtomicU32)`.
+pub fn train_goldfish_parallel_with_progress<F>(
+    initial_state: &GameState,
+    num_iterations: u32,
+    num_shards: u32,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    pilot: PlayerIndex,
+    checkpoint_interval: Option<u32>,
+    checkpoint_dir: Option<&str>,
+    on_progress: F,
+) -> [RegretTable; 2]
+where
+    F: Fn(u32, u32, &AtomicU32) + Send + Sync,
+{
+    use rayon::prelude::*;
+
+    let iterations_per_shard = num_iterations / num_shards;
+    let remainder = num_iterations % num_shards;
+    let progress = AtomicU32::new(0);
+
+    let shard_results: Vec<[RegretTable; 2]> = (0..num_shards)
+        .into_par_iter()
+        .map(|shard_idx| {
+            let iters = if shard_idx < remainder {
+                iterations_per_shard + 1
+            } else {
+                iterations_per_shard
+            };
+
+            if iters == 0 {
+                return [RegretTable::new(), RegretTable::new()];
+            }
+
+            let mut regret_tables = [RegretTable::new(), RegretTable::new()];
+            let goldfish = crate::strategy::GoldfishStrategy;
+
+            for i in 0..iters {
+                let state = initial_state.clone();
+                traverse_goldfish(
+                    state,
+                    &mut regret_tables[pilot as usize],
+                    config,
+                    abstraction,
+                    &goldfish,
+                    pilot,
+                    0,
+                    0,
+                );
+
+                let completed = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                on_progress(completed, num_iterations, &progress);
+
+                // Per-shard checkpointing
+                if let Some(interval) = checkpoint_interval {
+                    if interval > 0 && (i + 1) % interval == 0 {
+                        if let Some(dir) = checkpoint_dir {
+                            let shard_dir = format!("{}/shard_{}", dir, shard_idx);
+                            let _ = save_checkpoint(&regret_tables, &shard_dir, i + 1);
+                        }
+                    }
+                }
+            }
+
+            regret_tables
+        })
+        .collect();
+
+    merge_regret_tables(&shard_results)
+}
+
+// =========================================================================
+// Basic Parallel MCCFR Training (2-player)
+// =========================================================================
+
+/// Train 2-player MCCFR in parallel using rayon with default settings.
+///
+/// This is the parallel equivalent of `train()` — uses identity abstraction
+/// and heuristic evaluation, but distributes iterations across multiple threads.
+/// Delegates to `train_parallel` with a default `TrainConfig`.
+///
+/// # Arguments
+///
+/// * `initial_state` — Starting game state for each iteration.
+/// * `num_iterations` — Total iterations to run across all threads.
+/// * `num_shards` — Number of independent table shards (typically = number of CPU cores).
+/// * `config` — MCCFR configuration.
+pub fn train_parallel_basic(
+    initial_state: &GameState,
+    num_iterations: u32,
+    num_shards: u32,
+    config: &McfrConfig,
+) -> [RegretTable; 2] {
+    let train_config = TrainConfig {
+        mccfr: config.clone(),
+        ..TrainConfig::default()
+    };
+    train_parallel(initial_state, num_iterations, num_shards, &train_config)
 }
 
 // =========================================================================
@@ -1431,5 +1628,67 @@ mod tests {
         assert!(stats.total_visits[0] > 0);
         assert!(stats.memory_bytes[0] > 0);
         assert!(stats.exploitability.is_finite());
+    }
+
+    #[test]
+    fn test_train_goldfish_parallel() {
+        use crate::card::sample;
+        use std::sync::Arc;
+
+        let db = sample::build_sample_db();
+        let deck = sample::red_aggro_deck();
+
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_game(&mut state, &deck, &deck);
+
+        let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+        let tables = train_goldfish_parallel(&state, 8, 4, &config);
+
+        // Pilot's table should have entries
+        assert!(tables[0].num_info_sets() > 0, "Parallel goldfish training should create info sets");
+        let total_visits: u64 = tables[0].data.values().map(|d| d.visit_count).sum();
+        assert!(total_visits > 0, "Parallel goldfish training should accumulate visits");
+        // Opponent's table should remain empty (goldfish)
+        assert_eq!(tables[1].num_info_sets(), 0, "Opponent table should be empty in goldfish mode");
+    }
+
+    #[test]
+    fn test_train_parallel_basic() {
+        use crate::card::sample;
+        use std::sync::Arc;
+
+        let db = sample::build_sample_db();
+        let deck0 = sample::mini_red_burn();
+        let deck1 = sample::mini_red_creatures();
+
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_game(&mut state, &deck0, &deck1);
+
+        let config = McfrConfig { max_depth: 8, max_actions: 200 };
+        let tables = train_parallel_basic(&state, 8, 4, &config);
+
+        // Both players should have info set entries
+        let total_info_sets: usize = tables.iter().map(|t| t.num_info_sets()).sum();
+        assert!(total_info_sets > 0, "Parallel basic training should create entries");
+    }
+
+    #[test]
+    fn test_train_goldfish_parallel_more_shards_than_iterations() {
+        use crate::card::sample;
+        use std::sync::Arc;
+
+        let db = sample::build_sample_db();
+        let deck = sample::red_aggro_deck();
+
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_game(&mut state, &deck, &deck);
+
+        let config = McfrConfig { max_depth: 8, max_actions: 1000 };
+        // 2 iterations spread across 8 shards: should not panic
+        let tables = train_goldfish_parallel(&state, 2, 8, &config);
+        assert!(tables[0].num_info_sets() > 0);
     }
 }

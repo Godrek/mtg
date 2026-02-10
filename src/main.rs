@@ -18,11 +18,15 @@ fn goldfish_mccfr_report(
     num_games: u64,
     greedy_baseline: &GoldfishResults,
 ) {
-    println!("Training MCCFR for {} goldfish ({} iterations)...", deck_name, iterations);
+    let num_shards = mccfr::default_num_shards();
+    println!(
+        "Training MCCFR for {} goldfish ({} iterations, {} threads)...",
+        deck_name, iterations, num_shards
+    );
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_game(&mut state, deck, deck);
-    let tables = mccfr::train_goldfish(&state, iterations, config);
+    let tables = mccfr::train_goldfish_parallel(&state, iterations, num_shards, config);
 
     let stats = mccfr::training_stats(&tables);
     println!(

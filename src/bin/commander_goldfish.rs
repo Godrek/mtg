@@ -65,7 +65,8 @@ fn main() {
     let card_names = build_card_names(&db, &deck, commander);
 
     // ── 1. Train MCCFR ──────────────────────────────────────────────────
-    println!("Training...");
+    let num_shards = mccfr::default_num_shards();
+    println!("Training ({} threads)...", num_shards);
     let mut state = GameState::new_commander(2);
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
@@ -77,34 +78,37 @@ fn main() {
     let abstraction = BucketedAbstraction;
 
     let t0 = Instant::now();
-    let last_print = std::cell::Cell::new(Instant::now());
-    let tables = mccfr::train_goldfish_with_progress(
+    let last_print_secs = std::sync::atomic::AtomicU32::new(0);
+    let tables = mccfr::train_goldfish_parallel_with_progress(
         &state,
         iterations,
+        num_shards,
         &config,
         &abstraction,
         0,
-        |iter, total, tables| {
+        None,
+        None,
+        |completed, total, _progress| {
             let now = Instant::now();
-            // Print on first iteration, every 2 seconds, and on the last iteration.
-            let should_print = iter == 1
-                || iter == total
-                || now.duration_since(last_print.get()).as_secs_f64() >= 2.0;
+            let elapsed = now.duration_since(t0).as_secs_f64();
+            // Throttle output: print on first, last, and every ~2 seconds.
+            let elapsed_secs = elapsed as u32;
+            let prev = last_print_secs.load(std::sync::atomic::Ordering::Relaxed);
+            let should_print = completed == 1
+                || completed == total
+                || (elapsed_secs >= prev + 2);
             if !should_print {
                 return;
             }
-            last_print.set(now);
-            let elapsed = now.duration_since(t0).as_secs_f64();
-            let info_sets = tables[0].num_info_sets();
-            let exploit = mccfr::approximate_exploitability(tables);
-            let eta = if iter > 0 {
-                elapsed / iter as f64 * (total - iter) as f64
+            last_print_secs.store(elapsed_secs, std::sync::atomic::Ordering::Relaxed);
+            let eta = if completed > 0 {
+                elapsed / completed as f64 * (total - completed) as f64
             } else {
                 0.0
             };
             eprint!(
-                "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s | info_sets: {} | exploit: {:.6}   ",
-                iter, total, elapsed, eta, info_sets, exploit,
+                "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
+                completed, total, elapsed, eta,
             );
         },
     );
