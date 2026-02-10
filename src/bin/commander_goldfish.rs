@@ -77,9 +77,39 @@ fn main() {
     let abstraction = BucketedAbstraction;
 
     let t0 = Instant::now();
-    let tables =
-        mccfr::train_goldfish_with_abstraction(&state, iterations, &config, &abstraction, 0);
+    let last_print = std::cell::Cell::new(Instant::now());
+    let tables = mccfr::train_goldfish_with_progress(
+        &state,
+        iterations,
+        &config,
+        &abstraction,
+        0,
+        |iter, total, tables| {
+            let now = Instant::now();
+            // Print on first iteration, every 2 seconds, and on the last iteration.
+            let should_print = iter == 1
+                || iter == total
+                || now.duration_since(last_print.get()).as_secs_f64() >= 2.0;
+            if !should_print {
+                return;
+            }
+            last_print.set(now);
+            let elapsed = now.duration_since(t0).as_secs_f64();
+            let info_sets = tables[0].num_info_sets();
+            let exploit = mccfr::approximate_exploitability(tables);
+            let eta = if iter > 0 {
+                elapsed / iter as f64 * (total - iter) as f64
+            } else {
+                0.0
+            };
+            eprint!(
+                "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s | info_sets: {} | exploit: {:.6}   ",
+                iter, total, elapsed, eta, info_sets, exploit,
+            );
+        },
+    );
     let train_time = t0.elapsed();
+    eprintln!();
 
     let stats = mccfr::training_stats(&tables);
     let exploit = mccfr::approximate_exploitability(&tables);
