@@ -43,6 +43,44 @@ impl Strategy for GreedyStrategy {
         let actions = legal_actions(state);
         let db = state.card_db();
 
+        // Mulligan heuristic: keep if hand has 2-5 lands, otherwise mulligan
+        if state.phase == crate::game::Phase::Mulligan {
+            let player = state.priority_player;
+            let ps = &state.players[player];
+            if !ps.mulligan_decided {
+                let land_count = ps.hand.iter().filter(|&&obj_id| {
+                    let inst = &state.objects[&obj_id];
+                    db.get(inst.card_def_id).map_or(false, |d| d.is_land())
+                }).count();
+                // Keep if 2-5 lands, or if already mulliganed twice
+                if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
+                    return Action::MulliganKeep;
+                }
+                return Action::MulliganMulligan;
+            }
+            // Bottoming: put the highest-CMC non-land card on bottom
+            let mut worst_card = None;
+            let mut worst_score = -1i32;
+            for action in &actions {
+                if let Action::MulliganBottomCard { object_id } = action {
+                    let inst = &state.objects[object_id];
+                    let def = db.get(inst.card_def_id);
+                    let score = if def.map_or(false, |d| d.is_land()) {
+                        // Lands get low score (keep them)
+                        0
+                    } else {
+                        // Non-lands scored by CMC (bottom expensive ones)
+                        def.map_or(5, |d| d.cmc() as i32)
+                    };
+                    if score > worst_score {
+                        worst_score = score;
+                        worst_card = Some(action.clone());
+                    }
+                }
+            }
+            return worst_card.unwrap_or(actions[0].clone());
+        }
+
         // Priority 0: If we must order triggers or replacement effects, pick
         // the first ordering (FIFO). A real MCCFR solver would evaluate all
         // orderings; greedy just uses FIFO.
@@ -289,6 +327,18 @@ pub struct GoldfishStrategy;
 impl Strategy for GoldfishStrategy {
     fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
         let actions = legal_actions(state);
+
+        // Mulligan: always keep; bottom first card if forced (shouldn't happen
+        // since keeping at mulligan_count=0 means no bottoming, but handle it
+        // defensively so GoldfishStrategy is safe to use in any context).
+        if state.phase == crate::game::Phase::Mulligan {
+            for action in &actions {
+                if matches!(action, Action::MulliganBottomCard { .. }) {
+                    return action.clone();
+                }
+            }
+            return Action::MulliganKeep;
+        }
 
         // Handle mandatory actions that can't be skipped
 

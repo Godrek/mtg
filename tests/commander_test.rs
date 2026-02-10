@@ -487,3 +487,163 @@ fn test_commander_greedy_vs_random() {
         results.player1_wins,
     );
 }
+
+// ---------------------------------------------------------------------------
+// London Mulligan
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_commander_starts_in_mulligan_phase() {
+    let db = sample::build_sample_db();
+    let (deck, cmd) = sample::brimaz_commander_deck();
+
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
+
+    assert_eq!(state.phase, Phase::Mulligan);
+    assert_eq!(state.players[0].hand.len(), 7);
+    assert_eq!(state.players[1].hand.len(), 7);
+    assert!(!state.players[0].mulligan_decided);
+    assert!(!state.players[1].mulligan_decided);
+}
+
+#[test]
+fn test_mulligan_keep_advances_to_next_player() {
+    let db = sample::build_sample_db();
+    let (deck, cmd) = sample::brimaz_commander_deck();
+
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
+
+    // P0 keeps
+    assert_eq!(state.priority_player, 0);
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+
+    // Should advance to P1 (still in Mulligan phase)
+    assert_eq!(state.phase, Phase::Mulligan);
+    assert_eq!(state.priority_player, 1);
+    assert!(state.players[0].mulligan_decided);
+    assert!(!state.players[1].mulligan_decided);
+}
+
+#[test]
+fn test_mulligan_both_keep_transitions_to_untap() {
+    let db = sample::build_sample_db();
+    let (deck, cmd) = sample::brimaz_commander_deck();
+
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
+
+    // Both players keep
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+
+    // Should have transitioned out of Mulligan phase
+    assert_ne!(state.phase, Phase::Mulligan);
+    assert_eq!(state.players[0].hand.len(), 7);
+    assert_eq!(state.players[1].hand.len(), 7);
+}
+
+#[test]
+fn test_mulligan_once_then_keep_requires_bottom_one() {
+    let db = sample::build_sample_db();
+    let (deck, cmd) = sample::brimaz_commander_deck();
+
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
+
+    // P0 mulligans once
+    let old_hand: Vec<_> = state.players[0].hand.clone();
+    rules::apply_action(&mut state, &Action::MulliganMulligan);
+    assert_eq!(state.players[0].mulligan_count, 1);
+    assert_eq!(state.players[0].hand.len(), 7); // drew 7 new cards
+    assert!(!state.players[0].mulligan_decided);
+
+    // P0 keeps (now needs to bottom 1 card)
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+    assert!(state.players[0].mulligan_decided);
+
+    // Still in Mulligan phase — need to bottom a card
+    assert_eq!(state.phase, Phase::Mulligan);
+    assert_eq!(state.priority_player, 0);
+
+    // Legal actions should be MulliganBottomCard for each card in hand
+    let actions = legal_actions(&state);
+    assert_eq!(actions.len(), 7);
+    assert!(actions.iter().all(|a| matches!(a, Action::MulliganBottomCard { .. })));
+
+    // Bottom a card
+    let bottom_action = actions[0].clone();
+    rules::apply_action(&mut state, &bottom_action);
+
+    // P0 now has 6 cards; priority passes to P1
+    assert_eq!(state.players[0].hand.len(), 6);
+    assert_eq!(state.priority_player, 1);
+
+    // P1 keeps → game starts
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+    assert_ne!(state.phase, Phase::Mulligan);
+    assert_eq!(state.players[0].hand.len(), 6);
+    assert_eq!(state.players[1].hand.len(), 7);
+}
+
+#[test]
+fn test_mulligan_twice_bottoms_two() {
+    let db = sample::build_sample_db();
+    let (deck, cmd) = sample::brimaz_commander_deck();
+
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(Arc::new(db));
+    rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
+
+    // P0 mulligans twice
+    rules::apply_action(&mut state, &Action::MulliganMulligan);
+    rules::apply_action(&mut state, &Action::MulliganMulligan);
+    assert_eq!(state.players[0].mulligan_count, 2);
+
+    // P0 keeps
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+
+    // Bottom 2 cards
+    let actions = legal_actions(&state);
+    assert_eq!(actions.len(), 7); // 7 cards to choose from
+    rules::apply_action(&mut state, &actions[0].clone());
+    assert_eq!(state.players[0].hand.len(), 6);
+    assert_eq!(state.priority_player, 0); // still P0's turn to bottom
+
+    let actions = legal_actions(&state);
+    assert_eq!(actions.len(), 6); // 6 cards to choose from
+    rules::apply_action(&mut state, &actions[0].clone());
+    assert_eq!(state.players[0].hand.len(), 5);
+
+    // Now P1 decides
+    assert_eq!(state.priority_player, 1);
+    rules::apply_action(&mut state, &Action::MulliganKeep);
+
+    // Game started, P0 has 5 cards
+    assert_ne!(state.phase, Phase::Mulligan);
+    assert_eq!(state.players[0].hand.len(), 5);
+    assert_eq!(state.players[1].hand.len(), 7);
+}
+
+#[test]
+fn test_mulligan_full_game_with_greedy() {
+    // Verify a full commander game completes correctly when mulligans are active
+    let db = sample::build_sample_db();
+    let (deck0, cmd0) = sample::brimaz_commander_deck();
+    let (deck1, cmd1) = sample::thrun_commander_deck();
+
+    let greedy = GreedyStrategy;
+    let result = simulation::run_commander_game(
+        &db, &deck0, &deck1, cmd0, cmd1, &greedy, &greedy,
+    );
+
+    assert!(
+        result.winner.is_some() || result.turns >= 200,
+        "Commander game with mulligans should complete"
+    );
+}

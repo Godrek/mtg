@@ -77,6 +77,9 @@ pub struct InformationSet {
     pub opp_command_zone: Vec<u64>,
     /// Commander tax (number of times commander has been cast from command zone).
     pub my_commander_tax: u32,
+
+    /// Number of times we've mulliganed (relevant during Mulligan phase).
+    pub my_mulligan_count: u32,
 }
 
 /// Observable information about a permanent on the battlefield.
@@ -216,6 +219,7 @@ impl InformationSet {
             my_command_zone,
             opp_command_zone,
             my_commander_tax: view.my_commander_tax,
+            my_mulligan_count: view.my_mulligan_count,
         }
     }
 
@@ -245,6 +249,7 @@ impl InformationSet {
         self.my_command_zone.hash(&mut hasher);
         self.opp_command_zone.hash(&mut hasher);
         self.my_commander_tax.hash(&mut hasher);
+        self.my_mulligan_count.hash(&mut hasher);
         hasher.finish()
     }
 }
@@ -253,6 +258,7 @@ impl InformationSet {
 fn phase_to_u8(phase: crate::game::Phase) -> u8 {
     use crate::game::Phase;
     match phase {
+        Phase::Mulligan => 13,
         Phase::Untap => 0,
         Phase::Upkeep => 1,
         Phase::Draw => 2,
@@ -479,6 +485,9 @@ impl InfoSetAbstraction for BucketedAbstraction {
         opp_cmd_count.hash(&mut hasher);
         info_set.my_commander_tax.hash(&mut hasher);
 
+        // Mulligan count (distinguishes 1st mulligan from 2nd, etc.)
+        info_set.my_mulligan_count.hash(&mut hasher);
+
         hasher.finish()
     }
 
@@ -616,6 +625,9 @@ impl<'a> InfoSetAbstraction for CardAwareBucketedAbstraction<'a> {
         my_cmd_count.hash(&mut hasher);
         opp_cmd_count.hash(&mut hasher);
         info_set.my_commander_tax.hash(&mut hasher);
+
+        // Mulligan count
+        info_set.my_mulligan_count.hash(&mut hasher);
 
         hasher.finish()
     }
