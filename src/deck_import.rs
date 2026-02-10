@@ -63,6 +63,10 @@ enum DeckSection {
     Mainboard,
     /// ~~Commanders~~ section — cards go into the commanders list.
     Commanders,
+    /// ~~Tutor Targets~~ section — cards that tutors can search for.
+    /// Restricts the search space so MCCFR can choose among a bounded
+    /// set of targets rather than the entire library.
+    TutorTargets,
 }
 
 /// Parse a single card line of the form "N Card Name" and return (card_id, quantity).
@@ -139,6 +143,8 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
     let mut main_indices: HashMap<u64, usize> = HashMap::new();
     let mut commander_entries: Vec<DeckEntry> = Vec::new();
     let mut commander_indices: HashMap<u64, usize> = HashMap::new();
+    let mut tutor_target_ids: Vec<u64> = Vec::new();
+    let mut tutor_target_seen: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     let mut section = DeckSection::Mainboard;
 
@@ -159,6 +165,9 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
                 "mainboard" | "main" | "maindeck" => {
                     section = DeckSection::Mainboard;
                 }
+                "tutor targets" | "tutortargets" | "tutor_targets" | "targets" => {
+                    section = DeckSection::TutorTargets;
+                }
                 _ => {
                     // Unknown section — treat as mainboard
                     section = DeckSection::Mainboard;
@@ -176,6 +185,12 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
             DeckSection::Mainboard => {
                 insert_entry(&mut main_entries, &mut main_indices, card_id, quantity);
             }
+            DeckSection::TutorTargets => {
+                // For tutor targets, only the card identity matters (quantity is ignored).
+                if tutor_target_seen.insert(card_id) {
+                    tutor_target_ids.push(card_id);
+                }
+            }
         }
     }
 
@@ -183,5 +198,6 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
         name: deck_name,
         cards: main_entries,
         commanders: commander_entries,
+        tutor_targets: tutor_target_ids,
     })
 }

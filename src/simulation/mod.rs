@@ -602,6 +602,14 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
         crate::action::Action::OrderTriggers { ordering } => {
             format!("Order {} triggers", ordering.len())
         }
+        crate::action::Action::ChooseTutorTarget { card_id } => {
+            format!(
+                "Tutor for {}",
+                db.get(*card_id)
+                    .map(|d| d.name.as_str())
+                    .unwrap_or("?")
+            )
+        }
         other => format!("{}", other),
     };
     eprintln!(

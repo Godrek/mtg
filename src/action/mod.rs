@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::card::{KeywordAbility, ObjectId};
+use crate::card::{CardId, KeywordAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex, Target};
 
 /// Controls whether combat actions use full enumeration or strategic bucketing.
@@ -99,6 +99,12 @@ pub enum Action {
     /// The player must bottom N cards where N = mulligan_count.
     MulliganBottomCard { object_id: ObjectId },
 
+    /// Choose a card to find from the library when a tutor effect resolves.
+    /// The `card_id` identifies the card template to search for. Only cards
+    /// in the player's `tutor_targets` list that exist in the library are
+    /// offered as choices. MCCFR learns the optimal target per game state.
+    ChooseTutorTarget { card_id: CardId },
+
     /// Concede the game.
     Concede,
 
@@ -143,6 +149,9 @@ impl fmt::Display for Action {
             Action::MulliganMulligan => write!(f, "Mulligan"),
             Action::MulliganBottomCard { object_id } => {
                 write!(f, "Bottom card (obj {})", object_id)
+            }
+            Action::ChooseTutorTarget { card_id } => {
+                write!(f, "Tutor for card {}", card_id)
             }
             Action::Concede => write!(f, "Concede"),
             Action::ActivateMacro { combo_id } => {
@@ -224,6 +233,21 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
 
             for perm in generate_permutations(&keys) {
                 actions.push(Action::OrderTriggers { ordering: perm });
+            }
+            actions.push(Action::Concede);
+            return actions;
+        }
+    }
+
+    // ---- Pending tutor: player must choose a card from their library ----
+    if let Some(ref pending) = state.pending_tutor {
+        if pending.controller == player {
+            let available = tutor_target_actions(state, player);
+            if available.is_empty() {
+                // No valid targets in library — "fail to find" (pass clears it)
+                actions.push(Action::PassPriority);
+            } else {
+                actions.extend(available);
             }
             actions.push(Action::Concede);
             return actions;
@@ -648,6 +672,28 @@ fn enumerate_targets_for_spell(
         Effect::SacrificeCreatures { target, .. } => targets_for_spec(state, caster, target),
         _ => vec![], // non-targeted spells (DestroyAll, GainLife, DrawCards, etc.)
     }
+}
+
+/// Enumerate valid tutor target actions for a player with a pending tutor.
+///
+/// Returns `ChooseTutorTarget` actions for each distinct card in the player's
+/// library that is also in their `tutor_targets` list. Deduplicates by CardId
+/// so MCCFR sees one action per card type, not per copy.
+fn tutor_target_actions(state: &GameState, player: PlayerIndex) -> Vec<Action> {
+    let targets = &state.players[player].tutor_targets;
+    let library = &state.players[player].library;
+
+    let mut seen = HashSet::new();
+    let mut actions = Vec::new();
+
+    for &obj_id in library {
+        let card_id = state.objects[&obj_id].card_def_id;
+        if targets.contains(&card_id) && seen.insert(card_id) {
+            actions.push(Action::ChooseTutorTarget { card_id });
+        }
+    }
+
+    actions
 }
 
 /// Generate subsets of up to `max_size` elements from `items`.
