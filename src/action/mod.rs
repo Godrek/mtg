@@ -155,7 +155,7 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
 }
 
 /// Maximum number of mulligans allowed before auto-keeping.
-const MAX_MULLIGANS: u32 = 4;
+pub const MAX_MULLIGANS: u32 = 4;
 
 /// Core action enumeration with configurable combat abstraction level.
 fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<Action> {

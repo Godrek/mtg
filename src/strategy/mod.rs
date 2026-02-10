@@ -328,8 +328,15 @@ impl Strategy for GoldfishStrategy {
     fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
         let actions = legal_actions(state);
 
-        // Mulligan: always keep
+        // Mulligan: always keep; bottom first card if forced (shouldn't happen
+        // since keeping at mulligan_count=0 means no bottoming, but handle it
+        // defensively so GoldfishStrategy is safe to use in any context).
         if state.phase == crate::game::Phase::Mulligan {
+            for action in &actions {
+                if matches!(action, Action::MulliganBottomCard { .. }) {
+                    return action.clone();
+                }
+            }
             return Action::MulliganKeep;
         }
 

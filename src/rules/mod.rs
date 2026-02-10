@@ -364,6 +364,12 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
 
         Action::MulliganMulligan => {
             let player = state.priority_player;
+            debug_assert!(
+                state.players[player].mulligan_count < crate::action::MAX_MULLIGANS,
+                "MulliganMulligan applied but player {} already at max mulligans ({})",
+                player,
+                state.players[player].mulligan_count,
+            );
             // Shuffle hand back into library
             let hand: Vec<crate::card::ObjectId> = state.players[player].hand.drain(..).collect();
             for obj_id in hand {

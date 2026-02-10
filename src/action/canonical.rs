@@ -119,9 +119,10 @@ pub enum CanonicalAction {
     MulliganMulligan,
 
     /// Put a card on the bottom of the library after keeping a mulliganed hand.
+    /// Uses card_id only (no hand_index) because which *copy* to bottom is
+    /// strategically irrelevant — the decision is "bottom this card or not".
     MulliganBottomCard {
         card_id: CardId,
-        hand_index: usize,
     },
 
     Concede,
@@ -297,9 +298,7 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::MulliganMulligan => CanonicalAction::MulliganMulligan,
         Action::MulliganBottomCard { object_id } => {
             let inst = &state.objects[object_id];
-            let card_id = inst.card_def_id;
-            let hand_index = hand_instance_index(state, inst.owner, *object_id);
-            CanonicalAction::MulliganBottomCard { card_id, hand_index }
+            CanonicalAction::MulliganBottomCard { card_id: inst.card_def_id }
         }
     }
 }
@@ -481,8 +480,9 @@ pub fn resolve(
 
         CanonicalAction::MulliganKeep => Some(Action::MulliganKeep),
         CanonicalAction::MulliganMulligan => Some(Action::MulliganMulligan),
-        CanonicalAction::MulliganBottomCard { card_id, hand_index } => {
-            let obj_id = find_in_hand_by_index(state, player, *card_id, *hand_index)?;
+        CanonicalAction::MulliganBottomCard { card_id } => {
+            // Match first instance — strategically equivalent for duplicates
+            let obj_id = find_in_hand_by_index(state, player, *card_id, 0)?;
             Some(Action::MulliganBottomCard { object_id: obj_id })
         }
     }
