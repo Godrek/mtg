@@ -17,6 +17,7 @@
 //!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -78,7 +79,36 @@ fn main() {
     let abstraction = BucketedAbstraction;
 
     let t0 = Instant::now();
-    let last_print_secs = std::sync::atomic::AtomicU32::new(0);
+    let progress_counter = Arc::new(AtomicU32::new(0));
+    let training_done = Arc::new(AtomicBool::new(false));
+
+    // Spawn a background thread that prints progress every 2 seconds,
+    // so the user sees updates even while a long iteration is in-flight.
+    let printer_handle = {
+        let progress = progress_counter.clone();
+        let done = training_done.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                let completed = progress.load(Ordering::Relaxed);
+                let elapsed = t0.elapsed().as_secs_f64();
+                let eta = if completed > 0 {
+                    elapsed / completed as f64 * (iterations - completed) as f64
+                } else {
+                    0.0
+                };
+                eprint!(
+                    "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
+                    completed, iterations, elapsed, eta,
+                );
+            }
+        })
+    };
+
+    let progress_for_callback = progress_counter.clone();
     let tables = mccfr::train_goldfish_parallel_with_progress(
         &state,
         iterations,
@@ -88,32 +118,19 @@ fn main() {
         0,
         None,
         None,
-        |completed, total, _progress| {
-            let now = Instant::now();
-            let elapsed = now.duration_since(t0).as_secs_f64();
-            // Throttle output: print on first, last, and every ~2 seconds.
-            let elapsed_secs = elapsed as u32;
-            let prev = last_print_secs.load(std::sync::atomic::Ordering::Relaxed);
-            let should_print = completed == 1
-                || completed == total
-                || (elapsed_secs >= prev + 2);
-            if !should_print {
-                return;
-            }
-            last_print_secs.store(elapsed_secs, std::sync::atomic::Ordering::Relaxed);
-            let eta = if completed > 0 {
-                elapsed / completed as f64 * (total - completed) as f64
-            } else {
-                0.0
-            };
-            eprint!(
-                "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
-                completed, total, elapsed, eta,
-            );
+        |completed, _total, _progress| {
+            progress_for_callback.store(completed, Ordering::Relaxed);
         },
     );
+    training_done.store(true, Ordering::Relaxed);
     let train_time = t0.elapsed();
+    // Print final progress line
+    eprint!(
+        "\r  iter {}/{} | {:.1}s elapsed              ",
+        iterations, iterations, train_time.as_secs_f64(),
+    );
     eprintln!();
+    let _ = printer_handle.join();
 
     let stats = mccfr::training_stats(&tables);
     let exploit = mccfr::approximate_exploitability(&tables);
