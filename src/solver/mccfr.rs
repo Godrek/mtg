@@ -984,10 +984,28 @@ pub fn train_goldfish_with_abstraction(
     abstraction: &dyn InfoSetAbstraction,
     pilot: PlayerIndex,
 ) -> [RegretTable; 2] {
+    train_goldfish_with_progress(initial_state, num_iterations, config, abstraction, pilot, |_, _, _| {})
+}
+
+/// Train goldfish MCCFR with information set abstraction and a progress callback.
+///
+/// The callback is invoked after each iteration with
+/// `(iteration_1based, total_iterations, &regret_tables)`.
+pub fn train_goldfish_with_progress<F>(
+    initial_state: &GameState,
+    num_iterations: u32,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    pilot: PlayerIndex,
+    mut on_progress: F,
+) -> [RegretTable; 2]
+where
+    F: FnMut(u32, u32, &[RegretTable; 2]),
+{
     let mut regret_tables = [RegretTable::new(), RegretTable::new()];
     let goldfish = crate::strategy::GoldfishStrategy;
 
-    for _ in 0..num_iterations {
+    for i in 0..num_iterations {
         let state = initial_state.clone();
         traverse_goldfish(
             state,
@@ -999,6 +1017,7 @@ pub fn train_goldfish_with_abstraction(
             0,
             0,
         );
+        on_progress(i + 1, num_iterations, &regret_tables);
     }
 
     regret_tables
