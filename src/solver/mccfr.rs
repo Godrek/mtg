@@ -55,6 +55,7 @@
 //! - **Checkpointing** — serialize regret tables to disk every N iterations
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use rand::Rng;
 
@@ -79,6 +80,14 @@ pub struct McfrConfig {
 /// Default maximum actions before declaring a draw in MCCFR training.
 /// Prevents infinite loops while being high enough for realistic games.
 pub const DEFAULT_MAX_ACTIONS: u32 = 10_000;
+
+/// Returns the number of threads in the rayon thread pool.
+///
+/// Use this as the default `num_shards` for parallel training functions,
+/// rather than calling `rayon::current_num_threads()` directly from callers.
+pub fn default_num_shards() -> u32 {
+    rayon::current_num_threads() as u32
+}
 
 impl Default for McfrConfig {
     fn default() -> Self {
@@ -650,13 +659,16 @@ pub fn train_goldfish_parallel(
     num_shards: u32,
     config: &McfrConfig,
 ) -> [RegretTable; 2] {
-    train_goldfish_parallel_with_abstraction(
+    train_goldfish_parallel_with_progress(
         initial_state,
         num_iterations,
         num_shards,
         config,
         &IdentityAbstraction,
         0,
+        None,
+        None,
+        |_, _, _| {},
     )
 }
 
@@ -678,10 +690,60 @@ pub fn train_goldfish_parallel_with_abstraction(
     abstraction: &dyn InfoSetAbstraction,
     pilot: PlayerIndex,
 ) -> [RegretTable; 2] {
+    train_goldfish_parallel_with_progress(
+        initial_state,
+        num_iterations,
+        num_shards,
+        config,
+        abstraction,
+        pilot,
+        None,
+        None,
+        |_, _, _| {},
+    )
+}
+
+/// Train goldfish MCCFR in parallel with progress reporting and checkpointing.
+///
+/// An `AtomicU32` progress counter is shared across all shards. Each thread
+/// increments the counter after completing an iteration, so the callback can
+/// report aggregate progress without lock contention.
+///
+/// The callback receives `(completed_iterations, total_iterations, &progress_counter)`.
+/// Because tables are shard-private, the callback cannot inspect regret tables
+/// mid-training — use checkpointing for intermediate snapshots.
+///
+/// # Arguments
+///
+/// * `initial_state` — Starting game state for each iteration.
+/// * `num_iterations` — Total iterations to run across all threads.
+/// * `num_shards` — Number of independent table shards.
+/// * `config` — MCCFR configuration.
+/// * `abstraction` — Information set abstraction to use.
+/// * `pilot` — Which player is optimized (typically 0).
+/// * `checkpoint_interval` — If `Some(n)`, save per-shard checkpoints every n iterations.
+/// * `checkpoint_dir` — Directory for checkpoints.
+/// * `on_progress` — Called from each shard after each iteration with
+///   `(completed_globally, total, &AtomicU32)`.
+pub fn train_goldfish_parallel_with_progress<F>(
+    initial_state: &GameState,
+    num_iterations: u32,
+    num_shards: u32,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    pilot: PlayerIndex,
+    checkpoint_interval: Option<u32>,
+    checkpoint_dir: Option<&str>,
+    on_progress: F,
+) -> [RegretTable; 2]
+where
+    F: Fn(u32, u32, &AtomicU32) + Send + Sync,
+{
     use rayon::prelude::*;
 
     let iterations_per_shard = num_iterations / num_shards;
     let remainder = num_iterations % num_shards;
+    let progress = AtomicU32::new(0);
 
     let shard_results: Vec<[RegretTable; 2]> = (0..num_shards)
         .into_par_iter()
@@ -699,7 +761,7 @@ pub fn train_goldfish_parallel_with_abstraction(
             let mut regret_tables = [RegretTable::new(), RegretTable::new()];
             let goldfish = crate::strategy::GoldfishStrategy;
 
-            for _ in 0..iters {
+            for i in 0..iters {
                 let state = initial_state.clone();
                 traverse_goldfish(
                     state,
@@ -711,6 +773,19 @@ pub fn train_goldfish_parallel_with_abstraction(
                     0,
                     0,
                 );
+
+                let completed = progress.fetch_add(1, Ordering::Relaxed) + 1;
+                on_progress(completed, num_iterations, &progress);
+
+                // Per-shard checkpointing
+                if let Some(interval) = checkpoint_interval {
+                    if interval > 0 && (i + 1) % interval == 0 {
+                        if let Some(dir) = checkpoint_dir {
+                            let shard_dir = format!("{}/shard_{}", dir, shard_idx);
+                            let _ = save_checkpoint(&regret_tables, &shard_dir, i + 1);
+                        }
+                    }
+                }
             }
 
             regret_tables
@@ -728,6 +803,7 @@ pub fn train_goldfish_parallel_with_abstraction(
 ///
 /// This is the parallel equivalent of `train()` — uses identity abstraction
 /// and heuristic evaluation, but distributes iterations across multiple threads.
+/// Delegates to `train_parallel` with a default `TrainConfig`.
 ///
 /// # Arguments
 ///
@@ -741,35 +817,11 @@ pub fn train_parallel_basic(
     num_shards: u32,
     config: &McfrConfig,
 ) -> [RegretTable; 2] {
-    use rayon::prelude::*;
-
-    let iterations_per_shard = num_iterations / num_shards;
-    let remainder = num_iterations % num_shards;
-
-    let shard_results: Vec<[RegretTable; 2]> = (0..num_shards)
-        .into_par_iter()
-        .map(|shard_idx| {
-            let iters = if shard_idx < remainder {
-                iterations_per_shard + 1
-            } else {
-                iterations_per_shard
-            };
-
-            if iters == 0 {
-                return [RegretTable::new(), RegretTable::new()];
-            }
-
-            let mut tables = [RegretTable::new(), RegretTable::new()];
-
-            for _ in 0..iters {
-                run_iteration(initial_state, &mut tables, config);
-            }
-
-            tables
-        })
-        .collect();
-
-    merge_regret_tables(&shard_results)
+    let train_config = TrainConfig {
+        mccfr: config.clone(),
+        ..TrainConfig::default()
+    };
+    train_parallel(initial_state, num_iterations, num_shards, &train_config)
 }
 
 // =========================================================================

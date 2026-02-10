@@ -18,7 +18,7 @@ fn goldfish_mccfr_report(
     num_games: u64,
     greedy_baseline: &GoldfishResults,
 ) {
-    let num_shards = rayon::current_num_threads() as u32;
+    let num_shards = mccfr::default_num_shards();
     println!(
         "Training MCCFR for {} goldfish ({} iterations, {} threads)...",
         deck_name, iterations, num_shards
