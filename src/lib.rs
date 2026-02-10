@@ -1,5 +1,6 @@
 pub mod mana;
 pub mod card;
+pub mod combo;
 pub mod deck_import;
 #[cfg(feature = "scryfall")]
 pub mod scryfall;

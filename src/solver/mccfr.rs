@@ -413,9 +413,14 @@ fn terminal_utility(state: &GameState, player: PlayerIndex) -> f64 {
 
 /// Heuristic evaluation when depth limit is reached.
 ///
-/// Uses a simple life-total-based evaluation:
-/// - Positive when we're ahead on life
-/// - Normalized to [-1, 1] range
+/// Uses a multi-factor evaluation:
+/// - Life total advantage (normalized)
+/// - Board presence (creature power differential)
+/// - Combo proximity bonus (reward shaping for having combo pieces together)
+///
+/// The combo proximity bonus gives partial credit for assembling combo pieces,
+/// incentivizing the solver to collect pieces even before the full combo is
+/// available. This is the "reward shaping" component described in the design.
 fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     use crate::game::GameFormat;
 
@@ -446,7 +451,25 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     let board_diff = (my_power - opp_power) as f64 / 10.0;
     let board_normalized = board_diff.clamp(-0.5, 0.5);
 
-    (normalized * 0.7 + board_normalized * 0.3).clamp(-1.0, 1.0)
+    // Combo proximity bonus: partial credit for having combo pieces on
+    // the battlefield. Differential: my proximity minus opponent's.
+    let combo_bonus = if let Some(ref registry) = state.combo_registry {
+        let my_proximity = crate::combo::combo_proximity_bonus(state, player, registry);
+        let opp_proximity = crate::combo::combo_proximity_bonus(state, opp, registry);
+        (my_proximity - opp_proximity).clamp(-0.3, 0.3)
+    } else {
+        0.0
+    };
+
+    // Mana pool bonus: having a large mana pool (from combo activation)
+    // is worth something — it means the player can cast expensive spells.
+    let my_mana = state.players[player].mana_pool.total() as f64;
+    let opp_mana = state.players[opp].mana_pool.total() as f64;
+    let mana_bonus = ((my_mana - opp_mana) / 50.0).clamp(-0.2, 0.2);
+
+    // Weighted combination with combo awareness
+    let base = normalized * 0.6 + board_normalized * 0.2;
+    (base + combo_bonus + mana_bonus).clamp(-1.0, 1.0)
 }
 
 /// Training loop: run many MCCFR iterations and return the trained regret tables.

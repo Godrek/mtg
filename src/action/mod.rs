@@ -101,6 +101,13 @@ pub enum Action {
 
     /// Concede the game.
     Concede,
+
+    /// Activate a pre-defined combo as a single macro-action.
+    /// The combo_id indexes into the ComboRegistry attached to GameState.
+    /// This collapses an infinite loop (e.g., Basalt Monolith + Kinnan
+    /// for infinite mana) into a single action so the solver doesn't need
+    /// to discover the loop step-by-step through depth.
+    ActivateMacro { combo_id: usize },
 }
 
 impl fmt::Display for Action {
@@ -138,6 +145,9 @@ impl fmt::Display for Action {
                 write!(f, "Bottom card (obj {})", object_id)
             }
             Action::Concede => write!(f, "Concede"),
+            Action::ActivateMacro { combo_id } => {
+                write!(f, "Activate combo #{}", combo_id)
+            }
         }
     }
 }
@@ -436,6 +446,17 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             ability_index: i,
                             targets: vec![], // simplified
                         });
+                    }
+                }
+            }
+
+            // Macro-actions: inject registered combos that are currently available.
+            // Only during main phases (when the player has full priority).
+            if is_main {
+                if let Some(ref registry) = state.combo_registry {
+                    let available = crate::combo::detect_available_combos(state, player, registry);
+                    for combo_id in available {
+                        actions.push(Action::ActivateMacro { combo_id });
                     }
                 }
             }
