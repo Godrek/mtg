@@ -356,6 +356,40 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.consecutive_passes = 0;
         }
 
+        Action::MulliganKeep => {
+            let player = state.priority_player;
+            state.players[player].mulligan_decided = true;
+            advance_mulligan(state);
+        }
+
+        Action::MulliganMulligan => {
+            let player = state.priority_player;
+            // Shuffle hand back into library
+            let hand: Vec<crate::card::ObjectId> = state.players[player].hand.drain(..).collect();
+            for obj_id in hand {
+                state.players[player].library.push(obj_id);
+            }
+            {
+                use rand::seq::SliceRandom;
+                let mut rng = rand::thread_rng();
+                state.players[player].library.shuffle(&mut rng);
+            }
+            // Draw 7 new cards
+            draw_cards(state, player, 7);
+            state.players[player].mulligan_count += 1;
+            // Stay on the same player for another keep/mulligan decision
+        }
+
+        Action::MulliganBottomCard { object_id } => {
+            let player = state.priority_player;
+            // Move the card from hand to bottom of library
+            if let Some(pos) = state.players[player].hand.iter().position(|&id| id == *object_id) {
+                state.players[player].hand.remove(pos);
+                state.players[player].library.push(*object_id);
+            }
+            advance_mulligan(state);
+        }
+
         Action::Concede => {
             let player = state.priority_player;
             state.players[player].has_lost = true;
@@ -363,6 +397,48 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.winner = Some(state.opponent(player));
         }
     }
+}
+
+/// Advance the mulligan state machine after a keep or bottom-card decision.
+///
+/// Flow:
+/// 1. If current player kept but still has cards to bottom → stay (bottom actions generated)
+/// 2. If current player is done → advance to next player who hasn't decided
+/// 3. If all players are done deciding and bottoming → transition to Turn 1
+fn advance_mulligan(state: &mut GameState) {
+    let player = state.priority_player;
+    let ps = &state.players[player];
+
+    // If this player kept but still needs to bottom cards, stay on them
+    if ps.mulligan_decided {
+        let target_hand_size = 7u32.saturating_sub(ps.mulligan_count) as usize;
+        if ps.hand.len() > target_hand_size {
+            return; // More bottom-card decisions needed
+        }
+    }
+
+    // This player is fully done — find the next player who needs action
+    let num_players = state.players.len();
+    for offset in 1..=num_players {
+        let next = (player + offset) % num_players;
+        let nps = &state.players[next];
+        if !nps.mulligan_decided {
+            state.priority_player = next;
+            return;
+        }
+        let target = 7u32.saturating_sub(nps.mulligan_count) as usize;
+        if nps.hand.len() > target {
+            state.priority_player = next;
+            return;
+        }
+    }
+
+    // All players done — transition to Turn 1
+    state.phase = Phase::Untap;
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.turn_number = 1;
+    execute_phase_entry(state);
 }
 
 /// Handle when priority is passed (may resolve stack or advance phase).
@@ -1456,6 +1532,12 @@ fn execute_phase_entry(state: &mut GameState) {
     let active = state.active_player;
 
     match state.phase {
+        Phase::Mulligan => {
+            // Mulligan phase is handled by apply_action (MulliganKeep/Mulligan/BottomCard).
+            // Priority is set by advance_mulligan.
+            state.priority_player = active;
+        }
+
         Phase::Untap => {
             // Untap all permanents controlled by active player
             let permanents = state.permanents_controlled_by(active);
@@ -2176,14 +2258,12 @@ pub fn setup_commander_game(
     draw_cards(state, 0, 7);
     draw_cards(state, 1, 7);
 
-    // Set starting state
+    // Set starting state — begin in Mulligan phase so players can decide
+    // whether to keep or mulligan before the game starts.
     state.active_player = 0;
     state.priority_player = 0;
-    state.phase = Phase::Untap;
+    state.phase = Phase::Mulligan;
     state.turn_number = 1;
-
-    // Execute first untap step (which auto-advances to upkeep -> draw)
-    execute_phase_entry(state);
 }
 
 /// Reshuffle opening hands for goldfish training iterations.
@@ -2214,20 +2294,26 @@ pub fn reshuffle_opening_hand(state: &mut GameState) {
         state.players[player].land_plays_remaining = 1;
         state.players[player].mana_pool.drain();
         state.players[player].has_drawn_for_turn = false;
+        state.players[player].mulligan_count = 0;
+        state.players[player].mulligan_decided = false;
     }
 
     // Redraw opening hands (7 cards each)
     draw_cards(state, 0, 7);
     draw_cards(state, 1, 7);
 
-    // Reset game state to Turn 1
+    // Reset game state
     state.active_player = 0;
     state.priority_player = 0;
-    state.phase = Phase::Untap;
     state.turn_number = 1;
 
-    // Execute first untap step (advances through untap -> upkeep)
-    execute_phase_entry(state);
+    // Commander games start in Mulligan phase; non-commander skip straight to Turn 1
+    if state.is_commander_format() {
+        state.phase = Phase::Mulligan;
+    } else {
+        state.phase = Phase::Untap;
+        execute_phase_entry(state);
+    }
 }
 
 /// Validate a Commander deck:

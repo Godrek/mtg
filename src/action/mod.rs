@@ -89,6 +89,16 @@ pub enum Action {
         targets: Vec<Target>,
     },
 
+    /// Keep the current hand (London Mulligan).
+    MulliganKeep,
+
+    /// Mulligan: shuffle hand into library and draw 7 new cards (London Mulligan).
+    MulliganMulligan,
+
+    /// Put a card from hand on the bottom of the library after keeping a mulliganed hand.
+    /// The player must bottom N cards where N = mulligan_count.
+    MulliganBottomCard { object_id: ObjectId },
+
     /// Concede the game.
     Concede,
 }
@@ -122,6 +132,11 @@ impl fmt::Display for Action {
             Action::CastCommander { object_id, .. } => {
                 write!(f, "Cast commander (obj {})", object_id)
             }
+            Action::MulliganKeep => write!(f, "Keep hand"),
+            Action::MulliganMulligan => write!(f, "Mulligan"),
+            Action::MulliganBottomCard { object_id } => {
+                write!(f, "Bottom card (obj {})", object_id)
+            }
             Action::Concede => write!(f, "Concede"),
         }
     }
@@ -139,12 +154,39 @@ pub fn legal_actions(state: &GameState) -> Vec<Action> {
     legal_actions_with(state, CombatAbstraction::Full)
 }
 
+/// Maximum number of mulligans allowed before auto-keeping.
+const MAX_MULLIGANS: u32 = 4;
+
 /// Core action enumeration with configurable combat abstraction level.
 fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<Action> {
     use crate::game::Phase;
 
     let player = state.priority_player;
     let mut actions = Vec::new();
+
+    // ---- Mulligan phase ----
+    if state.phase == Phase::Mulligan {
+        let ps = &state.players[player];
+        if !ps.mulligan_decided {
+            // Player hasn't decided yet: offer keep or mulligan
+            actions.push(Action::MulliganKeep);
+            if ps.mulligan_count < MAX_MULLIGANS {
+                actions.push(Action::MulliganMulligan);
+            }
+            return actions;
+        }
+        // Player decided to keep but still has cards to bottom
+        let target_hand_size = 7u32.saturating_sub(ps.mulligan_count) as usize;
+        if ps.hand.len() > target_hand_size {
+            // Must choose a card to put on bottom
+            for &obj_id in &ps.hand {
+                actions.push(Action::MulliganBottomCard { object_id: obj_id });
+            }
+            return actions;
+        }
+        // Should not reach here — advance_mulligan handles phase transitions
+        return vec![Action::PassPriority];
+    }
 
     // Before normal priority actions, check for pending triggers needing ordering.
     // When a player controls multiple simultaneous triggers, they must choose the

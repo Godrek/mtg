@@ -112,6 +112,18 @@ pub enum CanonicalAction {
         targets: Vec<CanonicalTarget>,
     },
 
+    /// Keep the current hand (London Mulligan).
+    MulliganKeep,
+
+    /// Mulligan: shuffle hand into library and draw 7 new cards.
+    MulliganMulligan,
+
+    /// Put a card on the bottom of the library after keeping a mulliganed hand.
+    MulliganBottomCard {
+        card_id: CardId,
+        hand_index: usize,
+    },
+
     Concede,
 }
 
@@ -279,6 +291,15 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
                 })
                 .collect();
             CanonicalAction::ChooseReplacementOrder { source_card_ids }
+        }
+
+        Action::MulliganKeep => CanonicalAction::MulliganKeep,
+        Action::MulliganMulligan => CanonicalAction::MulliganMulligan,
+        Action::MulliganBottomCard { object_id } => {
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let hand_index = hand_instance_index(state, inst.owner, *object_id);
+            CanonicalAction::MulliganBottomCard { card_id, hand_index }
         }
     }
 }
@@ -456,6 +477,13 @@ pub fn resolve(
                 ordering.push((obj_id, effect_index));
             }
             Some(Action::ChooseReplacementOrder { ordering })
+        }
+
+        CanonicalAction::MulliganKeep => Some(Action::MulliganKeep),
+        CanonicalAction::MulliganMulligan => Some(Action::MulliganMulligan),
+        CanonicalAction::MulliganBottomCard { card_id, hand_index } => {
+            let obj_id = find_in_hand_by_index(state, player, *card_id, *hand_index)?;
+            Some(Action::MulliganBottomCard { object_id: obj_id })
         }
     }
 }

@@ -75,6 +75,9 @@ pub type PlayerIndex = usize;
 /// Represents the phase/step within a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Phase {
+    // Pre-game
+    Mulligan,
+
     // Beginning phase
     Untap,
     Upkeep,
@@ -195,6 +198,13 @@ pub struct PlayerState {
     /// opponent PlayerIndex. In 1v1 this is a single-element vec.
     /// A player loses if any entry reaches 21.
     pub commander_damage_received: Vec<i32>,
+
+    // ---- Mulligan fields ----
+    /// Number of times this player has mulliganed (London Mulligan).
+    /// After keeping, the player puts this many cards on the bottom of their library.
+    pub mulligan_count: u32,
+    /// Whether this player has decided to keep their hand.
+    pub mulligan_decided: bool,
 }
 
 impl PlayerState {
@@ -215,6 +225,8 @@ impl PlayerState {
             commander_object_id: None,
             commander_tax: 0,
             commander_damage_received: Vec::new(),
+            mulligan_count: 0,
+            mulligan_decided: false,
         }
     }
 
@@ -539,6 +551,10 @@ pub struct PlayerView<'a> {
     /// The game format (Standard or Commander).
     pub format: GameFormat,
 
+    // --- Mulligan fields ---
+    /// How many times the viewing player has mulliganed.
+    pub my_mulligan_count: u32,
+
     // --- Object lookup (filtered, read-only) ---
     /// Card instances visible to the viewing player, keyed by ObjectId.
     /// Includes objects on the battlefield, stack, both graveyards, both exile
@@ -665,6 +681,8 @@ impl GameState {
             opp_command_zone: &self.players[opp].command_zone,
             my_commander_tax: self.players[player].commander_tax,
             format: self.format,
+
+            my_mulligan_count: self.players[player].mulligan_count,
 
             objects: visible,
             card_db: self.card_db(),

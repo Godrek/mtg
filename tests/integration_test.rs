@@ -3388,6 +3388,7 @@ fn test_multi_phase_abstraction() {
         my_command_zone: vec![],
         opp_command_zone: vec![],
         my_commander_tax: 0,
+        my_mulligan_count: 0,
     };
 
     let info_set_upkeep = InformationSet {
