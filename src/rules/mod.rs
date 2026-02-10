@@ -2186,6 +2186,50 @@ pub fn setup_commander_game(
     execute_phase_entry(state);
 }
 
+/// Reshuffle opening hands for goldfish training iterations.
+///
+/// Returns all hand cards to each player's library, shuffles both libraries,
+/// and redraws 7-card opening hands. Resets turn/phase/mana state so the
+/// game starts cleanly from Turn 1.
+///
+/// This is used by MCCFR goldfish training to vary the starting hand across
+/// iterations. Without reshuffling, every iteration trains on the exact same
+/// hand — making the learned strategy useless for hands with different cards.
+pub fn reshuffle_opening_hand(state: &mut GameState) {
+    use rand::seq::SliceRandom;
+
+    let mut rng = rand::thread_rng();
+
+    for player in 0..state.players.len() {
+        // Move hand cards back to library
+        let hand: Vec<crate::card::ObjectId> = state.players[player].hand.drain(..).collect();
+        for obj_id in hand {
+            state.players[player].library.push(obj_id);
+        }
+
+        // Shuffle library
+        state.players[player].library.shuffle(&mut rng);
+
+        // Reset per-player state
+        state.players[player].land_plays_remaining = 1;
+        state.players[player].mana_pool.drain();
+        state.players[player].has_drawn_for_turn = false;
+    }
+
+    // Redraw opening hands (7 cards each)
+    draw_cards(state, 0, 7);
+    draw_cards(state, 1, 7);
+
+    // Reset game state to Turn 1
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Untap;
+    state.turn_number = 1;
+
+    // Execute first untap step (advances through untap -> upkeep)
+    execute_phase_entry(state);
+}
+
 /// Validate a Commander deck:
 /// - Exactly 100 cards (including commander)
 /// - Singleton (max 1 copy of each non-basic-land card)

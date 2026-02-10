@@ -762,7 +762,10 @@ where
             let goldfish = crate::strategy::GoldfishStrategy;
 
             for i in 0..iters {
-                let state = initial_state.clone();
+                let mut state = initial_state.clone();
+                // Reshuffle opening hand each iteration so the solver trains on diverse
+                // starting hands rather than memorizing one fixed deal.
+                rules::reshuffle_opening_hand(&mut state);
                 traverse_goldfish(
                     state,
                     &mut regret_tables[pilot as usize],
@@ -850,6 +853,8 @@ pub fn warm_start_from_greedy(
 
     for _ in 0..num_warmup_games {
         let mut state = initial_state.clone();
+        // Reshuffle opening hand so warm-start covers diverse starting hands.
+        rules::reshuffle_opening_hand(&mut state);
         let mut actions_taken = 0u32;
 
         while !state.game_over && actions_taken < 500 {
@@ -1203,7 +1208,10 @@ where
     let goldfish = crate::strategy::GoldfishStrategy;
 
     for i in 0..num_iterations {
-        let state = initial_state.clone();
+        let mut state = initial_state.clone();
+        // Reshuffle opening hand each iteration so the solver trains on diverse
+        // starting hands rather than memorizing one fixed deal.
+        rules::reshuffle_opening_hand(&mut state);
         traverse_goldfish(
             state,
             &mut regret_tables[pilot as usize],
