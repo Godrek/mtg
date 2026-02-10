@@ -273,6 +273,15 @@ impl AbstractedMcfrStrategy {
 
 impl Strategy for AbstractedMcfrStrategy {
     fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
+        use crate::action::canonical::abstract_canonical_action;
+
+        // Mulligan decisions: fall back to GreedyStrategy.
+        // Training resolves mulligans with a greedy heuristic before MCCFR traversal,
+        // so the regret table has no mulligan data. Match that during simulation.
+        if state.phase == crate::game::Phase::Mulligan {
+            return GreedyStrategy.choose_action(state, player);
+        }
+
         let actions = legal_actions_abstracted(state);
         if actions.is_empty() {
             return Action::PassPriority;
@@ -281,26 +290,46 @@ impl Strategy for AbstractedMcfrStrategy {
             return actions[0].clone();
         }
 
+        let db = state.card_db();
         let canonical_actions: Vec<_> = actions
             .iter()
             .map(|a| canonicalize(a, state))
             .collect();
+        let abstract_actions: Vec<_> = canonical_actions
+            .iter()
+            .map(|ca| abstract_canonical_action(ca, db))
+            .collect();
+
+        // Group concrete actions by abstract action
+        let mut unique_abstracts: Vec<crate::action::canonical::CanonicalAction> = Vec::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (i, aa) in abstract_actions.iter().enumerate() {
+            if let Some(pos) = unique_abstracts.iter().position(|u| u == aa) {
+                groups[pos].push(i);
+            } else {
+                unique_abstracts.push(aa.clone());
+                groups.push(vec![i]);
+            }
+        }
 
         let view = state.visible_state(player);
         let info_set = InformationSet::from_view(&view, state.card_db());
         let info_hash = self.abstraction.abstract_info_set(&info_set);
 
-        let distribution = match self.policy.get(info_hash) {
-            Some(data) => data.average_strategy(&canonical_actions),
+        // Get strategy over abstract action groups
+        let group_distribution = match self.policy.get(info_hash) {
+            Some(data) => data.average_strategy(&unique_abstracts),
             None => {
-                let n = actions.len();
+                let n = unique_abstracts.len();
                 vec![1.0 / n as f64; n]
             }
         };
 
+        // Sample an abstract action group, then pick uniformly within the group
         let mut rng = rand::thread_rng();
-        let idx = sample_from_distribution(&distribution, &mut rng);
-        actions[idx].clone()
+        let group_idx = sample_from_distribution(&group_distribution, &mut rng);
+        let concrete_idx = *groups[group_idx].choose(&mut rng).unwrap();
+        actions[concrete_idx].clone()
     }
 
     fn name(&self) -> &str {

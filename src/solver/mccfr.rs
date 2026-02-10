@@ -57,9 +57,10 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use rand::seq::SliceRandom;
 use rand::Rng;
 
-use crate::action::canonical::canonicalize;
+use crate::action::canonical::{canonicalize, CanonicalAction};
 use crate::action::{legal_actions, legal_actions_abstracted, Action};
 use crate::game::{GameState, PlayerIndex};
 use crate::info_set::{IdentityAbstraction, InfoSetAbstraction, InformationSet};
@@ -411,11 +412,16 @@ fn terminal_utility(state: &GameState, player: PlayerIndex) -> f64 {
     }
 }
 
-/// Heuristic evaluation when depth limit is reached.
+/// Heuristic evaluation when depth limit or node budget is reached.
 ///
-/// Uses a simple life-total-based evaluation:
-/// - Positive when we're ahead on life
-/// - Normalized to [-1, 1] range
+/// Evaluates board position using:
+/// - Life differential (how much damage dealt to opponent)
+/// - Board presence (total creature power)
+/// - Mana development (lands + mana-producing permanents on battlefield)
+///
+/// Mana development is critical for goldfish training: when the node budget
+/// prunes a tree, this signal rewards playing lands/rocks even though the
+/// payoff (casting creatures, winning) isn't visible in the pruned subtree.
 fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     use crate::game::GameFormat;
 
@@ -429,7 +435,7 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
         _ => 20.0,
     };
     let life_diff = my_life - opp_life;
-    let normalized = (life_diff / starting_life).clamp(-1.0, 1.0);
+    let life_normalized = (life_diff / starting_life).clamp(-1.0, 1.0);
 
     // Board presence bonus (using layer engine for accurate power)
     let my_power: i32 = state
@@ -446,7 +452,16 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     let board_diff = (my_power - opp_power) as f64 / 10.0;
     let board_normalized = board_diff.clamp(-0.5, 0.5);
 
-    (normalized * 0.7 + board_normalized * 0.3).clamp(-1.0, 1.0)
+    // Mana development: lands + permanents on battlefield (proxy for mana-producing permanents)
+    let my_lands = state.lands_controlled_by(player).len() as f64;
+    let opp_lands = state.lands_controlled_by(opp).len() as f64;
+    let my_permanents = state.permanents_controlled_by(player).len() as f64;
+    let opp_permanents = state.permanents_controlled_by(opp).len() as f64;
+    // Combine lands (primary mana) + non-land permanents (mana rocks, creatures)
+    let mana_diff = (my_lands - opp_lands) + (my_permanents - opp_permanents) * 0.5;
+    let mana_normalized = (mana_diff / 10.0).clamp(-0.5, 0.5);
+
+    (life_normalized * 0.4 + board_normalized * 0.3 + mana_normalized * 0.3).clamp(-1.0, 1.0)
 }
 
 /// Training loop: run many MCCFR iterations and return the trained regret tables.
@@ -1084,6 +1099,11 @@ pub fn collect_policy_snapshots(
     let mut state = initial_state.clone();
     let mut actions_taken = 0u32;
 
+    // Resolve mulligans with greedy heuristic (matches training behavior)
+    if state.phase == crate::game::Phase::Mulligan {
+        rules::resolve_mulligans_with_heuristic(&mut state);
+    }
+
     while !state.game_over && actions_taken < 500 && snapshots.len() < max_snapshots {
         let player = state.priority_player;
         let actions = legal_actions_abstracted(&state);
@@ -1099,27 +1119,46 @@ pub fn collect_policy_snapshots(
             continue;
         }
 
+        use crate::action::canonical::abstract_canonical_action;
+
+        let db = state.card_db();
         let canonical_actions: Vec<_> = actions
             .iter()
             .map(|a| canonicalize(a, &state))
             .collect();
+        let abstract_actions: Vec<_> = canonical_actions
+            .iter()
+            .map(|ca| abstract_canonical_action(ca, db))
+            .collect();
+
+        // Group by abstract action
+        let mut unique_abstracts: Vec<CanonicalAction> = Vec::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (i, aa) in abstract_actions.iter().enumerate() {
+            if let Some(pos) = unique_abstracts.iter().position(|u| u == aa) {
+                groups[pos].push(i);
+            } else {
+                unique_abstracts.push(aa.clone());
+                groups.push(vec![i]);
+            }
+        }
 
         let view = state.visible_state(player);
         let info_set = InformationSet::from_view(&view, state.card_db());
         let info_hash = abstraction.abstract_info_set(&info_set);
 
-        let (distribution, visit_count) = match regret_tables[player].get(info_hash) {
-            Some(data) => (data.average_strategy(&canonical_actions), data.visit_count),
+        let (group_distribution, visit_count) = match regret_tables[player].get(info_hash) {
+            Some(data) => (data.average_strategy(&unique_abstracts), data.visit_count),
             None => {
-                let n = actions.len();
+                let n = unique_abstracts.len();
                 (vec![1.0 / n as f64; n], 0)
             }
         };
 
-        let action_dist: Vec<(String, f64)> = canonical_actions
+        let action_dist: Vec<(String, f64)> = unique_abstracts
             .iter()
-            .zip(distribution.iter())
-            .map(|(ca, &prob)| (format!("{:?}", ca), prob))
+            .zip(group_distribution.iter())
+            .map(|(aa, &prob)| (format!("{:?}", aa), prob))
             .collect();
 
         snapshots.push(PolicySnapshot {
@@ -1140,9 +1179,11 @@ pub fn collect_policy_snapshots(
             visit_count,
         });
 
+        // Sample abstract group, then pick random concrete action from group
         let mut rng = rand::thread_rng();
-        let idx = sample_from_distribution(&distribution, &mut rng);
-        rules::apply_action(&mut state, &actions[idx]);
+        let group_idx = sample_from_distribution(&group_distribution, &mut rng);
+        let concrete_idx = *groups[group_idx].choose(&mut rng).unwrap();
+        rules::apply_action(&mut state, &actions[concrete_idx]);
         actions_taken += 1;
     }
 
@@ -1342,31 +1383,56 @@ fn traverse_goldfish(
         return heuristic_utility(&state, pilot);
     }
 
-    // Canonicalize actions
+    // Canonicalize and abstract actions for regret table keying.
+    // Action abstraction groups card-specific canonical actions into strategic
+    // categories (e.g., all "play a land" actions → one abstract action) so
+    // learning transfers across different shuffles of a singleton deck.
+    use crate::action::canonical::abstract_canonical_action;
+
+    let db = state.card_db();
     let canonical_actions: Vec<_> = actions
         .iter()
         .map(|a| canonicalize(a, &state))
         .collect();
+    let abstract_actions: Vec<_> = canonical_actions
+        .iter()
+        .map(|ca| abstract_canonical_action(ca, db))
+        .collect();
+
+    // Group concrete action indices by their abstract action.
+    // Each group shares regret and strategy; we explore one representative per group.
+    let mut unique_abstracts: Vec<CanonicalAction> = Vec::new();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (i, aa) in abstract_actions.iter().enumerate() {
+        if let Some(pos) = unique_abstracts.iter().position(|u| u == aa) {
+            groups[pos].push(i);
+        } else {
+            unique_abstracts.push(aa.clone());
+            groups.push(vec![i]);
+        }
+    }
 
     // Compute info set
     let view = state.visible_state(pilot);
     let info_set = InformationSet::from_view(&view, state.card_db());
     let info_hash = abstraction.abstract_info_set(&info_set);
 
-    // Get current strategy via regret matching
+    // Get current strategy over unique abstract actions
     let strategy = {
         let entry = regret_table.get_or_create(info_hash);
-        entry.current_strategy(&canonical_actions)
+        entry.current_strategy(&unique_abstracts)
     };
 
-    // Explore ALL actions (traverser node)
-    let num_actions = actions.len();
-    let mut action_utilities = vec![0.0f64; num_actions];
+    // Explore one representative concrete action per abstract group
+    let num_groups = unique_abstracts.len();
+    let mut group_utilities = vec![0.0f64; num_groups];
 
-    for (i, action) in actions.iter().enumerate() {
+    for (g, group) in groups.iter().enumerate() {
+        // Pick first concrete action as representative
+        let representative = group[0];
         let mut child_state = state.clone();
-        rules::apply_action(&mut child_state, action);
-        action_utilities[i] = traverse_goldfish(
+        rules::apply_action(&mut child_state, &actions[representative]);
+        group_utilities[g] = traverse_goldfish(
             child_state,
             regret_table,
             config,
@@ -1382,16 +1448,16 @@ fn traverse_goldfish(
     // Expected utility under current strategy
     let node_utility: f64 = strategy
         .iter()
-        .zip(action_utilities.iter())
+        .zip(group_utilities.iter())
         .map(|(&s, &u)| s * u)
         .sum();
 
-    // Update regrets and cumulative strategy
+    // Update regrets and cumulative strategy for abstract actions
     let entry = regret_table.get_or_create(info_hash);
-    for (i, ca) in canonical_actions.iter().enumerate() {
-        let action_entry = entry.get_or_create_action(ca);
-        action_entry.cumulative_regret += action_utilities[i] - node_utility;
-        action_entry.cumulative_strategy += strategy[i];
+    for (g, aa) in unique_abstracts.iter().enumerate() {
+        let action_entry = entry.get_or_create_action(aa);
+        action_entry.cumulative_regret += group_utilities[g] - node_utility;
+        action_entry.cumulative_strategy += strategy[g];
     }
     entry.visit_count += 1;
 

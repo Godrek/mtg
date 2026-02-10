@@ -624,6 +624,103 @@ fn find_on_battlefield_by_controller(
     matches.get(instance_index).copied()
 }
 
+/// Abstract a canonical action for goldfish training regret table keying.
+///
+/// Groups card-specific actions into strategic categories so that learning
+/// transfers across different shuffles of a singleton deck. For example,
+/// all "play a land" actions map to the same abstract action regardless
+/// of which specific land is being played.
+///
+/// The abstraction:
+/// - `PlayLand { any }` → `PlayLand { card_id: 0, hand_index: 0 }`
+/// - `CastSpell { any }` → `CastSpell { card_id: cmc, hand_index: 0, targets: [] }`
+/// - `CastCommander` → `CastCommander { card_id: 0, targets: [] }`
+/// - `Discard { any }` → `Discard { card_id: 0, hand_index: 0 }`
+/// - `MulliganBottomCard { any }` → `MulliganBottomCard { card_id: 0 }`
+/// - `ActivateManaAbility { any }` → `ActivateManaAbility { card_id: 0, 0, 0 }`
+/// - `DeclareAttackers` → bucketed by number of attackers
+/// - Others pass through unchanged
+pub fn abstract_canonical_action(
+    ca: &CanonicalAction,
+    db: &crate::game::CardDatabase,
+) -> CanonicalAction {
+    match ca {
+        CanonicalAction::PassPriority => CanonicalAction::PassPriority,
+        CanonicalAction::Concede => CanonicalAction::Concede,
+
+        // All land plays → single abstract "play a land" action
+        CanonicalAction::PlayLand { .. } => CanonicalAction::PlayLand {
+            card_id: 0,
+            hand_index: 0,
+        },
+
+        // Spells grouped by CMC (the key strategic dimension)
+        CanonicalAction::CastSpell { card_id, .. } => {
+            let cmc = db.get(*card_id).map(|d| d.cmc()).unwrap_or(0);
+            let cmc_bucket = std::cmp::min(cmc, 7) as u64;
+            CanonicalAction::CastSpell {
+                card_id: cmc_bucket,
+                hand_index: 0,
+                targets: vec![],
+            }
+        }
+
+        CanonicalAction::CastCommander { .. } => CanonicalAction::CastCommander {
+            card_id: 0,
+            targets: vec![],
+        },
+
+        // All mana abilities → single abstract action
+        CanonicalAction::ActivateManaAbility { .. } => CanonicalAction::ActivateManaAbility {
+            source_card_id: 0,
+            source_instance_index: 0,
+            ability_index: 0,
+        },
+
+        // Activated abilities grouped by ability index only
+        CanonicalAction::ActivateAbility { ability_index, .. } => {
+            CanonicalAction::ActivateAbility {
+                source_card_id: 0,
+                source_instance_index: 0,
+                ability_index: *ability_index,
+                targets: vec![],
+            }
+        }
+
+        // Attackers: bucket by count (0, 1, 2, 3+)
+        CanonicalAction::DeclareAttackers { attacker_card_ids } => {
+            let count = std::cmp::min(attacker_card_ids.len(), 3) as u64;
+            CanonicalAction::DeclareAttackers {
+                attacker_card_ids: vec![(count, 0)],
+            }
+        }
+
+        // Blockers: bucket by count
+        CanonicalAction::DeclareBlockers { assignments } => {
+            let count = std::cmp::min(assignments.len(), 3) as u64;
+            CanonicalAction::DeclareBlockers {
+                assignments: vec![(count, 0, 0, 0)],
+            }
+        }
+
+        // All discards → single abstract action
+        CanonicalAction::Discard { .. } => CanonicalAction::Discard {
+            card_id: 0,
+            hand_index: 0,
+        },
+
+        // Mulligan actions
+        CanonicalAction::MulliganKeep => CanonicalAction::MulliganKeep,
+        CanonicalAction::MulliganMulligan => CanonicalAction::MulliganMulligan,
+        CanonicalAction::MulliganBottomCard { .. } => CanonicalAction::MulliganBottomCard {
+            card_id: 0,
+        },
+
+        // Pass through ordering/damage assignment
+        other => other.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
