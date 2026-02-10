@@ -185,7 +185,14 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
             return actions;
         }
         // Should not reach here — advance_mulligan handles phase transitions
-        return vec![Action::PassPriority];
+        unreachable!(
+            "Mulligan phase: player {} has decided (mull_count={}) and hand size {} <= target {}; \
+             advance_mulligan should have transitioned out of Mulligan phase",
+            player,
+            ps.mulligan_count,
+            ps.hand.len(),
+            target_hand_size,
+        );
     }
 
     // Before normal priority actions, check for pending triggers needing ordering.
