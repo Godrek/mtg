@@ -768,6 +768,21 @@ fn resolve_effect(
             create_token(state, token_def, controller);
         }
 
+        Effect::CreateTokens { token, count } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let n = count.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                None,
+            );
+            for _ in 0..n.max(0) {
+                create_token(state, token, controller);
+            }
+        }
+
         Effect::Counter { .. } => {
             // Find the targeted spell on the stack and counter it
             let target_obj_id = targets.iter().find_map(|t| {

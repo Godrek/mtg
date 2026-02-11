@@ -4610,7 +4610,17 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
-                effect: Effect::Unimplemented("Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into()),
+                effect: Effect::CreateTokens {
+                    token: TokenDef {
+                        name: "Rat".into(),
+                        power: 1,
+                        toughness: 1,
+                        colors: vec![Color::Black],
+                        subtypes: vec![Subtype("Rat".into())],
+                        keywords: vec![],
+                    },
+                    count: DynamicValue::CreaturesControlled,
+                },
                 description: "{T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into(),
             },
         ],
