@@ -13,7 +13,9 @@
 //!   ACTION_LIMIT=50000 Max actions per line before treated as draw (default: 50000)
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use mtg_gto::action::{legal_actions, Action};
 use mtg_gto::card::sample;
@@ -76,6 +78,35 @@ fn main() {
     println!();
 
     let mut total = ExhaustiveStats::default();
+    let progress_nodes = Arc::new(AtomicU64::new(0));
+    let progress_states_done = Arc::new(AtomicU32::new(0));
+    let progress_done = Arc::new(AtomicBool::new(false));
+
+    let t0 = Instant::now();
+    let progress_printer = {
+        let nodes = Arc::clone(&progress_nodes);
+        let states_done = Arc::clone(&progress_states_done);
+        let done = Arc::clone(&progress_done);
+
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            let elapsed = t0.elapsed().as_secs_f64();
+            let explored = nodes.load(Ordering::Relaxed);
+            let completed = states_done.load(Ordering::Relaxed);
+            let nps = if elapsed > 0.0 {
+                explored as f64 / elapsed
+            } else {
+                0.0
+            };
+            eprint!(
+                "\rprogress: states {}/{} | nodes {} | {:.0} nodes/s | {:.1}s elapsed   ",
+                completed, num_states, explored, nps, elapsed
+            );
+        })
+    };
 
     for state_idx in 1..=num_states {
         let mut state = GameState::new_commander(2);
@@ -97,7 +128,10 @@ fn main() {
             &mut seen_hashes,
             &mut local,
             state_idx,
+            &progress_nodes,
         );
+
+        progress_states_done.fetch_add(1, Ordering::Relaxed);
 
         println!(
             "State #{}: nodes={} terminals={} W/L/D={}/{}/{} loops_cut={}",
@@ -112,6 +146,17 @@ fn main() {
 
         merge_stats(&mut total, local);
     }
+
+    progress_done.store(true, Ordering::Relaxed);
+    eprint!(
+        "\rprogress: states {}/{} | nodes {} | {:.1}s elapsed                           ",
+        progress_states_done.load(Ordering::Relaxed),
+        num_states,
+        progress_nodes.load(Ordering::Relaxed),
+        t0.elapsed().as_secs_f64()
+    );
+    eprintln!();
+    let _ = progress_printer.join();
 
     println!();
     println!("=== Aggregate ===");
@@ -150,8 +195,10 @@ fn explore_all_branches(
     seen_hashes: &mut HashSet<u64>,
     stats: &mut ExhaustiveStats,
     state_index: u32,
+    progress_nodes: &AtomicU64,
 ) {
     stats.nodes_explored += 1;
+    progress_nodes.fetch_add(1, Ordering::Relaxed);
 
     if is_terminal_or_limited(&state, max_turns, action_limit, actions_taken) {
         record_terminal(stats, &state, pilot, actions_taken, path, state_index);
@@ -204,6 +251,7 @@ fn explore_all_branches(
             seen_hashes,
             stats,
             state_index,
+            progress_nodes,
         );
         path.pop();
         seen_hashes.remove(&state_hash);
@@ -224,6 +272,7 @@ fn explore_all_branches(
             seen_hashes,
             stats,
             state_index,
+            progress_nodes,
         );
         path.pop();
     }
