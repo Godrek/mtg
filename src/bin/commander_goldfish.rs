@@ -68,6 +68,11 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
 
+    // Commander kill-turn analysis is interpreted against the simulator's
+    // 20-turn goldfish horizon; clamp lower values to avoid accidental
+    // "all draw" configurations that can never report <20-turn wins.
+    let effective_brute_turns = brute_turns.max(20);
+
     let db = sample::build_sample_db();
     let (deck, commander, tutor_targets) = match deck_name.as_str() {
         "brimaz" => {
@@ -96,12 +101,18 @@ fn main() {
     if brute_force {
         println!(
             "Brute mode: enabled ({} opening states, {} nodes, {} turns)",
-            brute_games, brute_nodes, brute_turns
+            brute_games, brute_nodes, effective_brute_turns
         );
     } else {
         println!("Brute mode: disabled");
     }
     println!();
+    if brute_force && brute_turns < 20 {
+        println!(
+            "Note: BRUTE_TURNS={} is below 20; clamped to 20 for commander kill search.",
+            brute_turns
+        );
+    }
 
     // Build card name lookup for readable output
     let card_names = build_card_names(&db, &deck, commander);
@@ -262,7 +273,7 @@ fn main() {
                 &brute_state,
                 0,
                 GoldfishSearchConfig {
-                    max_turns: brute_turns,
+                    max_turns: effective_brute_turns,
                     max_actions: 10_000,
                     max_nodes: brute_nodes,
                 },
@@ -322,12 +333,6 @@ fn main() {
             }
         } else {
             println!("Fastest win line: none found in searched opening states");
-            if brute_turns < 20 {
-                println!(
-                    "Note: BRUTE_TURNS={} caps search before turn 20.",
-                    brute_turns
-                );
-            }
         }
         println!();
     }

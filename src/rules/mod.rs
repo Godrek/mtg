@@ -4,7 +4,10 @@ use rand::Rng;
 use std::sync::Arc;
 
 use crate::action::Action;
-use crate::card::{CardDef, CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TokenDef, TriggerCondition, ZoneType};
+use crate::card::{
+    CardDef, CardType, Effect, KeywordAbility, ManaAbility, ObjectId, TokenDef, TriggerCondition,
+    ZoneType,
+};
 use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, StackSource, Target};
 
@@ -19,9 +22,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 return;
             }
 
-            if state.phase == Phase::Cleanup
-                && state.players[state.active_player].hand.len() > 7
-            {
+            if state.phase == Phase::Cleanup && state.players[state.active_player].hand.len() > 7 {
                 debug_assert!(
                     false,
                     "PassPriority during cleanup discard is illegal; choose a Discard action."
@@ -349,7 +350,9 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 targets: targets.clone(),
             });
             // Remove from command zone
-            state.players[player].command_zone.retain(|&id| id != obj_id);
+            state.players[player]
+                .command_zone
+                .retain(|&id| id != obj_id);
 
             state.emit_event(GameEvent::SpellCast {
                 object: obj_id,
@@ -414,7 +417,11 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
         Action::MulliganBottomCard { object_id } => {
             let player = state.priority_player;
             // Move the card from hand to bottom of library
-            if let Some(pos) = state.players[player].hand.iter().position(|&id| id == *object_id) {
+            if let Some(pos) = state.players[player]
+                .hand
+                .iter()
+                .position(|&id| id == *object_id)
+            {
                 state.players[player].hand.remove(pos);
                 state.players[player].library.push(*object_id);
             }
@@ -566,7 +573,8 @@ fn resolve_spell(
         db.get(inst.card_def_id).unwrap().clone()
     };
 
-    if def.is_creature() || def.card_types.contains(&CardType::Artifact)
+    if def.is_creature()
+        || def.card_types.contains(&CardType::Artifact)
         || def.card_types.contains(&CardType::Enchantment)
         || def.card_types.contains(&CardType::Planeswalker)
     {
@@ -612,7 +620,10 @@ fn resolve_effect(
     targets: &[Target],
 ) {
     match effect {
-        Effect::DealDamage { amount, target: target_spec } => {
+        Effect::DealDamage {
+            amount,
+            target: target_spec,
+        } => {
             // For untargeted effects, auto-generate targets from the spec.
             let effective_targets: Vec<Target> = if targets.is_empty() {
                 match target_spec {
@@ -625,9 +636,14 @@ fn resolve_effect(
                     crate::card::TargetSpec::EachCreature => {
                         // "Each creature" — deal damage to all creatures on the battlefield
                         let db = state.card_db();
-                        state.battlefield.iter().copied()
+                        state
+                            .battlefield
+                            .iter()
+                            .copied()
                             .filter(|&id| {
-                                state.objects.get(&id)
+                                state
+                                    .objects
+                                    .get(&id)
                                     .and_then(|inst| db.get(inst.card_def_id))
                                     .map_or(false, |def| def.is_creature())
                             })
@@ -712,9 +728,12 @@ fn resolve_effect(
                 .iter()
                 .filter_map(|target| {
                     if let Target::Object(id) = target {
-                        let indestructible =
-                            state.has_keyword(*id, KeywordAbility::Indestructible);
-                        if !indestructible { Some(*id) } else { None }
+                        let indestructible = state.has_keyword(*id, KeywordAbility::Indestructible);
+                        if !indestructible {
+                            Some(*id)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -812,14 +831,18 @@ fn resolve_effect(
         Effect::Counter { .. } => {
             // Find the targeted spell on the stack and counter it
             let target_obj_id = targets.iter().find_map(|t| {
-                if let Target::Object(id) = t { Some(*id) } else { None }
+                if let Target::Object(id) = t {
+                    Some(*id)
+                } else {
+                    None
+                }
             });
 
             if let Some(target_id) = target_obj_id {
                 // Find and remove the targeted spell from the stack
-                if let Some(idx) = state.stack.iter().position(|entry| {
-                    matches!(&entry.source, StackSource::Spell(id) if *id == target_id)
-                }) {
+                if let Some(idx) = state.stack.iter().position(
+                    |entry| matches!(&entry.source, StackSource::Spell(id) if *id == target_id),
+                ) {
                     let countered = state.stack.remove(idx);
                     if let StackSource::Spell(obj_id) = countered.source {
                         state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
@@ -1027,7 +1050,11 @@ fn resolve_effect(
                             let owner = inst.owner;
                             state.move_object(*obj_id, ZoneType::Graveyard, ZoneType::Library);
                             // Move to front (top) of library
-                            if let Some(pos) = state.players[owner].library.iter().position(|&id| id == *obj_id) {
+                            if let Some(pos) = state.players[owner]
+                                .library
+                                .iter()
+                                .position(|&id| id == *obj_id)
+                            {
                                 let id = state.players[owner].library.remove(pos);
                                 state.players[owner].library.insert(0, id);
                             }
@@ -1063,7 +1090,11 @@ fn resolve_effect(
 
 /// Check all permanents on the battlefield for triggered abilities matching
 /// the given condition, and queue any that trigger.
-fn check_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) {
+fn check_triggers(
+    state: &mut GameState,
+    condition: TriggerCondition,
+    source_hint: Option<ObjectId>,
+) {
     let triggers: Vec<PendingTrigger> = {
         let db = state.card_db();
         let mut found = Vec::new();
@@ -1197,7 +1228,11 @@ fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
 /// Returns `true` if all triggers were flushed, `false` if paused waiting
 /// for a player's ordering decision (i.e. pending_triggers is non-empty).
 #[must_use]
-pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) -> bool {
+pub fn fire_triggers(
+    state: &mut GameState,
+    condition: TriggerCondition,
+    source_hint: Option<ObjectId>,
+) -> bool {
     check_triggers(state, condition, source_hint);
     flush_triggers(state)
 }
@@ -1322,7 +1357,10 @@ fn resolve_activated_ability(
         let db = state.card_db();
         let inst = &state.objects[&source_id];
         let def = db.get(inst.card_def_id).unwrap();
-        let effect = def.activated_abilities.get(ability_index).map(|a| a.effect.clone());
+        let effect = def
+            .activated_abilities
+            .get(ability_index)
+            .map(|a| a.effect.clone());
         (effect, inst.controller)
     };
 
@@ -1342,7 +1380,10 @@ fn resolve_triggered_ability(
         let db = state.card_db();
         state.objects.get(&source_id).and_then(|inst| {
             let def = db.get(inst.card_def_id)?;
-            let effect = def.triggered_abilities.get(ability_index).map(|a| a.effect.clone())?;
+            let effect = def
+                .triggered_abilities
+                .get(ability_index)
+                .map(|a| a.effect.clone())?;
             Some((effect, inst.controller))
         })
     };
@@ -1464,10 +1505,9 @@ pub fn check_state_based_actions(state: &mut GameState) {
 
             // CR 704.5j: Legendary rule — if a player controls two or more
             // legendary permanents with the same name, keep the newest.
-            let legendary_dupes: Vec<ObjectId> =
-                find_duplicates_to_remove(state, |def| {
-                    def.supertypes.contains(&crate::card::Supertype::Legendary)
-                });
+            let legendary_dupes: Vec<ObjectId> = find_duplicates_to_remove(state, |def| {
+                def.supertypes.contains(&crate::card::Supertype::Legendary)
+            });
             for &id in &legendary_dupes {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
                 any_action = true;
@@ -1479,10 +1519,9 @@ pub fn check_state_based_actions(state: &mut GameState) {
             }
 
             // CR 704.5i: Planeswalker uniqueness rule — keep newest per name.
-            let pw_dupes: Vec<ObjectId> =
-                find_duplicates_to_remove(state, |def| {
-                    def.card_types.contains(&CardType::Planeswalker)
-                });
+            let pw_dupes: Vec<ObjectId> = find_duplicates_to_remove(state, |def| {
+                def.card_types.contains(&CardType::Planeswalker)
+            });
             for &id in &pw_dupes {
                 state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
                 any_action = true;
@@ -1539,8 +1578,7 @@ pub fn check_state_based_actions(state: &mut GameState) {
 
             if losers.len() >= state.players.len() - 1 {
                 state.game_over = true;
-                state.winner = (0..state.players.len())
-                    .find(|&i| !state.players[i].has_lost);
+                state.winner = (0..state.players.len()).find(|&i| !state.players[i].has_lost);
             }
 
             if !any_action {
@@ -1868,7 +1906,10 @@ fn token_to_card_def(token_def: &TokenDef, card_id: u64) -> CardDef {
         keywords: token_def.keywords.clone(),
         power: Some(token_def.power as i32),
         toughness: Some(token_def.toughness as i32),
-        oracle_text: format!("{}/{} {} Token", token_def.power, token_def.toughness, token_def.name),
+        oracle_text: format!(
+            "{}/{} {} Token",
+            token_def.power, token_def.toughness, token_def.name
+        ),
         ..Default::default()
     }
 }
@@ -1918,8 +1959,7 @@ fn has_first_strike_creatures(state: &GameState) -> bool {
             || state.has_keyword(*id, KeywordAbility::DoubleStrike)
     };
 
-    state.combat.attackers.iter().any(check)
-        || state.combat.blockers.keys().any(check)
+    state.combat.attackers.iter().any(check) || state.combat.blockers.keys().any(check)
 }
 
 /// A pending damage application collected during combat resolution.
@@ -2037,8 +2077,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                         continue;
                     }
 
-                    let blocker_has_fs =
-                        state.has_keyword(blocker_id, KeywordAbility::FirstStrike);
+                    let blocker_has_fs = state.has_keyword(blocker_id, KeywordAbility::FirstStrike);
                     let blocker_has_ds =
                         state.has_keyword(blocker_id, KeywordAbility::DoubleStrike);
 
@@ -2049,8 +2088,7 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
                     };
 
                     if blocker_deals {
-                        let blocker_power =
-                            state.effective_power(blocker_id).max(0) as u32;
+                        let blocker_power = state.effective_power(blocker_id).max(0) as u32;
                         let blocker_lifelink =
                             if state.has_keyword(blocker_id, KeywordAbility::Lifelink) {
                                 Some(state.objects[&blocker_id].controller)
@@ -2090,7 +2128,9 @@ fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
 
             // Commander damage tracking (CR 903.10a)
             if state.is_commander(event.source_id) {
-                let source_owner = state.objects.get(&event.source_id)
+                let source_owner = state
+                    .objects
+                    .get(&event.source_id)
                     .map(|i| i.owner)
                     .unwrap_or(0);
                 if player < state.players.len()
@@ -2134,11 +2174,7 @@ enum TapDecision {
 /// Auto-tap lands to pay a mana cost.
 /// Simple greedy: tap colored sources first for colored requirements, then any for generic.
 /// Uses a two-phase approach: collect tap decisions (read-only), then apply them (mutate).
-pub fn auto_tap_lands(
-    state: &mut GameState,
-    player: PlayerIndex,
-    cost: &crate::mana::ManaCost,
-) {
+pub fn auto_tap_lands(state: &mut GameState, player: PlayerIndex, cost: &crate::mana::ManaCost) {
     use crate::mana::Color;
 
     let mut decisions: Vec<TapDecision> = Vec::new();
@@ -2220,8 +2256,7 @@ pub fn auto_tap_lands(
                             decisions.push(TapDecision::Color(land_id, *c));
                             1
                         }
-                        ManaAbility::TapForColorless
-                        | ManaAbility::TapForAny => {
+                        ManaAbility::TapForColorless | ManaAbility::TapForAny => {
                             decisions.push(TapDecision::Colorless(land_id, 1));
                             1
                         }
@@ -2292,6 +2327,10 @@ pub fn setup_game(
     draw_cards(state, 0, 7);
     draw_cards(state, 1, 7);
 
+    // Register default macro-combos so legal_actions can surface
+    // `ActivateMacro` when combo pieces are assembled.
+    state.combo_registry = Some(std::sync::Arc::new(crate::combo::build_default_combos()));
+
     // Set starting state
     state.active_player = 0;
     state.priority_player = 0;
@@ -2354,6 +2393,10 @@ pub fn setup_commander_game(
     // Draw opening hands (7 cards each)
     draw_cards(state, 0, 7);
     draw_cards(state, 1, 7);
+
+    // Register default macro-combos so commander goldfish can discover
+    // deterministic win lines via `ActivateMacro` when available.
+    state.combo_registry = Some(std::sync::Arc::new(crate::combo::build_default_combos()));
 
     // Set starting state — begin in Mulligan phase so players can decide
     // whether to keep or mulligan before the game starts.
@@ -2451,11 +2494,18 @@ fn resolve_mulligans_with_heuristic(state: &mut GameState) {
 
         if !ps.mulligan_decided {
             // Keep/mulligan decision: count lands in hand
-            let land_count = ps.hand.iter().filter(|&&obj_id| {
-                state.objects.get(&obj_id).map_or(false, |inst| {
-                    state.card_db().get(inst.card_def_id).map_or(false, |d| d.is_land())
+            let land_count = ps
+                .hand
+                .iter()
+                .filter(|&&obj_id| {
+                    state.objects.get(&obj_id).map_or(false, |inst| {
+                        state
+                            .card_db()
+                            .get(inst.card_def_id)
+                            .map_or(false, |d| d.is_land())
+                    })
                 })
-            }).count();
+                .count();
 
             let action = if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
                 Action::MulliganKeep
@@ -2485,7 +2535,12 @@ fn resolve_mulligans_with_heuristic(state: &mut GameState) {
                     }
                 }
             }
-            apply_action(state, &Action::MulliganBottomCard { object_id: worst_obj });
+            apply_action(
+                state,
+                &Action::MulliganBottomCard {
+                    object_id: worst_obj,
+                },
+            );
         } else {
             // Should not happen — advance_mulligan transitions out
             break;
@@ -2527,7 +2582,10 @@ pub fn validate_commander_deck(
             ));
         }
     } else {
-        return Err(format!("Commander card ID {} not found in database", commander));
+        return Err(format!(
+            "Commander card ID {} not found in database",
+            commander
+        ));
     }
 
     // Color identity check (CR 903.4): every card must have a color identity
