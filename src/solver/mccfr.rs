@@ -442,6 +442,149 @@ fn heuristic_utility(state: &GameState, player: PlayerIndex) -> f64 {
     (base + combo_bonus + mana_bonus).clamp(-1.0, 1.0)
 }
 
+/// Goldfish-optimized heuristic for single-player optimization.
+///
+/// The standard heuristic is designed for two-player zero-sum games where
+/// life differentials are symmetric. In goldfish mode, the opponent never
+/// attacks, so `life_diff ≈ 0` most of the time, producing near-zero signal.
+///
+/// This heuristic measures progress toward killing the goldfish opponent:
+///
+/// 1. **Damage dealt** (50%): `(starting_life - opp_life) / starting_life`.
+///    Directly measures how close we are to winning.
+/// 2. **Clock** (25%): Total attack power on board relative to remaining
+///    opponent life. Higher ratio = closer to lethal.
+/// 3. **Mana development** (15%): Number of lands in play, rewarding
+///    consistent land drops that enable casting spells.
+/// 4. **Combo proximity** (10%): Same as standard heuristic.
+fn goldfish_heuristic_utility(state: &GameState, pilot: PlayerIndex) -> f64 {
+    use crate::game::GameFormat;
+
+    let opp = state.opponent(pilot);
+    let opp_life = state.players[opp].life as f64;
+    let db = state.card_db();
+
+    let starting_life = match state.format {
+        GameFormat::Commander => 40.0,
+        _ => 20.0,
+    };
+
+    // 1. Damage dealt — square root scaling so early damage is valued highly.
+    //    4/40 damage → 0.32, 10/40 → 0.50, 20/40 → 0.71
+    let damage_frac = ((starting_life - opp_life) / starting_life).clamp(0.0, 1.0);
+    let damage_score = damage_frac.sqrt();
+
+    // 2. Board power — total creature power (saturates at 15)
+    let my_power: i32 = state
+        .creatures_controlled_by(pilot)
+        .iter()
+        .map(|&id| state.effective_power(id))
+        .sum();
+    let power_score = (my_power as f64 / 15.0).clamp(0.0, 1.0);
+
+    // 3. Mana development — lands in play (saturates at 5 for fast reward)
+    let lands_in_play = state
+        .battlefield
+        .iter()
+        .filter(|&&obj_id| {
+            if let Some(inst) = state.objects.get(&obj_id) {
+                if inst.controller == pilot {
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        return def.is_land();
+                    }
+                }
+            }
+            false
+        })
+        .count() as f64;
+    let mana_score = (lands_in_play / 5.0).clamp(0.0, 1.0);
+
+    // 4. Non-land permanents (mana rocks, enchantments, etc.)
+    //    Rewards playing ANY cards early.
+    let nonland_perm_count = state
+        .battlefield
+        .iter()
+        .filter(|&&obj_id| {
+            if let Some(inst) = state.objects.get(&obj_id) {
+                if inst.controller == pilot {
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        return !def.is_land();
+                    }
+                }
+            }
+            false
+        })
+        .count() as f64;
+    let perm_score = (nonland_perm_count / 4.0).clamp(0.0, 1.0);
+
+    // 5. Combo proximity
+    let combo_bonus = if let Some(ref registry) = state.combo_registry {
+        crate::combo::combo_proximity_bonus(state, pilot, registry).clamp(0.0, 0.3)
+    } else {
+        0.0
+    };
+
+    // Weighted combination — board development weighted heavily so early
+    // actions (play land, cast creature) get strong positive signal.
+    //
+    // Example values:
+    //   0 lands, 0 creatures, 0 damage: score=0.00, utility=-0.80
+    //   1 land,  0 creatures, 0 damage: score=0.05, utility=-0.73
+    //   2 lands, 1 creature(2), 0 dmg:  score=0.17, utility=-0.55
+    //   4 lands, 3 creatures(8), 8 dmg: score=0.55, utility=+0.00
+    //   5 lands, 5 creatures(15), 20dm: score=0.90, utility=+0.52
+    let score = damage_score * 0.25
+        + power_score * 0.30
+        + mana_score * 0.25
+        + perm_score * 0.10
+        + combo_bonus;
+
+    // Map [0, ~1.2] score to [-0.8, 0.95] utility range.
+    // Not reaching full ±1.0 reserves those for actual terminal win/loss.
+    (score * 1.46 - 0.8).clamp(-0.8, 0.95)
+}
+
+/// Greedy rollout evaluation for goldfish mode.
+///
+/// Plays forward a few turns using `GreedyStrategy` (for the pilot) and
+/// `GoldfishStrategy` (for the opponent), then evaluates the resulting state
+/// with the static heuristic. This gives much stronger signal than the
+/// static heuristic alone because the rollout advances the game past the
+/// MCCFR depth/budget limit, revealing the consequences of the current state.
+///
+/// The rollout is capped at `ROLLOUT_TURNS` additional turns to keep cost
+/// manageable — playing to full completion is too expensive for every leaf
+/// in full-traversal MCCFR.
+fn goldfish_rollout_utility(state: &GameState, pilot: PlayerIndex) -> f64 {
+    const ROLLOUT_TURNS: u32 = 4;
+    const ROLLOUT_MAX_ACTIONS: u32 = 120;
+
+    let mut s = state.clone();
+    let greedy = crate::strategy::GreedyStrategy;
+    let goldfish = crate::strategy::GoldfishStrategy;
+    let end_turn = s.turn_number + ROLLOUT_TURNS;
+    let mut actions_taken = 0u32;
+
+    while !s.game_over && s.turn_number <= end_turn && actions_taken < ROLLOUT_MAX_ACTIONS {
+        let player = s.priority_player;
+        let action = if player == pilot {
+            greedy.choose_action(&s, player)
+        } else {
+            goldfish.choose_action(&s, player)
+        };
+        rules::apply_action(&mut s, &action);
+        actions_taken += 1;
+    }
+
+    if s.game_over {
+        terminal_utility(&s, pilot)
+    } else {
+        // Use the static heuristic on the rolled-out state, which is now
+        // several turns advanced with greedy play.
+        goldfish_heuristic_utility(&s, pilot)
+    }
+}
+
 /// Training loop: run many MCCFR iterations and return the trained regret tables.
 ///
 /// This is the high-level training function for the minimal scenario.
@@ -1067,19 +1210,42 @@ pub struct PolicySnapshot {
 
 /// Collect policy snapshots from a trained regret table at key decision points
 /// during a sample game.
+///
+/// `opponent_strategy`: When provided, non-pilot players use this strategy
+/// instead of the regret table. Required for goldfish mode where training
+/// uses `GoldfishStrategy` for the opponent — without it, the opponent's
+/// actions are sampled uniformly from the empty regret table, causing game
+/// paths to diverge from what training explored.
+///
+/// `pilot`: The player whose regret table was trained. Only meaningful when
+/// `opponent_strategy` is `Some`. Defaults to player 0 if `None`.
 pub fn collect_policy_snapshots(
     initial_state: &GameState,
     regret_tables: &[RegretTable; 2],
     abstraction: &dyn InfoSetAbstraction,
     max_snapshots: usize,
+    pilot: Option<PlayerIndex>,
+    opponent_strategy: Option<&dyn Strategy>,
 ) -> Vec<PolicySnapshot> {
     let mut snapshots = Vec::new();
     let mut state = initial_state.clone();
+    let pilot_player = pilot.unwrap_or(0);
+
+    // Resolve mulligans with heuristic (matching training setup) so that
+    // policy snapshots show post-mulligan gameplay decisions.
+    if state.phase == crate::game::Phase::Mulligan {
+        rules::resolve_mulligans_with_heuristic(&mut state);
+    }
+
     let mut actions_taken = 0u32;
 
     while !state.game_over && actions_taken < 500 && snapshots.len() < max_snapshots {
         let player = state.priority_player;
-        let actions = legal_actions_abstracted(&state);
+        let actions = if opponent_strategy.is_some() {
+            prune_goldfish_actions(legal_actions_abstracted(&state), &state, pilot_player)
+        } else {
+            legal_actions_abstracted(&state)
+        };
 
         if actions.len() <= 1 {
             let action = if actions.is_empty() {
@@ -1090,6 +1256,17 @@ pub fn collect_policy_snapshots(
             rules::apply_action(&mut state, &action);
             actions_taken += 1;
             continue;
+        }
+
+        // Non-pilot player: use the provided opponent strategy (matching training)
+        // instead of sampling from the (empty) regret table.
+        if let Some(opp_strat) = opponent_strategy {
+            if player != pilot_player {
+                let action = opp_strat.choose_action(&state, player);
+                rules::apply_action(&mut state, &action);
+                actions_taken += 1;
+                continue;
+            }
         }
 
         let canonical_actions: Vec<_> = actions
@@ -1239,6 +1416,78 @@ where
 ///
 /// Unlike the standard `traverse`, the depth limit falls back to
 /// `heuristic_utility` unconditionally. Rollout support is intentionally
+/// Prune redundant actions in goldfish mode to reduce branching factor.
+///
+/// Removes actions that are functionally identical to PassPriority:
+/// - DeclareAttackers(empty) when there's also PassPriority and no eligible
+///   attackers with power > 0
+/// - DeclareBlockers(empty) when there's also PassPriority (goldfish never blocks)
+/// - Multiple DeclareAttackers options when all attackers have 0 power
+///   (e.g., Blood Artist can technically attack but deals 0 damage)
+fn prune_goldfish_actions(actions: Vec<Action>, state: &GameState, pilot: PlayerIndex) -> Vec<Action> {
+    use crate::game::Phase;
+
+    // Only prune in combat phases
+    match state.phase {
+        Phase::DeclareAttackers if state.priority_player == pilot => {}
+        Phase::DeclareBlockers if state.priority_player == pilot => {
+            // In goldfish, the pilot never needs to block (opponent never attacks
+            // in practice, but if blockers are offered, keep only PassPriority)
+            if actions.iter().any(|a| matches!(a, Action::PassPriority)) {
+                return actions
+                    .into_iter()
+                    .filter(|a| !matches!(a, Action::DeclareBlockers { .. }))
+                    .collect();
+            }
+            return actions;
+        }
+        _ => return actions,
+    }
+
+    // DeclareAttackers phase: check if any attacker has power > 0
+    let has_meaningful_attack = actions.iter().any(|a| {
+        if let Action::DeclareAttackers { attackers } = a {
+            if attackers.is_empty() {
+                return false;
+            }
+            // Check if total attack power > 0
+            let total_power: i32 = attackers
+                .iter()
+                .map(|&id| state.effective_power(id))
+                .sum();
+            total_power > 0
+        } else {
+            false
+        }
+    });
+
+    if has_meaningful_attack {
+        // Keep PassPriority and only attacker sets with power > 0
+        // (remove empty attacks and 0-power-only attacks)
+        actions
+            .into_iter()
+            .filter(|a| match a {
+                Action::DeclareAttackers { attackers } => {
+                    if attackers.is_empty() {
+                        return false; // Drop empty attack (PassPriority covers "don't attack")
+                    }
+                    let total: i32 = attackers.iter().map(|&id| state.effective_power(id)).sum();
+                    total > 0
+                }
+                _ => true,
+            })
+            .collect()
+    } else {
+        // No meaningful attacks possible — just PassPriority
+        actions
+            .into_iter()
+            .filter(|a| !matches!(a, Action::DeclareAttackers { .. }))
+            .collect()
+    }
+}
+
+/// Recursive goldfish MCCFR traversal.
+///
 /// omitted: goldfish games have much lower branching on the opponent
 /// side, so the shallow search reaches meaningful terminal states without
 /// needing strategy-based rollouts. Adding rollouts here would be
@@ -1263,7 +1512,7 @@ fn traverse_goldfish(
 
         // Action limit
         if actions_taken >= config.max_actions {
-            return heuristic_utility(&state, pilot);
+            return goldfish_rollout_utility(&state, pilot);
         }
 
         // Node budget: fall back to heuristic when iteration budget is exhausted.
@@ -1272,7 +1521,7 @@ fn traverse_goldfish(
         if config.max_nodes_per_iteration > 0
             && *nodes_visited >= config.max_nodes_per_iteration
         {
-            return heuristic_utility(&state, pilot);
+            return goldfish_rollout_utility(&state, pilot);
         }
 
         let player = state.priority_player;
@@ -1288,7 +1537,7 @@ fn traverse_goldfish(
         }
 
         // Pilot: MCCFR decision node
-        let actions = legal_actions_abstracted(&state);
+        let actions = prune_goldfish_actions(legal_actions_abstracted(&state), &state, pilot);
 
         // No actions — pass
         if actions.is_empty() {
@@ -1304,10 +1553,9 @@ fn traverse_goldfish(
             continue;
         }
 
-        // Depth limit — uses heuristic_utility directly; see doc comment above
-        // for rationale on omitting rollout support.
+        // Depth limit — uses goldfish heuristic for stronger signal
         if config.max_depth > 0 && depth >= config.max_depth {
-            return heuristic_utility(&state, pilot);
+            return goldfish_rollout_utility(&state, pilot);
         }
 
         // Canonicalize actions
@@ -1327,13 +1575,22 @@ fn traverse_goldfish(
             entry.current_strategy(&canonical_actions)
         };
 
-        // Explore ALL actions (traverser node)
+        // Explore ALL actions (traverser node).
+        // Shuffle exploration order so the shared node budget is distributed
+        // fairly across actions over many iterations — without shuffling, the
+        // first action in the list always gets the deepest exploration while
+        // later actions mostly hit the budget limit.
         let num_actions = actions.len();
         let mut action_utilities = vec![0.0f64; num_actions];
+        let mut explore_order: Vec<usize> = (0..num_actions).collect();
+        {
+            use rand::seq::SliceRandom;
+            explore_order.shuffle(&mut rand::thread_rng());
+        }
 
-        for (i, action) in actions.iter().enumerate() {
+        for &i in &explore_order {
             let mut child_state = state.clone();
-            rules::apply_action(&mut child_state, action);
+            rules::apply_action(&mut child_state, &actions[i]);
             action_utilities[i] = traverse_goldfish(
                 child_state,
                 regret_table,
@@ -1640,7 +1897,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
+        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000 };
         let tables = train_goldfish_parallel(&state, 8, 4, &config);
 
         // Pilot's table should have entries
@@ -1684,7 +1941,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
+        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000 };
         // 2 iterations spread across 8 shards: should not panic
         let tables = train_goldfish_parallel(&state, 2, 8, &config);
         assert!(tables[0].num_info_sets() > 0);

@@ -11,9 +11,9 @@
 //!   cargo run --release --bin commander_goldfish
 //!
 //! Options (via environment variables):
-//!   ITERATIONS=100    Number of MCCFR training iterations (default: 100)
-//!   DEPTH=10          Max tree depth per traversal (default: 10)
-//!   NODES=100000      Max nodes per iteration, 0=unlimited (default: 100000)
+//!   ITERATIONS=2000   Number of MCCFR training iterations (default: 2000)
+//!   DEPTH=4           Max tree depth per traversal (default: 4)
+//!   NODES=0           Max nodes per iteration, 0=unlimited (default: 0)
 //!   GAMES=1000        Number of simulation games (default: 1000)
 //!   DECK=kinnan       Deck to use: "kinnan", "brimaz", or "ashcoat" (default: kinnan)
 
@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use mtg_gto::card::sample;
 use mtg_gto::game::{CardDatabase, GameState};
-use mtg_gto::info_set::BucketedAbstraction;
+use mtg_gto::info_set::GoldfishBucketedAbstraction;
 use mtg_gto::rules;
 use mtg_gto::simulation::{
     run_commander_goldfish_game_verbose, simulate_commander_goldfish, GoldfishResults,
@@ -45,15 +45,15 @@ fn main() {
     let iterations: u32 = std::env::var("ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(100);
+        .unwrap_or(2000);
     let max_depth: u32 = std::env::var("DEPTH")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(10);
+        .unwrap_or(4);
     let max_nodes: u32 = std::env::var("NODES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(100_000);
+        .unwrap_or(0);
     let num_games: u64 = std::env::var("GAMES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -101,7 +101,7 @@ fn main() {
         max_actions: 2000,
         max_nodes_per_iteration: max_nodes,
     };
-    let abstraction = BucketedAbstraction;
+    let abstraction = GoldfishBucketedAbstraction;
 
     let t0 = Instant::now();
     let progress_counter = Arc::new(AtomicU32::new(0));
@@ -167,8 +167,11 @@ fn main() {
     println!();
 
     // ── 2. Simulate all three strategies ─────────────────────────────────
-    let mccfr_strat =
-        AbstractedMcfrStrategy::new(tables[0].clone(), Box::new(BucketedAbstraction));
+    let mccfr_strat = AbstractedMcfrStrategy::with_fallback(
+        tables[0].clone(),
+        Box::new(GoldfishBucketedAbstraction),
+        Box::new(GreedyStrategy),
+    );
 
     println!("Simulating {} games per strategy...", num_games);
     let t0 = Instant::now();
@@ -229,7 +232,15 @@ fn main() {
     replay_state.card_db = Some(Arc::new(db.clone()));
     rules::setup_commander_game(&mut replay_state, &deck, &deck, commander, commander);
 
-    let snapshots = collect_policy_snapshots(&replay_state, &tables, &abstraction, 60);
+    let goldfish_strat = mtg_gto::strategy::GoldfishStrategy;
+    let snapshots = collect_policy_snapshots(
+        &replay_state,
+        &tables,
+        &abstraction,
+        60,
+        Some(0),
+        Some(&goldfish_strat),
+    );
 
     let mut shown = 0;
     for snap in &snapshots {

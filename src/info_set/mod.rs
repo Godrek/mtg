@@ -496,6 +496,90 @@ impl InfoSetAbstraction for BucketedAbstraction {
     }
 }
 
+/// Goldfish-optimized abstraction for solitaire (single-player) training.
+///
+/// In goldfish mode the opponent is passive (never plays cards, never attacks),
+/// so many features of the full `BucketedAbstraction` are wasted dimensions
+/// that fragment the state space without adding information:
+///
+/// - **Opponent hand size**: always 7 (or 6 after mulligan), opponent never
+///   plays cards from hand. Removed.
+/// - **Opponent creatures**: always 0. Removed.
+/// - **Opponent command zone**: always 1. Removed.
+/// - **Phase**: collapsed to 3 categories (main, combat, other) instead of
+///   13 exact phases. Instant-speed decisions during combat steps share the
+///   same bucket as main phases.
+/// - **Active player**: irrelevant in goldfish. Removed.
+/// - **Stack**: almost never non-empty. Removed.
+///
+/// This reduces the effective state space by ~100× compared to
+/// `BucketedAbstraction`, allowing training to converge with fewer iterations.
+pub struct GoldfishBucketedAbstraction;
+
+impl GoldfishBucketedAbstraction {
+    /// Collapse 13 phases into 3 goldfish-relevant categories.
+    /// Uses u8 phase encoding from `phase_to_u8`.
+    fn phase_bucket(phase_u8: u8) -> u8 {
+        match phase_u8 {
+            // Main phases: where most decisions (play land, cast spells) happen
+            3 | 10 => 0, // PreCombatMain | PostCombatMain
+            // Combat: attack decisions
+            4 | 5 | 6 | 7 | 8 | 9 => 1, // BeginningOfCombat..EndOfCombat
+            // Other: upkeep, draw, end step, cleanup, mulligan
+            _ => 2,
+        }
+    }
+}
+
+impl InfoSetAbstraction for GoldfishBucketedAbstraction {
+    fn abstract_info_set(&self, info_set: &InformationSet) -> u64 {
+        let mut hasher = DefaultHasher::new();
+
+        // Phase bucket (3 values instead of 13)
+        Self::phase_bucket(info_set.phase).hash(&mut hasher);
+
+        // Turn bucket (3 values: early/mid/late)
+        BucketedAbstraction::turn_bucket(info_set.turn_number).hash(&mut hasher);
+
+        // Pilot life bucket
+        BucketedAbstraction::life_bucket(info_set.my_life).hash(&mut hasher);
+
+        // Opponent life bucket (tracks damage dealt — key metric in goldfish)
+        BucketedAbstraction::life_bucket(info_set.opp_life).hash(&mut hasher);
+
+        // Hand size
+        let hand_size = info_set.my_hand.len() as u8;
+        hand_size.hash(&mut hasher);
+
+        // Board: our creature count only (opponent always has 0)
+        let my_creatures: u32 = info_set
+            .battlefield
+            .iter()
+            .filter(|p| p.controller == info_set.priority_player)
+            .count() as u32;
+        my_creatures.hash(&mut hasher);
+
+        // Mana availability (bucketed)
+        let total_mana: u32 = info_set.my_mana.iter().sum();
+        let mana_bucket = total_mana.min(10);
+        mana_bucket.hash(&mut hasher);
+
+        // Land plays remaining
+        info_set.my_land_plays_remaining.hash(&mut hasher);
+
+        // Commander zone + tax
+        let my_cmd_count = info_set.my_command_zone.len() as u8;
+        my_cmd_count.hash(&mut hasher);
+        info_set.my_commander_tax.hash(&mut hasher);
+
+        hasher.finish()
+    }
+
+    fn name(&self) -> &str {
+        "GoldfishBucketed"
+    }
+}
+
 /// Extended bucketed abstraction that uses the card database for richer
 /// classification (hand roles, board power/toughness aggregates).
 ///

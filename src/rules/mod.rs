@@ -2629,7 +2629,7 @@ pub fn reshuffle_opening_hand(state: &mut GameState) {
 ///
 /// This is separate from `GreedyStrategy` to avoid a dependency from
 /// `rules` on `strategy` and to keep the logic self-contained.
-fn resolve_mulligans_with_heuristic(state: &mut GameState) {
+pub fn resolve_mulligans_with_heuristic(state: &mut GameState) {
     while state.phase == Phase::Mulligan {
         let player = state.priority_player;
         let ps = &state.players[player];

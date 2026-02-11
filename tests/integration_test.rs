@@ -3436,7 +3436,7 @@ fn test_policy_snapshot_collection() {
     let tables = train_extended(&state, 5, &train_cfg);
 
     // Collect policy snapshots
-    let snapshots = collect_policy_snapshots(&state, &tables, &abstraction, 10);
+    let snapshots = collect_policy_snapshots(&state, &tables, &abstraction, 10, None, None);
 
     // Should have at least some snapshots from the game
     assert!(

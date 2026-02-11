@@ -254,11 +254,19 @@ impl Strategy for McfrStrategy {
 /// the same way the training did. This is essential when training uses
 /// `BucketedAbstraction` — the play-time strategy must use the same abstraction
 /// or it will never find matching entries in the regret table.
+///
+/// When `fallback` is set, untrained states use the fallback strategy instead
+/// of uniform random. This is critical for goldfish mode where MCCFR training
+/// only covers a fraction of the state space — without a fallback, untrained
+/// mid/late game states get uniform random play (50% PassPriority on every
+/// decision), which makes the strategy dramatically worse than even Random.
 pub struct AbstractedMcfrStrategy {
     /// Trained regret table (read-only during play).
     policy: RegretTable,
     /// Abstraction used during training (must match).
     abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
+    /// Optional fallback strategy for untrained info sets.
+    fallback: Option<Box<dyn Strategy>>,
 }
 
 impl AbstractedMcfrStrategy {
@@ -267,7 +275,24 @@ impl AbstractedMcfrStrategy {
         policy: RegretTable,
         abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
     ) -> Self {
-        AbstractedMcfrStrategy { policy, abstraction }
+        AbstractedMcfrStrategy {
+            policy,
+            abstraction,
+            fallback: None,
+        }
+    }
+
+    /// Create a new strategy with a fallback for untrained states.
+    pub fn with_fallback(
+        policy: RegretTable,
+        abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
+        fallback: Box<dyn Strategy>,
+    ) -> Self {
+        AbstractedMcfrStrategy {
+            policy,
+            abstraction,
+            fallback: Some(fallback),
+        }
     }
 }
 
@@ -290,17 +315,26 @@ impl Strategy for AbstractedMcfrStrategy {
         let info_set = InformationSet::from_view(&view, state.card_db());
         let info_hash = self.abstraction.abstract_info_set(&info_set);
 
-        let distribution = match self.policy.get(info_hash) {
-            Some(data) => data.average_strategy(&canonical_actions),
-            None => {
-                let n = actions.len();
-                vec![1.0 / n as f64; n]
+        match self.policy.get(info_hash) {
+            Some(data) => {
+                let distribution = data.average_strategy(&canonical_actions);
+                let mut rng = rand::thread_rng();
+                let idx = sample_from_distribution(&distribution, &mut rng);
+                actions[idx].clone()
             }
-        };
-
-        let mut rng = rand::thread_rng();
-        let idx = sample_from_distribution(&distribution, &mut rng);
-        actions[idx].clone()
+            None => {
+                // Untrained state: use fallback or uniform random
+                if let Some(ref fb) = self.fallback {
+                    fb.choose_action(state, player)
+                } else {
+                    let n = actions.len();
+                    let distribution = vec![1.0 / n as f64; n];
+                    let mut rng = rand::thread_rng();
+                    let idx = sample_from_distribution(&distribution, &mut rng);
+                    actions[idx].clone()
+                }
+            }
+        }
     }
 
     fn name(&self) -> &str {

@@ -424,11 +424,22 @@ fn init_and_run_goldfish(
 ///
 /// Player 0 uses the provided strategy; player 1 is a passive goldfish
 /// that always passes priority.
+///
+/// If the game starts in the Mulligan phase (Commander format), mulligans
+/// are resolved using a greedy heuristic before the main game loop begins.
+/// This matches MCCFR training, which auto-resolves mulligans so the
+/// trained policy covers only post-mulligan gameplay.
 fn run_goldfish_loop(
     state: &mut GameState,
     strategy: &dyn Strategy,
     verbose: bool,
 ) -> GameResult {
+    // Resolve mulligans with heuristic so all strategies start from the
+    // same post-mulligan distribution, matching MCCFR training setup.
+    if state.phase == crate::game::Phase::Mulligan {
+        rules::resolve_mulligans_with_heuristic(state);
+    }
+
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
 
