@@ -16,7 +16,7 @@
 //!   NODES=100000      Max nodes per iteration, 0=unlimited (default: 100000)
 //!   GAMES=1000        Number of simulation games (default: 1000)
 //!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
-//!   BRUTE=1           Also run exhaustive branch search (default: 1)
+//!   BRUTE=1           Number of brute-force opening states to search (0 disables)
 //!   BRUTE_NODES=250000  Node cap for exhaustive search (default: 250000)
 //!   BRUTE_TURNS=20      Turn cap for exhaustive search (default: 20)
 
@@ -31,7 +31,7 @@ use mtg_gto::info_set::BucketedAbstraction;
 use mtg_gto::rules;
 use mtg_gto::simulation::{
     run_commander_goldfish_game_verbose, search_goldfish_branches, simulate_commander_goldfish,
-    GoldfishResults, GoldfishSearchConfig,
+    GoldfishLine, GoldfishResults, GoldfishSearchConfig,
 };
 use mtg_gto::solver::mccfr::{self, collect_policy_snapshots, McfrConfig};
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, RandomStrategy};
@@ -54,10 +54,11 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1000);
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "kinnan".to_string());
-    let brute_force = std::env::var("BRUTE")
+    let brute_games: u32 = std::env::var("BRUTE")
         .ok()
-        .map(|v| v != "0")
-        .unwrap_or(true);
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let brute_force = brute_games > 0;
     let brute_nodes: u64 = std::env::var("BRUTE_NODES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -94,8 +95,8 @@ fn main() {
     println!("Sim games:  {}", num_games);
     if brute_force {
         println!(
-            "Brute mode: enabled ({} nodes, {} turns)",
-            brute_nodes, brute_turns
+            "Brute mode: enabled ({} opening states, {} nodes, {} turns)",
+            brute_games, brute_nodes, brute_turns
         );
     } else {
         println!("Brute mode: disabled");
@@ -237,45 +238,81 @@ fn main() {
     );
     println!();
 
-    // ── 6. Exhaustive branch search (single shuffled game) ──────────────
+    // ── 6. Exhaustive branch search (multiple opening states) ────────────
     if brute_force {
-        println!("Exhaustive Goldfish Branch Search (single game)");
+        println!("Exhaustive Goldfish Branch Search");
         println!("──────────────────────────────────────────────");
 
-        let mut brute_state = GameState::new_commander(2);
-        brute_state.card_db = Some(Arc::new(db.clone()));
-        rules::setup_commander_game(&mut brute_state, &deck, &deck, commander, commander);
-        rules::set_tutor_targets(&mut brute_state, 0, &tutor_targets);
-        rules::set_tutor_targets(&mut brute_state, 1, &tutor_targets);
+        let mut total_nodes = 0u64;
+        let mut total_terminals = 0u64;
+        let mut total_wins = 0u64;
+        let mut total_losses = 0u64;
+        let mut total_draws = 0u64;
+        let mut truncated_runs = 0u32;
+        let mut best_win: Option<(u32, GoldfishLine)> = None;
 
-        let brute_result = search_goldfish_branches(
-            &brute_state,
-            0,
-            GoldfishSearchConfig {
-                max_turns: brute_turns,
-                max_actions: 10_000,
-                max_nodes: brute_nodes,
-            },
-        );
+        for game_idx in 0..brute_games {
+            let mut brute_state = GameState::new_commander(2);
+            brute_state.card_db = Some(Arc::new(db.clone()));
+            rules::setup_commander_game(&mut brute_state, &deck, &deck, commander, commander);
+            rules::set_tutor_targets(&mut brute_state, 0, &tutor_targets);
+            rules::set_tutor_targets(&mut brute_state, 1, &tutor_targets);
 
-        println!("Nodes explored:   {}", brute_result.nodes_explored);
-        println!("Terminal lines:   {}", brute_result.terminal_lines);
-        println!(
-            "Wins/Loss/Draw:   {}/{}/{}",
-            brute_result.wins, brute_result.losses, brute_result.draws
-        );
-        if brute_result.truncated {
-            println!(
-                "Status:           TRUNCATED (increase BRUTE_NODES to enumerate all branches)"
+            let brute_result = search_goldfish_branches(
+                &brute_state,
+                0,
+                GoldfishSearchConfig {
+                    max_turns: brute_turns,
+                    max_actions: 10_000,
+                    max_nodes: brute_nodes,
+                },
             );
-        } else {
-            println!("Status:           COMPLETE");
+
+            total_nodes += brute_result.nodes_explored;
+            total_terminals += brute_result.terminal_lines;
+            total_wins += brute_result.wins;
+            total_losses += brute_result.losses;
+            total_draws += brute_result.draws;
+            if brute_result.truncated {
+                truncated_runs += 1;
+            }
+
+            if let Some(line) = brute_result.fastest_win {
+                let replace = match &best_win {
+                    None => true,
+                    Some((_, existing)) => {
+                        line.turns < existing.turns
+                            || (line.turns == existing.turns
+                                && line.actions_taken < existing.actions_taken)
+                    }
+                };
+                if replace {
+                    best_win = Some((game_idx + 1, line));
+                }
+            }
         }
 
-        if let Some(line) = &brute_result.fastest_win {
+        println!("Opening states:   {}", brute_games);
+        println!("Nodes explored:   {}", total_nodes);
+        println!("Terminal lines:   {}", total_terminals);
+        println!(
+            "Wins/Loss/Draw:   {}/{}/{}",
+            total_wins, total_losses, total_draws
+        );
+        println!(
+            "Truncated runs:   {}{}",
+            truncated_runs,
+            if truncated_runs > 0 {
+                " (increase BRUTE_NODES to enumerate more of each tree)"
+            } else {
+                ""
+            }
+        );
+
+        if let Some((state_idx, line)) = &best_win {
             println!(
-                "Fastest win line: T{} ({} actions, life {}/{})",
-                line.turns, line.actions_taken, line.final_life[0], line.final_life[1],
+                "Fastest win line: state #{} T{} ({} actions, life {}/{})",
+                state_idx, line.turns, line.actions_taken, line.final_life[0], line.final_life[1],
             );
             for (i, action) in line.actions.iter().enumerate().take(80) {
                 println!("  {:>2}. {}", i + 1, action);
@@ -284,7 +321,13 @@ fn main() {
                 println!("  ... ({} more actions)", line.actions.len() - 80);
             }
         } else {
-            println!("Fastest win line: none found within search limits");
+            println!("Fastest win line: none found in searched opening states");
+            if brute_turns < 20 {
+                println!(
+                    "Note: BRUTE_TURNS={} caps search before turn 20.",
+                    brute_turns
+                );
+            }
         }
         println!();
     }
