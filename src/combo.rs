@@ -121,9 +121,12 @@ impl ComboRegistry {
 /// - **Basalt Monolith + Kinnan**: Tap Monolith for 3 colorless, Kinnan adds
 ///   1 (total 4), pay 3 to untap = net +1 per iteration = infinite colorless.
 ///   Macro produces 100 colorless mana (enough to win via any mana sink).
-/// - **Grim Monolith + Kinnan**: Tap Grim for 3, Kinnan adds 1 (total 4),
-///   pay 4 to untap = net 0, BUT Kinnan triggers again on the re-tap making
-///   it net +1 per full cycle. We model this as producing 100 colorless.
+///
+/// NOT registered (common misconception):
+/// - Grim Monolith + Kinnan: Grim taps for 3, Kinnan adds 1 = 4 total, but
+///   Grim costs {4} to untap = net 0. This is break-even, not infinite.
+///   Kinnan only triggers when a permanent is tapped for mana, not when
+///   activating the untap ability.
 pub fn build_default_combos() -> ComboRegistry {
     use crate::card::sample::ids;
 
@@ -136,18 +139,6 @@ pub fn build_default_combos() -> ComboRegistry {
         name: "Basalt Monolith + Kinnan Infinite Mana".into(),
         required_pieces: vec![ids::BASALT_MONOLITH, ids::KINNAN_BONDER_PRODIGY],
         preconditions: vec![ComboPrecondition::PieceUntapped(ids::BASALT_MONOLITH)],
-        effect: ComboEffect::AddColorlessMana(100),
-        reward_weight: 0.2,
-    });
-
-    // Grim Monolith + Kinnan = infinite colorless mana
-    // Grim taps for 3, Kinnan adds 1 = 4 total; pay 4 to untap = break-even,
-    // but next tap cycle Kinnan triggers again = net +1/full cycle
-    registry.register(ComboDef {
-        id: 0,
-        name: "Grim Monolith + Kinnan Infinite Mana".into(),
-        required_pieces: vec![ids::GRIM_MONOLITH, ids::KINNAN_BONDER_PRODIGY],
-        preconditions: vec![ComboPrecondition::PieceUntapped(ids::GRIM_MONOLITH)],
         effect: ComboEffect::AddColorlessMana(100),
         reward_weight: 0.2,
     });
@@ -452,15 +443,15 @@ mod tests {
     fn test_combo_proximity_partial() {
         let (mut state, registry) = setup_state_with_combos();
 
-        // Only Kinnan (1 of 2 pieces for both combos)
+        // Only Kinnan (1 of 2 pieces for Basalt Monolith combo)
         state.create_card_in_zone(ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
         let bonus = combo_proximity_bonus(&state, 0, &registry);
-        // Kinnan is 1/2 of both combos, each with weight 0.2
-        // bonus = (0.5 * 0.2) + (0.5 * 0.2) = 0.2
+        // Kinnan is 1/2 of the Basalt combo, weight 0.2
+        // bonus = 0.5 * 0.2 = 0.1
         assert!(
-            (bonus - 0.2).abs() < 1e-10,
-            "Half pieces = half weight per combo, got {}",
+            (bonus - 0.1).abs() < 1e-10,
+            "Half pieces = half weight, got {}",
             bonus
         );
     }
@@ -475,10 +466,9 @@ mod tests {
 
         let bonus = combo_proximity_bonus(&state, 0, &registry);
         // Basalt combo: 2/2 * 0.2 = 0.2
-        // Grim combo: 1/2 * 0.2 = 0.1 (Kinnan present, Grim not)
         assert!(
-            (bonus - 0.3).abs() < 1e-10,
-            "Full + partial = 0.3, got {}",
+            (bonus - 0.2).abs() < 1e-10,
+            "Full combo = 0.2, got {}",
             bonus
         );
     }
@@ -504,21 +494,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_grim_monolith_combo() {
-        let (mut state, registry) = setup_state_with_combos();
-
-        let grim = state.create_card_in_zone(ids::GRIM_MONOLITH, 0, ZoneType::Battlefield);
-        state.create_card_in_zone(ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
-
-        let available = detect_available_combos(&state, 0, &registry);
-        assert!(
-            available.contains(&1),
-            "Grim Monolith + Kinnan combo should be available"
-        );
-
-        apply_combo_effect(&mut state, 0, &registry.combos[1]);
-        assert_eq!(state.players[0].mana_pool.colorless, 100);
-        assert!(state.objects[&grim].tapped);
-    }
 }
