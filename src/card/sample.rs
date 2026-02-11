@@ -338,7 +338,7 @@ pub mod ids {
     pub const GRAVE_PACT: u64 = 983;
     pub const PHYREXIAN_ARENA: u64 = 984;
     pub const PHYREXIAN_RECLAMATION: u64 = 985;
-    pub const POSTS_CITADEL: u64 = 986;
+    pub const BOLASS_CITADEL: u64 = 986;
 
     // --- Lands ---
     pub const CABAL_COFFERS: u64 = 1000;
@@ -4306,14 +4306,15 @@ pub fn build_sample_db() -> CardDatabase {
 
     // Bloodline Pretender {3}
     // Artifact Creature — Shapeshifter 2/2
-    // Changeling. Whenever another creature with a shared creature type enters
-    // the battlefield under your control, put a +1/+1 counter on Bloodline Pretender.
+    // Changeling (has all creature types). Whenever another creature with a
+    // shared creature type enters the battlefield under your control, put a
+    // +1/+1 counter on Bloodline Pretender.
     db.insert(CardDef {
         id: ids::BLOODLINE_PRETENDER,
         name: "Bloodline Pretender".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact, CardType::Creature],
-        subtypes: vec![Subtype("Shapeshifter".into())],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Rat".into())],
         power: Some(2),
         toughness: Some(2),
         triggered_abilities: vec![
@@ -4351,13 +4352,14 @@ pub fn build_sample_db() -> CardDatabase {
 
     // Changeling Outcast {B}
     // Creature — Shapeshifter 1/1
-    // Changeling. Can't be blocked.
+    // Changeling (has all creature types). Can't be blocked.
     db.insert(CardDef {
         id: ids::CHANGELING_OUTCAST,
         name: "Changeling Outcast".into(),
         mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
         card_types: vec![CardType::Creature],
-        subtypes: vec![Subtype("Shapeshifter".into())],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Rat".into())],
+        keywords: vec![KeywordAbility::CantBlock],
         power: Some(1),
         toughness: Some(1),
         oracle_text: "Changeling. Changeling Outcast can't be blocked.".into(),
@@ -4440,10 +4442,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::YouCastSpell,
-                effect: Effect::Multiple(vec![
-                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
-                    Effect::GainLife { amount: 1 },
-                ]),
+                effect: Effect::Unimplemented("Extort — You may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into()),
                 description: "Extort — Whenever you cast a spell, you may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into(),
             },
         ],
@@ -4606,21 +4605,14 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![
             StaticAbility::GrantKeyword {
                 keyword: KeywordAbility::Fear,
-                affected: AffectedObjects::AllCreatures, // All Rats — simplified
+                affected: AffectedObjects::CreaturesControlledBy(0), // All Rats — approximated as all creatures you control (no subtype filter in engine)
             },
         ],
         activated_abilities: vec![
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
-                effect: Effect::CreateToken(TokenDef {
-                    name: "Rat".into(),
-                    power: 1,
-                    toughness: 1,
-                    colors: vec![Color::Black],
-                    subtypes: vec![Subtype("Rat".into())],
-                    keywords: vec![],
-                }),
+                effect: Effect::Unimplemented("Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into()),
                 description: "{T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into(),
             },
         ],
@@ -4930,15 +4922,15 @@ pub fn build_sample_db() -> CardDatabase {
 
     // Roaming Throne {4}
     // Artifact Creature — Golem 4/4
-    // Changeling. As Roaming Throne enters the battlefield, choose a creature type.
-    // If a triggered ability of a creature you control with the chosen type triggers,
-    // it triggers an additional time.
+    // Changeling (has all creature types). As Roaming Throne enters the
+    // battlefield, choose a creature type. If a triggered ability of a creature
+    // you control with the chosen type triggers, it triggers an additional time.
     db.insert(CardDef {
         id: ids::ROAMING_THRONE,
         name: "Roaming Throne".into(),
         mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact, CardType::Creature],
-        subtypes: vec![Subtype("Golem".into())],
+        subtypes: vec![Subtype("Golem".into()), Subtype("Rat".into())],
         power: Some(4),
         toughness: Some(4),
         oracle_text: "Changeling. As Roaming Throne enters the battlefield, choose a creature type. If a triggered ability of a creature you control with the chosen type triggers, it triggers an additional time.".into(),
@@ -5107,11 +5099,20 @@ pub fn build_sample_db() -> CardDatabase {
     // Artifact
     // Each creature gets +1/+1 for each other creature on the battlefield that
     // shares at least one creature type with it.
+    // NOTE: Dynamic tribal anthem not yet modeled — would need per-creature
+    // counting of shared subtypes.
     db.insert(CardDef {
         id: ids::COAT_OF_ARMS,
         name: "Coat of Arms".into(),
         mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 2,
+                toughness: 2,
+                affected: AffectedObjects::CreaturesControlledBy(0), // Approximation: +2/+2 to your creatures (typical Rat board)
+            },
+        ],
         oracle_text: "Each creature gets +1/+1 for each other creature on the battlefield that shares at least one creature type with it.".into(),
         ..Default::default()
     });
@@ -5329,7 +5330,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::ACreatureDies,
-                effect: Effect::Unimplemented("Untap equipped creature.".into()),
+                effect: Effect::UntapTarget { target: TargetSpec::NoTarget },
                 description: "Whenever a creature dies, untap equipped creature.".into(),
             },
         ],
@@ -5548,15 +5549,15 @@ pub fn build_sample_db() -> CardDatabase {
     });
 
     // Bolas's Citadel {3}{B}{B}{B}
-    // Legendary Artifact (listed as "Post's Citadel" in the decklist)
+    // Legendary Artifact
     // You may look at the top card of your library at any time.
     // You may play lands and cast spells from the top of your library. Whenever
     // you cast a spell this way, pay life equal to its mana value rather than
     // paying its mana cost. {T}, Sacrifice ten nonland permanents: Each opponent
     // loses 10 life.
     db.insert(CardDef {
-        id: ids::POSTS_CITADEL,
-        name: "Post's Citadel".into(),
+        id: ids::BOLASS_CITADEL,
+        name: "Bolas's Citadel".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 3, 0, 0)),
         card_types: vec![CardType::Artifact],
         supertypes: vec![Supertype::Legendary],
@@ -6238,7 +6239,7 @@ pub fn ashcoat_commander_deck() -> (Vec<CardId>, CardId) {
     deck.push(ids::GRAVE_PACT);
     deck.push(ids::PHYREXIAN_ARENA);
     deck.push(ids::PHYREXIAN_RECLAMATION);
-    deck.push(ids::POSTS_CITADEL);
+    deck.push(ids::BOLASS_CITADEL);
 
     // Lands (7 nonbasic)
     deck.push(ids::CABAL_COFFERS);
@@ -6257,8 +6258,8 @@ pub fn ashcoat_commander_deck() -> (Vec<CardId>, CardId) {
     // Mana artifacts already in database
     deck.push(ids::LOTUS_PETAL);
 
-    // 28 Swamps
-    for _ in 0..28 {
+    // 29 Swamps
+    for _ in 0..29 {
         deck.push(ids::SWAMP);
     }
 

@@ -51,7 +51,7 @@
 1 Path of Ancestry
 1 Phyrexian Arena
 1 Phyrexian Reclamation
-1 Post's Citadel
+1 Bolas's Citadel
 1 Ratcatcher
 1 Ravenous Rats
 1 Refurbished Familiar
@@ -62,7 +62,7 @@
 1 Sol Ring
 1 Species Specialist
 1 Strionic Resonator
-28 Swamp
+29 Swamp
 1 Swarmyard
 1 The Immortal Sun
 1 Thornbite Staff
