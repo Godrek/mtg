@@ -563,6 +563,15 @@ pub struct Decklist {
     /// Commander cards (for Commander format decks).
     #[serde(default)]
     pub commanders: Vec<DeckEntry>,
+    /// Cards that tutors can search for. When a tutor effect resolves and this
+    /// list is non-empty, the player chooses from this restricted set (intersected
+    /// with cards actually in their library). MCCFR learns which target is optimal
+    /// in each game state.
+    ///
+    /// If empty, tutors fall back to taking the top card of the library (legacy
+    /// behavior), keeping backward compatibility with existing tests/configs.
+    #[serde(default)]
+    pub tutor_targets: Vec<CardId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
