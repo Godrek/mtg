@@ -290,6 +290,60 @@ const GOLDFISH_MAX_TURNS: u32 = 20;
 /// Maximum actions per goldfish game (lower bound since opponent does nothing).
 const GOLDFISH_MAX_ACTIONS: u32 = 10_000;
 
+/// Configuration for exhaustive goldfish search.
+///
+/// The search explores every pilot decision branch while treating all
+/// non-pilot players as deterministic goldfish opponents.
+#[derive(Debug, Clone, Copy)]
+pub struct GoldfishSearchConfig {
+    /// Maximum turn reached before the node is treated as terminal.
+    pub max_turns: u32,
+    /// Maximum number of actions in a single line before termination.
+    pub max_actions: u32,
+    /// Maximum number of expanded nodes in the search tree.
+    /// 0 means unlimited.
+    pub max_nodes: u64,
+}
+
+impl Default for GoldfishSearchConfig {
+    fn default() -> Self {
+        Self {
+            max_turns: GOLDFISH_MAX_TURNS,
+            max_actions: GOLDFISH_MAX_ACTIONS,
+            max_nodes: 250_000,
+        }
+    }
+}
+
+/// One concrete line (sequence of actions) discovered by exhaustive search.
+#[derive(Debug, Clone)]
+pub struct GoldfishLine {
+    pub turns: u32,
+    pub actions_taken: u32,
+    pub final_life: [i32; 2],
+    pub actions: Vec<crate::action::Action>,
+}
+
+/// Aggregate outcome from exhaustive goldfish branch search.
+#[derive(Debug, Clone)]
+pub struct GoldfishSearchResult {
+    pub nodes_explored: u64,
+    pub terminal_lines: u64,
+    pub wins: u64,
+    pub losses: u64,
+    pub draws: u64,
+    /// True when search hit `max_nodes` and could not enumerate all branches.
+    pub truncated: bool,
+    /// Fastest winning line found, if any.
+    pub fastest_win: Option<GoldfishLine>,
+}
+
+impl GoldfishSearchResult {
+    pub fn has_win(&self) -> bool {
+        self.fastest_win.is_some()
+    }
+}
+
 /// Aggregate results from goldfish simulation.
 ///
 /// Tracks kill-turn distribution in addition to standard win/loss stats.
@@ -400,6 +454,143 @@ pub fn run_commander_goldfish_game_verbose(
     run_goldfish_loop(&mut state, strategy, true)
 }
 
+/// Exhaustively explore all pilot branches in a single goldfish game setup.
+///
+/// - Player `pilot` explores every legal action branch.
+/// - Non-pilot players act as deterministic goldfish (always pass/forced action).
+/// - Search stops at terminal state, turn/action limits, or node budget.
+pub fn search_goldfish_branches(
+    initial_state: &GameState,
+    pilot: PlayerIndex,
+    config: GoldfishSearchConfig,
+) -> GoldfishSearchResult {
+    let mut result = GoldfishSearchResult {
+        nodes_explored: 0,
+        terminal_lines: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        truncated: false,
+        fastest_win: None,
+    };
+    let mut path = Vec::new();
+    search_goldfish_branches_rec(
+        initial_state.clone(),
+        pilot,
+        config,
+        0,
+        &mut path,
+        &mut result,
+    );
+    result
+}
+
+fn search_goldfish_branches_rec(
+    mut state: GameState,
+    pilot: PlayerIndex,
+    config: GoldfishSearchConfig,
+    mut actions_taken: u32,
+    path: &mut Vec<crate::action::Action>,
+    result: &mut GoldfishSearchResult,
+) {
+    if result.truncated {
+        return;
+    }
+    result.nodes_explored += 1;
+
+    if config.max_nodes > 0 && result.nodes_explored > config.max_nodes {
+        result.truncated = true;
+        return;
+    }
+
+    if state.game_over {
+        record_goldfish_terminal(result, state.winner, &state, pilot, actions_taken, path);
+        return;
+    }
+    if state.turn_number > config.max_turns || actions_taken >= config.max_actions {
+        record_goldfish_terminal(result, None, &state, pilot, actions_taken, path);
+        return;
+    }
+
+    // Resolve all non-pilot decisions deterministically (goldfish players).
+    let goldfish = GoldfishStrategy;
+    while !state.game_over
+        && state.priority_player != pilot
+        && state.turn_number <= config.max_turns
+        && actions_taken < config.max_actions
+    {
+        let action = goldfish.choose_action(&state, state.priority_player);
+        rules::apply_action(&mut state, &action);
+        actions_taken += 1;
+    }
+
+    if state.game_over {
+        record_goldfish_terminal(result, state.winner, &state, pilot, actions_taken, path);
+        return;
+    }
+    if state.turn_number > config.max_turns || actions_taken >= config.max_actions {
+        record_goldfish_terminal(result, None, &state, pilot, actions_taken, path);
+        return;
+    }
+
+    let actions = legal_actions(&state);
+    if actions.is_empty() {
+        let mut next = state;
+        let action = crate::action::Action::PassPriority;
+        rules::apply_action(&mut next, &action);
+        path.push(action);
+        search_goldfish_branches_rec(next, pilot, config, actions_taken + 1, path, result);
+        path.pop();
+        return;
+    }
+
+    for action in actions {
+        let mut next = state.clone();
+        rules::apply_action(&mut next, &action);
+        path.push(action);
+        search_goldfish_branches_rec(next, pilot, config, actions_taken + 1, path, result);
+        path.pop();
+        if result.truncated {
+            return;
+        }
+    }
+}
+
+fn record_goldfish_terminal(
+    result: &mut GoldfishSearchResult,
+    winner: Option<PlayerIndex>,
+    state: &GameState,
+    pilot: PlayerIndex,
+    actions_taken: u32,
+    path: &[crate::action::Action],
+) {
+    result.terminal_lines += 1;
+    match winner {
+        Some(w) if w == pilot => {
+            result.wins += 1;
+            let candidate = GoldfishLine {
+                turns: state.turn_number,
+                actions_taken,
+                final_life: [state.players[0].life, state.players[1].life],
+                actions: path.to_vec(),
+            };
+            let replace = match &result.fastest_win {
+                None => true,
+                Some(existing) => {
+                    candidate.turns < existing.turns
+                        || (candidate.turns == existing.turns
+                            && candidate.actions_taken < existing.actions_taken)
+                }
+            };
+            if replace {
+                result.fastest_win = Some(candidate);
+            }
+        }
+        Some(_) => result.losses += 1,
+        None => result.draws += 1,
+    }
+}
+
 /// Initialize a game state and run the goldfish loop.
 ///
 /// The `setup` closure receives a `&mut GameState` with `card_db` already set.
@@ -424,11 +615,7 @@ fn init_and_run_goldfish(
 ///
 /// Player 0 uses the provided strategy; player 1 is a passive goldfish
 /// that always passes priority.
-fn run_goldfish_loop(
-    state: &mut GameState,
-    strategy: &dyn Strategy,
-    verbose: bool,
-) -> GameResult {
+fn run_goldfish_loop(state: &mut GameState, strategy: &dyn Strategy, verbose: bool) -> GameResult {
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
 
@@ -605,9 +792,7 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
         crate::action::Action::ChooseTutorTarget { card_id } => {
             format!(
                 "Tutor for {}",
-                db.get(*card_id)
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("?")
+                db.get(*card_id).map(|d| d.name.as_str()).unwrap_or("?")
             )
         }
         other => format!("{}", other),
@@ -621,4 +806,60 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
         state.players[0].life,
         state.players[1].life,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::card::sample;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_search_goldfish_branches_runs_on_commander_setup() {
+        let db = sample::build_sample_db();
+        let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
+
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+        rules::set_tutor_targets(&mut state, 1, &tutor_targets);
+
+        let result = search_goldfish_branches(
+            &state,
+            0,
+            GoldfishSearchConfig {
+                max_turns: 4,
+                max_actions: 500,
+                max_nodes: 5_000,
+            },
+        );
+
+        assert!(result.nodes_explored > 0);
+        assert!(result.terminal_lines > 0 || result.truncated);
+    }
+
+    #[test]
+    fn test_search_goldfish_branches_respects_node_cap() {
+        let db = sample::build_sample_db();
+        let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
+
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+        rules::set_tutor_targets(&mut state, 1, &tutor_targets);
+
+        let result = search_goldfish_branches(
+            &state,
+            0,
+            GoldfishSearchConfig {
+                max_turns: 20,
+                max_actions: 10_000,
+                max_nodes: 10,
+            },
+        );
+
+        assert!(result.truncated);
+    }
 }

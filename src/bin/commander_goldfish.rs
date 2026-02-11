@@ -16,6 +16,9 @@
 //!   NODES=100000      Max nodes per iteration, 0=unlimited (default: 100000)
 //!   GAMES=1000        Number of simulation games (default: 1000)
 //!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
+//!   BRUTE=1           Also run exhaustive branch search (default: 1)
+//!   BRUTE_NODES=250000  Node cap for exhaustive search (default: 250000)
+//!   BRUTE_TURNS=20      Turn cap for exhaustive search (default: 20)
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -27,7 +30,8 @@ use mtg_gto::game::{CardDatabase, GameState};
 use mtg_gto::info_set::BucketedAbstraction;
 use mtg_gto::rules;
 use mtg_gto::simulation::{
-    run_commander_goldfish_game_verbose, simulate_commander_goldfish, GoldfishResults,
+    run_commander_goldfish_game_verbose, search_goldfish_branches, simulate_commander_goldfish,
+    GoldfishResults, GoldfishSearchConfig,
 };
 use mtg_gto::solver::mccfr::{self, collect_policy_snapshots, McfrConfig};
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, RandomStrategy};
@@ -50,6 +54,18 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1000);
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "kinnan".to_string());
+    let brute_force = std::env::var("BRUTE")
+        .ok()
+        .map(|v| v != "0")
+        .unwrap_or(true);
+    let brute_nodes: u64 = std::env::var("BRUTE_NODES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(250_000);
+    let brute_turns: u32 = std::env::var("BRUTE_TURNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
 
     let db = sample::build_sample_db();
     let (deck, commander, tutor_targets) = match deck_name.as_str() {
@@ -67,8 +83,23 @@ fn main() {
     println!("Deck:       {} ({})", deck_name, commander_name);
     println!("Iterations: {}", iterations);
     println!("Depth:      {}", max_depth);
-    println!("Node budget:{}", if max_nodes == 0 { "unlimited".to_string() } else { format!("{}", max_nodes) });
+    println!(
+        "Node budget:{}",
+        if max_nodes == 0 {
+            "unlimited".to_string()
+        } else {
+            format!("{}", max_nodes)
+        }
+    );
     println!("Sim games:  {}", num_games);
+    if brute_force {
+        println!(
+            "Brute mode: enabled ({} nodes, {} turns)",
+            brute_nodes, brute_turns
+        );
+    } else {
+        println!("Brute mode: disabled");
+    }
     println!();
 
     // Build card name lookup for readable output
@@ -99,24 +130,22 @@ fn main() {
     let printer_handle = {
         let progress = progress_counter.clone();
         let done = training_done.clone();
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                if done.load(Ordering::Relaxed) {
-                    break;
-                }
-                let completed = progress.load(Ordering::Relaxed);
-                let elapsed = t0.elapsed().as_secs_f64();
-                let eta = if completed > 0 {
-                    elapsed / completed as f64 * (iterations - completed) as f64
-                } else {
-                    0.0
-                };
-                eprint!(
-                    "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
-                    completed, iterations, elapsed, eta,
-                );
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if done.load(Ordering::Relaxed) {
+                break;
             }
+            let completed = progress.load(Ordering::Relaxed);
+            let elapsed = t0.elapsed().as_secs_f64();
+            let eta = if completed > 0 {
+                elapsed / completed as f64 * (iterations - completed) as f64
+            } else {
+                0.0
+            };
+            eprint!(
+                "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
+                completed, iterations, elapsed, eta,
+            );
         })
     };
 
@@ -139,7 +168,9 @@ fn main() {
     // Print final progress line
     eprint!(
         "\r  iter {}/{} | {:.1}s elapsed              ",
-        iterations, iterations, train_time.as_secs_f64(),
+        iterations,
+        iterations,
+        train_time.as_secs_f64(),
     );
     eprintln!();
     let _ = printer_handle.join();
@@ -154,8 +185,7 @@ fn main() {
     println!();
 
     // ── 2. Simulate all three strategies ─────────────────────────────────
-    let mccfr_strat =
-        AbstractedMcfrStrategy::new(tables[0].clone(), Box::new(BucketedAbstraction));
+    let mccfr_strat = AbstractedMcfrStrategy::new(tables[0].clone(), Box::new(BucketedAbstraction));
 
     println!("Simulating {} games per strategy...", num_games);
     let t0 = Instant::now();
@@ -163,8 +193,7 @@ fn main() {
         simulate_commander_goldfish(&db, &deck, commander, &RandomStrategy, num_games);
     let greedy_results =
         simulate_commander_goldfish(&db, &deck, commander, &GreedyStrategy, num_games);
-    let mccfr_results =
-        simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
+    let mccfr_results = simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
     let sim_time = t0.elapsed();
     println!("Simulation complete in {:.1}s\n", sim_time.as_secs_f64());
 
@@ -208,7 +237,59 @@ fn main() {
     );
     println!();
 
-    // ── 6. Policy snapshots at key decision points ───────────────────────
+    // ── 6. Exhaustive branch search (single shuffled game) ──────────────
+    if brute_force {
+        println!("Exhaustive Goldfish Branch Search (single game)");
+        println!("──────────────────────────────────────────────");
+
+        let mut brute_state = GameState::new_commander(2);
+        brute_state.card_db = Some(Arc::new(db.clone()));
+        rules::setup_commander_game(&mut brute_state, &deck, &deck, commander, commander);
+        rules::set_tutor_targets(&mut brute_state, 0, &tutor_targets);
+        rules::set_tutor_targets(&mut brute_state, 1, &tutor_targets);
+
+        let brute_result = search_goldfish_branches(
+            &brute_state,
+            0,
+            GoldfishSearchConfig {
+                max_turns: brute_turns,
+                max_actions: 10_000,
+                max_nodes: brute_nodes,
+            },
+        );
+
+        println!("Nodes explored:   {}", brute_result.nodes_explored);
+        println!("Terminal lines:   {}", brute_result.terminal_lines);
+        println!(
+            "Wins/Loss/Draw:   {}/{}/{}",
+            brute_result.wins, brute_result.losses, brute_result.draws
+        );
+        if brute_result.truncated {
+            println!(
+                "Status:           TRUNCATED (increase BRUTE_NODES to enumerate all branches)"
+            );
+        } else {
+            println!("Status:           COMPLETE");
+        }
+
+        if let Some(line) = &brute_result.fastest_win {
+            println!(
+                "Fastest win line: T{} ({} actions, life {}/{})",
+                line.turns, line.actions_taken, line.final_life[0], line.final_life[1],
+            );
+            for (i, action) in line.actions.iter().enumerate().take(80) {
+                println!("  {:>2}. {}", i + 1, action);
+            }
+            if line.actions.len() > 80 {
+                println!("  ... ({} more actions)", line.actions.len() - 80);
+            }
+        } else {
+            println!("Fastest win line: none found within search limits");
+        }
+        println!();
+    }
+
+    // ── 7. Policy snapshots at key decision points ───────────────────────
     println!("MCCFR Policy at Key Decision Points (pilot only)");
     println!("─────────────────────────────────────────────────");
 
@@ -352,8 +433,16 @@ fn print_distribution_comparison(
     let mut cum_m = 0u64;
 
     for turn in 1..=max_turn {
-        let rc = random.kill_turn_distribution.get(turn).copied().unwrap_or(0);
-        let gc = greedy.kill_turn_distribution.get(turn).copied().unwrap_or(0);
+        let rc = random
+            .kill_turn_distribution
+            .get(turn)
+            .copied()
+            .unwrap_or(0);
+        let gc = greedy
+            .kill_turn_distribution
+            .get(turn)
+            .copied()
+            .unwrap_or(0);
         let mc = mccfr.kill_turn_distribution.get(turn).copied().unwrap_or(0);
         cum_r += rc;
         cum_g += gc;
