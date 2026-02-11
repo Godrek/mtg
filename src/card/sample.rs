@@ -4605,14 +4605,24 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![
             StaticAbility::GrantKeyword {
                 keyword: KeywordAbility::Fear,
-                affected: AffectedObjects::CreaturesControlledBy(0), // All Rats — approximated as all creatures you control (no subtype filter in engine)
+                affected: AffectedObjects::CreaturesControlledBy(0), // All Rats you control — simplified to all your creatures
             },
         ],
         activated_abilities: vec![
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
-                effect: Effect::Unimplemented("Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into()),
+                effect: Effect::CreateTokens {
+                    token: TokenDef {
+                        name: "Rat".into(),
+                        power: 1,
+                        toughness: 1,
+                        colors: vec![Color::Black],
+                        subtypes: vec![Subtype("Rat".into())],
+                        keywords: vec![],
+                    },
+                    count: DynamicValue::CreaturesControlled,
+                },
                 description: "{T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into(),
             },
         ],
@@ -5107,10 +5117,12 @@ pub fn build_sample_db() -> CardDatabase {
         mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
         static_abilities: vec![
+            // Approximate: in a tribal deck most creatures share types, so model as
+            // a global +2/+2 anthem. The real effect scales with creature count.
             StaticAbility::Anthem {
                 power: 2,
                 toughness: 2,
-                affected: AffectedObjects::CreaturesControlledBy(0), // Approximation: +2/+2 to your creatures (typical Rat board)
+                affected: AffectedObjects::AllCreatures,
             },
         ],
         oracle_text: "Each creature gets +1/+1 for each other creature on the battlefield that shares at least one creature type with it.".into(),
@@ -5330,7 +5342,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::ACreatureDies,
-                effect: Effect::UntapTarget { target: TargetSpec::NoTarget },
+                effect: Effect::UntapTarget { target: TargetSpec::Controller },
                 description: "Whenever a creature dies, untap equipped creature.".into(),
             },
         ],

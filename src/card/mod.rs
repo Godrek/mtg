@@ -238,6 +238,10 @@ pub enum Effect {
     Debuff { power: i32, toughness: i32, until_eot: bool },
     DiscardCards { count: u32, target: TargetSpec },
     CreateToken(TokenDef),
+    /// Create N tokens where N is determined by a dynamic value at runtime.
+    /// Used for effects like Marrow-Gnawer ("Create X 1/1 Rat tokens, where
+    /// X is the number of Rats you control").
+    CreateTokens { token: TokenDef, count: DynamicValue },
     Counter { target: TargetSpec },
     /// Put +1/+1 counters on target creature.
     PutCounters { count: i32, target: TargetSpec },
