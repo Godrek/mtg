@@ -4445,6 +4445,11 @@ pub fn build_sample_db() -> CardDatabase {
                 effect: Effect::Unimplemented("Extort — You may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into()),
                 description: "Extort — Whenever you cast a spell, you may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into(),
             },
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Unimplemented("Whenever you tap a Swamp for mana, add an additional {B}. (Swamp mana doubling not yet modeled.)".into()),
+                description: "Whenever you tap a Swamp for mana, add an additional {B}.".into(),
+            },
         ],
         oracle_text: "Extort. Whenever you tap a Swamp for mana, add an additional {B}.".into(),
         ..Default::default()
@@ -4488,6 +4493,13 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Rat".into()), Subtype("Shaman".into())],
         power: Some(1),
         toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Unimplemented("Each opponent's maximum hand size is reduced by one.".into()),
+                description: "Each opponent's maximum hand size is reduced by one.".into(),
+            },
+        ],
         oracle_text: "Each opponent's maximum hand size is reduced by one.".into(),
         ..Default::default()
     });
@@ -4779,6 +4791,13 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Vampire".into()), Subtype("Shade".into())],
         power: Some(4),
         toughness: Some(4),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Unimplemented("Whenever you tap a Swamp for mana, add an additional {B}. (Swamp mana doubling not yet modeled.)".into()),
+                description: "Whenever you tap a Swamp for mana, add an additional {B}.".into(),
+            },
+        ],
         activated_abilities: vec![
             ActivatedAbility {
                 cost: ManaCost::new(0, 0, 0, 1, 0, 0),
@@ -5445,7 +5464,7 @@ pub fn build_sample_db() -> CardDatabase {
             },
             TriggeredAbility {
                 trigger: TriggerCondition::BeginningOfUpkeep,
-                effect: Effect::AddMana { color: Some(Color::Black), amount: 1 },
+                effect: Effect::Unimplemented("Add {B} for each charge counter on Black Market. (Mana amount should scale with counters.)".into()),
                 description: "At the beginning of your precombat main phase, add {B} for each charge counter on Black Market.".into(),
             },
         ],
