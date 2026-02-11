@@ -125,8 +125,8 @@ fn main() {
                 } else {
                     0.0
                 };
-                eprint!(
-                    "\r  iter {}/{} | {:.1}s elapsed | ETA {:.0}s   ",
+                eprintln!(
+                    "  iter {}/{} | {:.1}s elapsed | ETA {:.0}s",
                     completed, iterations, elapsed, eta,
                 );
             }
@@ -150,11 +150,10 @@ fn main() {
     training_done.store(true, Ordering::Relaxed);
     let train_time = t0.elapsed();
     // Print final progress line
-    eprint!(
-        "\r  iter {}/{} | {:.1}s elapsed              ",
+    eprintln!(
+        "  iter {}/{} | {:.1}s elapsed",
         iterations, iterations, train_time.as_secs_f64(),
     );
-    eprintln!();
     let _ = printer_handle.join();
 
     let stats = mccfr::training_stats(&tables);
