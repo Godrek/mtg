@@ -22,6 +22,7 @@ use mtg_gto::card::sample;
 use mtg_gto::game::{GameState, PlayerIndex};
 use mtg_gto::rules;
 use mtg_gto::strategy::{GoldfishStrategy, Strategy};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
 struct WinLine {
@@ -108,31 +109,38 @@ fn main() {
         })
     };
 
-    for state_idx in 1..=num_states {
-        let mut state = GameState::new_commander(2);
-        state.card_db = Some(Arc::new(db.clone()));
-        rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
-        rules::set_tutor_targets(&mut state, 0, &tutor_targets);
-        rules::set_tutor_targets(&mut state, 1, &tutor_targets);
+    let mut per_state_results: Vec<(u32, ExhaustiveStats)> = (1..=num_states)
+        .into_par_iter()
+        .map(|state_idx| {
+            let mut state = GameState::new_commander(2);
+            state.card_db = Some(Arc::new(db.clone()));
+            rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+            rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+            rules::set_tutor_targets(&mut state, 1, &tutor_targets);
 
-        let mut path = Vec::new();
-        let mut seen_hashes = HashSet::new();
-        let mut local = ExhaustiveStats::default();
-        explore_all_branches(
-            state,
-            0,
-            max_turns,
-            action_limit,
-            0,
-            &mut path,
-            &mut seen_hashes,
-            &mut local,
-            state_idx,
-            &progress_nodes,
-        );
+            let mut path = Vec::new();
+            let mut seen_hashes = HashSet::new();
+            let mut local = ExhaustiveStats::default();
+            explore_all_branches(
+                state,
+                0,
+                max_turns,
+                action_limit,
+                0,
+                &mut path,
+                &mut seen_hashes,
+                &mut local,
+                state_idx,
+                &progress_nodes,
+            );
 
-        progress_states_done.fetch_add(1, Ordering::Relaxed);
+            progress_states_done.fetch_add(1, Ordering::Relaxed);
+            (state_idx, local)
+        })
+        .collect();
 
+    per_state_results.sort_by_key(|(state_idx, _)| *state_idx);
+    for (state_idx, local) in per_state_results {
         println!(
             "State #{}: nodes={} terminals={} W/L/D={}/{}/{} loops_cut={}",
             state_idx,
@@ -143,7 +151,6 @@ fn main() {
             local.draws,
             local.loops_cut
         );
-
         merge_stats(&mut total, local);
     }
 
