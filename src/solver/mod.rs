@@ -15,6 +15,7 @@
 //! - `mccfr` submodule — external sampling MCCFR traversal
 
 pub mod mccfr;
+pub mod mcts;
 
 use std::collections::HashMap;
 

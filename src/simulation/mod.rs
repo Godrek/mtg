@@ -576,6 +576,174 @@ fn aggregate_goldfish_results(
     }
 }
 
+// ---------------------------------------------------------------------------
+// MCTS goldfish — solitaire optimization using Monte Carlo Tree Search
+// ---------------------------------------------------------------------------
+
+use crate::solver::mcts::{self, MctsConfig, MctsGoldfishResults};
+
+/// Run a single goldfish game using MCTS for player 0's decisions.
+///
+/// Unlike `run_goldfish_game()` which uses a fixed strategy, this runs
+/// MCTS search at each decision point to find near-optimal play for
+/// the given shuffle.
+pub fn run_mcts_goldfish_game(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    config: &MctsConfig,
+    verbose: bool,
+) -> mcts::MctsGameResult {
+    let db = Arc::new(card_db.clone());
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+    rules::setup_game(&mut state, deck, deck);
+    mcts::run_mcts_goldfish_game(&mut state, config, verbose)
+}
+
+/// Run a single Commander goldfish game using MCTS.
+pub fn run_mcts_commander_goldfish_game(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    commander: CardId,
+    config: &MctsConfig,
+    verbose: bool,
+) -> mcts::MctsGameResult {
+    let db = Arc::new(card_db.clone());
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(db);
+    rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+    mcts::run_mcts_goldfish_game(&mut state, config, verbose)
+}
+
+/// Run many MCTS goldfish games in parallel and aggregate results.
+///
+/// Each game gets a fresh shuffle and runs MCTS at every decision point
+/// for player 0. This measures how well MCTS-optimized play performs
+/// across many random draws.
+pub fn simulate_mcts_goldfish(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    config: &MctsConfig,
+    num_games: u64,
+) -> MctsGoldfishResults {
+    let db = Arc::new(card_db.clone());
+    aggregate_mcts_goldfish_results(num_games, config, |_| {
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_game(&mut state, deck, deck);
+        state
+    })
+}
+
+/// Run many Commander MCTS goldfish games in parallel and aggregate results.
+pub fn simulate_mcts_commander_goldfish(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    commander: CardId,
+    config: &MctsConfig,
+    num_games: u64,
+) -> MctsGoldfishResults {
+    let db = Arc::new(card_db.clone());
+    aggregate_mcts_goldfish_results(num_games, config, |_| {
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+        state
+    })
+}
+
+/// Shared aggregation logic for MCTS goldfish simulations.
+fn aggregate_mcts_goldfish_results(
+    num_games: u64,
+    config: &MctsConfig,
+    make_state: impl Fn(u64) -> GameState + Send + Sync,
+) -> MctsGoldfishResults {
+    let wins = AtomicU64::new(0);
+    let losses = AtomicU64::new(0);
+    let draws = AtomicU64::new(0);
+    let total_kill_turns = AtomicU64::new(0);
+    let total_actions = AtomicU64::new(0);
+    let fastest = AtomicU64::new(u64::MAX);
+    let slowest = AtomicU64::new(0);
+    // Track decisions and reward sums using atomic integers (scaled by 1000 for precision)
+    let total_decisions = AtomicU64::new(0);
+    let total_reward_x1000 = AtomicU64::new(0);
+
+    let max_turn = 20u32;
+    let distribution: Vec<AtomicU64> = (0..=max_turn)
+        .map(|_| AtomicU64::new(0))
+        .collect();
+
+    (0..num_games).into_par_iter().for_each(|i| {
+        let mut state = make_state(i);
+        let result = mcts::run_mcts_goldfish_game(&mut state, config, false);
+
+        total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
+
+        let n_decisions = result.decision_stats.len() as u64;
+        total_decisions.fetch_add(n_decisions, Ordering::Relaxed);
+        let avg_reward: f64 = if result.decision_stats.is_empty() {
+            0.0
+        } else {
+            result.decision_stats.iter().map(|d| d.best_action_avg_reward).sum::<f64>()
+                / result.decision_stats.len() as f64
+        };
+        total_reward_x1000.fetch_add((avg_reward * 1000.0) as u64, Ordering::Relaxed);
+
+        if result.won {
+            wins.fetch_add(1, Ordering::Relaxed);
+            let turn = result.kill_turn;
+            total_kill_turns.fetch_add(turn as u64, Ordering::Relaxed);
+            if (turn as usize) < distribution.len() {
+                distribution[turn as usize].fetch_add(1, Ordering::Relaxed);
+            }
+            fastest.fetch_min(turn as u64, Ordering::Relaxed);
+            slowest.fetch_max(turn as u64, Ordering::Relaxed);
+        } else if result.final_life[0] <= 0 {
+            losses.fetch_add(1, Ordering::Relaxed);
+        } else {
+            draws.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+
+    let total_wins = wins.load(Ordering::Relaxed);
+    let fast = fastest.load(Ordering::Relaxed);
+    let slow = slowest.load(Ordering::Relaxed);
+    let tot_decisions = total_decisions.load(Ordering::Relaxed);
+    let tot_reward = total_reward_x1000.load(Ordering::Relaxed) as f64 / 1000.0;
+
+    let kill_turn_dist: Vec<u64> = distribution
+        .iter()
+        .map(|a| a.load(Ordering::Relaxed))
+        .collect();
+
+    MctsGoldfishResults {
+        total_games: num_games,
+        wins: total_wins,
+        losses: losses.load(Ordering::Relaxed),
+        draws: draws.load(Ordering::Relaxed),
+        avg_kill_turn: if total_wins > 0 {
+            total_kill_turns.load(Ordering::Relaxed) as f64 / total_wins as f64
+        } else {
+            0.0
+        },
+        fastest_kill: if total_wins > 0 { fast as u32 } else { 0 },
+        slowest_kill: if total_wins > 0 { slow as u32 } else { 0 },
+        avg_actions: total_actions.load(Ordering::Relaxed) as f64 / num_games as f64,
+        avg_decisions_per_game: if num_games > 0 {
+            tot_decisions as f64 / num_games as f64
+        } else {
+            0.0
+        },
+        avg_best_reward: if num_games > 0 {
+            tot_reward / num_games as f64
+        } else {
+            0.0
+        },
+        kill_turn_distribution: kill_turn_dist,
+    }
+}
+
 /// Log a game action to stderr for verbose tracing.
 fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerIndex) {
     let db = state.card_db();
