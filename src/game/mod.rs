@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
+use crate::combo::ComboRegistry;
 use crate::events::GameEvent;
 use crate::layers::{ComputedCharacteristics, ContinuousEffect};
 use crate::mana::ManaPool;
@@ -298,6 +299,13 @@ pub struct GameState {
     /// `GameState::clone()` is O(1) for the DB — critical for MCTS/CFR search.
     #[serde(skip)]
     pub card_db: Option<Arc<CardDatabase>>,
+
+    /// Registered combos for macro-action injection (shared, immutable).
+    /// When present, `legal_actions_with()` detects available combos and
+    /// injects `Action::ActivateMacro` into the legal action list. Shared
+    /// via `Arc` for zero-cost clone, same pattern as `card_db`.
+    #[serde(skip)]
+    pub combo_registry: Option<Arc<ComboRegistry>>,
 
     /// The game format (Standard or Commander). Determines starting life,
     /// deck construction rules, and whether commander-specific rules apply.
@@ -694,6 +702,7 @@ impl GameState {
     pub fn new(num_players: usize) -> Self {
         GameState {
             card_db: None,
+            combo_registry: None,
             format: GameFormat::Standard,
             objects: HashMap::new(),
             battlefield: Vec::new(),
@@ -724,6 +733,7 @@ impl GameState {
     pub fn new_commander(num_players: usize) -> Self {
         let mut state = GameState {
             card_db: None,
+            combo_registry: None,
             format: GameFormat::Commander,
             objects: HashMap::new(),
             battlefield: Vec::new(),

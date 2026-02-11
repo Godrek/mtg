@@ -4341,3 +4341,285 @@ fn test_commander_snapshot_restore() {
         "Commander card ID should be restored"
     );
 }
+
+// =========================================================================
+// Macro-actions and combo reward shaping tests
+// =========================================================================
+
+#[test]
+fn test_macro_action_appears_in_legal_actions() {
+    use mtg_gto::combo;
+
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    // Libraries
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Put Basalt Monolith + Kinnan on battlefield for player 0
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    let actions = legal_actions(&state);
+    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
+    assert!(
+        has_macro,
+        "Legal actions should include ActivateMacro when combo pieces are present"
+    );
+}
+
+#[test]
+fn test_macro_action_not_available_without_registry() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    // No combo_registry set
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    let actions = legal_actions(&state);
+    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
+    assert!(
+        !has_macro,
+        "No macro actions without a combo registry"
+    );
+}
+
+#[test]
+fn test_macro_action_not_during_combat() {
+    use mtg_gto::combo;
+
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    // During combat, not main phase — macro should not appear
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::DeclareAttackers;
+
+    let actions = legal_actions(&state);
+    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
+    assert!(
+        !has_macro,
+        "Macro actions should only appear during main phases"
+    );
+}
+
+#[test]
+fn test_apply_macro_action_adds_mana() {
+    use mtg_gto::combo;
+
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    let monolith = state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    let before_mana = state.players[0].mana_pool.colorless;
+
+    // Apply the macro action
+    rules::apply_action(&mut state, &Action::ActivateMacro { combo_id: 0 });
+
+    assert_eq!(
+        state.players[0].mana_pool.colorless,
+        before_mana + 100,
+        "Macro should add 100 colorless mana to player's pool"
+    );
+    assert!(
+        state.objects[&monolith].tapped,
+        "Monolith should be tapped after macro activation"
+    );
+}
+
+#[test]
+fn test_macro_action_canonical_roundtrip() {
+    use mtg_gto::action::canonical::{canonicalize, resolve};
+    use mtg_gto::combo;
+
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+
+    let action = Action::ActivateMacro { combo_id: 0 };
+    let canonical = canonicalize(&action, &state);
+    let resolved = resolve(&canonical, &state, 0);
+    assert_eq!(resolved, Some(action), "ActivateMacro should round-trip through canonical form");
+}
+
+#[test]
+fn test_combo_proximity_reward_in_heuristic() {
+    use mtg_gto::combo;
+
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    // Equal life, no creatures — baseline
+    let base_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    assert!(
+        base_proximity.abs() < 1e-10,
+        "No combo pieces = zero proximity bonus"
+    );
+
+    // Add Kinnan for player 0 — partial combo
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Battlefield,
+    );
+    let partial_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    assert!(
+        partial_proximity > 0.0,
+        "Partial combo pieces should give positive proximity bonus, got {}",
+        partial_proximity
+    );
+
+    // Add Basalt Monolith — full combo
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    let full_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    assert!(
+        full_proximity > partial_proximity,
+        "Full combo should give more bonus than partial: {} > {}",
+        full_proximity,
+        partial_proximity
+    );
+}
+
+#[test]
+fn test_macro_action_in_goldfish_game() {
+    use mtg_gto::combo;
+
+    // Test that a goldfish game with combos can proceed without hitting action limits
+    let db = sample::build_sample_db();
+    let registry = combo::build_default_combos();
+
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db));
+    state.combo_registry = Some(Arc::new(registry));
+
+    // Give player 0 combo pieces in hand and lands on battlefield
+    state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Hand);
+    state.create_card_in_zone(
+        sample::ids::KINNAN_BONDER_PRODIGY,
+        0,
+        ZoneType::Hand,
+    );
+
+    // Provide mana sources
+    for _ in 0..6 {
+        let land = state.create_card_in_zone(sample::ids::FOREST, 0, ZoneType::Battlefield);
+        state.objects.get_mut(&land).unwrap().tapped = false;
+        state.objects.get_mut(&land).unwrap().summoning_sick = false;
+    }
+
+    // Libraries
+    for _ in 0..40 {
+        state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
+    }
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 3;
+
+    // Simulate: play a few actions manually
+    // The point is that the combo system is wired and doesn't crash
+    let actions = legal_actions(&state);
+    assert!(!actions.is_empty(), "Should have legal actions");
+
+    // Just verify the game can make progress
+    rules::apply_action(&mut state, &Action::PassPriority);
+    assert!(!state.game_over, "Game shouldn't be over after pass");
+}

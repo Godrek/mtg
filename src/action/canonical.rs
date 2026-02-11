@@ -126,6 +126,11 @@ pub enum CanonicalAction {
     },
 
     Concede,
+
+    /// Activate a pre-defined combo as a single macro-action.
+    /// Combo ID is stable across game states (it's a registry index, not
+    /// dependent on ObjectIds), so this is already canonical.
+    ActivateMacro { combo_id: usize },
 }
 
 /// Convert a concrete `Action` (with ObjectIds) into a `CanonicalAction`
@@ -299,6 +304,10 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::MulliganBottomCard { object_id } => {
             let inst = &state.objects[object_id];
             CanonicalAction::MulliganBottomCard { card_id: inst.card_def_id }
+        }
+
+        Action::ActivateMacro { combo_id } => {
+            CanonicalAction::ActivateMacro { combo_id: *combo_id }
         }
     }
 }
@@ -484,6 +493,10 @@ pub fn resolve(
             // Match first instance — strategically equivalent for duplicates
             let obj_id = find_in_hand_by_index(state, player, *card_id, 0)?;
             Some(Action::MulliganBottomCard { object_id: obj_id })
+        }
+
+        CanonicalAction::ActivateMacro { combo_id } => {
+            Some(Action::ActivateMacro { combo_id: *combo_id })
         }
     }
 }

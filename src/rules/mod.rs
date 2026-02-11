@@ -402,6 +402,20 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.game_over = true;
             state.winner = Some(state.opponent(player));
         }
+
+        Action::ActivateMacro { combo_id } => {
+            let player = state.priority_player;
+            // Look up the combo from the registry and apply its effect.
+            // Clone the combo to avoid borrow conflict with state mutation.
+            let combo = state
+                .combo_registry
+                .as_ref()
+                .and_then(|reg| reg.get(*combo_id).cloned());
+            if let Some(combo) = combo {
+                crate::combo::apply_combo_effect(state, player, &combo);
+                state.consecutive_passes = 0;
+            }
+        }
     }
 }
 
