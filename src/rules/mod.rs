@@ -1081,8 +1081,16 @@ fn resolve_effect(
             }
         }
 
-        Effect::SearchLibrary { destination } => {
-            if state.players[controller].tutor_targets.is_empty() {
+        Effect::SearchLibrary { destination, subtype_filter } => {
+            if !subtype_filter.is_empty() {
+                // Fetch-land style: filter by subtype. Always present a choice
+                // (or fail to find if no matching cards in library).
+                state.pending_tutor = Some(crate::game::PendingTutor {
+                    controller,
+                    destination: *destination,
+                    subtype_filter: subtype_filter.clone(),
+                });
+            } else if state.players[controller].tutor_targets.is_empty() {
                 // Legacy behavior: no tutor targets configured, take top card.
                 // Maintains backward compatibility with existing tests/configs.
                 if !state.players[controller].library.is_empty() {
@@ -1096,6 +1104,7 @@ fn resolve_effect(
                 state.pending_tutor = Some(crate::game::PendingTutor {
                     controller,
                     destination: *destination,
+                    subtype_filter: vec![],
                 });
             }
         }

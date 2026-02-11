@@ -457,7 +457,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 }
             }
 
-            // Activated abilities from permanents
+            // Activated abilities and mana abilities from permanents
             let permanents = state.permanents_controlled_by(player);
             for &obj_id in &permanents {
                 let inst = &state.objects[&obj_id];
@@ -475,6 +475,16 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             object_id: obj_id,
                             ability_index: i,
                             targets: vec![], // simplified
+                        });
+                    }
+                }
+
+                // Mana abilities (tap abilities that don't use the stack)
+                if !inst.tapped && !def.mana_abilities.is_empty() {
+                    for (i, _ma) in def.mana_abilities.iter().enumerate() {
+                        actions.push(Action::ActivateManaAbility {
+                            object_id: obj_id,
+                            ability_index: i,
                         });
                     }
                 }
@@ -682,20 +692,47 @@ fn enumerate_targets_for_spell(
 
 /// Enumerate valid tutor target actions for a player with a pending tutor.
 ///
-/// Returns `ChooseTutorTarget` actions for each distinct card in the player's
-/// library that is also in their `tutor_targets` list. Deduplicates by CardId
-/// so MCCFR sees one action per card type, not per copy.
+/// When the pending tutor has a non-empty `subtype_filter`, only cards in the
+/// library with at least one matching subtype are offered (e.g., fetch lands
+/// searching for Forest/Plains). Otherwise, falls back to the player's
+/// `tutor_targets` list.
+///
+/// Returns `ChooseTutorTarget` actions deduplicated by CardId so MCCFR sees
+/// one action per card type, not per copy.
 fn tutor_target_actions(state: &GameState, player: PlayerIndex) -> Vec<Action> {
-    let targets = &state.players[player].tutor_targets;
     let library = &state.players[player].library;
+    let db = state.card_db();
+
+    let subtype_filter = state
+        .pending_tutor
+        .as_ref()
+        .map(|pt| &pt.subtype_filter[..])
+        .unwrap_or(&[]);
 
     let mut seen = HashSet::new();
     let mut actions = Vec::new();
 
-    for &obj_id in library {
-        let card_id = state.objects[&obj_id].card_def_id;
-        if targets.contains(&card_id) && seen.insert(card_id) {
-            actions.push(Action::ChooseTutorTarget { card_id });
+    if !subtype_filter.is_empty() {
+        // Fetch-land style: filter by subtype
+        for &obj_id in library {
+            let card_id = state.objects[&obj_id].card_def_id;
+            if seen.insert(card_id) {
+                if let Some(def) = db.get(card_id) {
+                    let matches = def.subtypes.iter().any(|st| subtype_filter.contains(st));
+                    if matches {
+                        actions.push(Action::ChooseTutorTarget { card_id });
+                    }
+                }
+            }
+        }
+    } else {
+        // Original behavior: use tutor_targets list
+        let targets = &state.players[player].tutor_targets;
+        for &obj_id in library {
+            let card_id = state.objects[&obj_id].card_def_id;
+            if targets.contains(&card_id) && seen.insert(card_id) {
+                actions.push(Action::ChooseTutorTarget { card_id });
+            }
         }
     }
 
