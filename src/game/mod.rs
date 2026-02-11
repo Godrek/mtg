@@ -206,6 +206,12 @@ pub struct PlayerState {
     pub mulligan_count: u32,
     /// Whether this player has decided to keep their hand.
     pub mulligan_decided: bool,
+
+    /// Cards that tutors can search for (configured from the decklist).
+    /// When non-empty, tutor effects present a choice restricted to this set.
+    /// MCCFR learns which target is optimal in each game state.
+    #[serde(default)]
+    pub tutor_targets: Vec<CardId>,
 }
 
 impl PlayerState {
@@ -228,6 +234,7 @@ impl PlayerState {
             commander_damage_received: Vec::new(),
             mulligan_count: 0,
             mulligan_decided: false,
+            tutor_targets: Vec::new(),
         }
     }
 
@@ -369,6 +376,12 @@ pub struct GameState {
     /// replacements are surfaced as Action::ChooseReplacementOrder.
     pub replacement_effects: Vec<ReplacementEffect>,
 
+    /// Pending tutor — when a SearchLibrary effect resolves and the player
+    /// has tutor_targets configured, this is set to indicate the player must
+    /// choose a card from their library. `legal_actions` generates
+    /// `ChooseTutorTarget` actions until this is resolved.
+    pub pending_tutor: Option<PendingTutor>,
+
     /// Extra turns queue (Phase 3A). When a player takes an extra turn,
     /// they're added to this queue. After the current turn's Cleanup,
     /// if this queue is non-empty, the next turn's active player is
@@ -417,6 +430,19 @@ pub struct PendingTrigger {
     pub ability_index: usize,
     pub controller: PlayerIndex,
     pub targets: Vec<Target>,
+}
+
+/// A pending tutor choice — a SearchLibrary effect has resolved and the
+/// player must choose which card to find from their library.
+///
+/// This is surfaced as `Action::ChooseTutorTarget` choices in `legal_actions`,
+/// allowing MCCFR to learn the optimal tutor target in each game state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingTutor {
+    /// Which player is searching their library.
+    pub controller: PlayerIndex,
+    /// Where the found card goes (Hand, Battlefield, etc.).
+    pub destination: crate::card::ZoneType,
 }
 
 /// A simple card database that maps CardId -> CardDef.
@@ -481,6 +507,7 @@ pub struct GameStateSnapshot {
     continuous_effects: Vec<ContinuousEffect>,
     next_timestamp: u32,
     replacement_effects: Vec<ReplacementEffect>,
+    pending_tutor: Option<PendingTutor>,
     extra_turns: VecDeque<PlayerIndex>,
     skip_phases: HashSet<Phase>,
     game_over: bool,
@@ -562,6 +589,10 @@ pub struct PlayerView<'a> {
     // --- Mulligan fields ---
     /// How many times the viewing player has mulliganed.
     pub my_mulligan_count: u32,
+
+    // --- Tutor fields ---
+    /// Whether there is a pending tutor choice for the viewing player.
+    pub pending_tutor: Option<PendingTutor>,
 
     // --- Object lookup (filtered, read-only) ---
     /// Card instances visible to the viewing player, keyed by ObjectId.
@@ -692,6 +723,8 @@ impl GameState {
 
             my_mulligan_count: self.players[player].mulligan_count,
 
+            pending_tutor: self.pending_tutor.clone(),
+
             objects: visible,
             card_db: self.card_db(),
         }
@@ -720,6 +753,7 @@ impl GameState {
             continuous_effects: Vec::new(),
             next_timestamp: 1,
             replacement_effects: Vec::new(),
+            pending_tutor: None,
             extra_turns: VecDeque::new(),
             skip_phases: HashSet::new(),
             game_over: false,
@@ -753,6 +787,7 @@ impl GameState {
             continuous_effects: Vec::new(),
             next_timestamp: 1,
             replacement_effects: Vec::new(),
+            pending_tutor: None,
             extra_turns: VecDeque::new(),
             skip_phases: HashSet::new(),
             game_over: false,
@@ -798,6 +833,7 @@ impl GameState {
             continuous_effects: self.continuous_effects.clone(),
             next_timestamp: self.next_timestamp,
             replacement_effects: self.replacement_effects.clone(),
+            pending_tutor: self.pending_tutor.clone(),
             extra_turns: self.extra_turns.clone(),
             skip_phases: self.skip_phases.clone(),
             game_over: self.game_over,
@@ -825,6 +861,7 @@ impl GameState {
         self.continuous_effects = snap.continuous_effects;
         self.next_timestamp = snap.next_timestamp;
         self.replacement_effects = snap.replacement_effects;
+        self.pending_tutor = snap.pending_tutor;
         self.extra_turns = snap.extra_turns;
         self.skip_phases = snap.skip_phases;
         self.game_over = snap.game_over;

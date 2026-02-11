@@ -33,6 +33,15 @@ use mtg_gto::solver::mccfr::{self, collect_policy_snapshots, McfrConfig};
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, RandomStrategy};
 
 fn main() {
+    // Configure rayon thread pool with larger stack size (8 MB) for deep MCCFR
+    // traversal. The default thread stack (512 KB on macOS, 2 MB on Linux) can
+    // overflow at high DEPTH values because each recursive decision node keeps
+    // a GameState clone on the stack.
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()
+        .expect("Failed to configure rayon thread pool");
+
     let iterations: u32 = std::env::var("ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -52,8 +61,11 @@ fn main() {
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "kinnan".to_string());
 
     let db = sample::build_sample_db();
-    let (deck, commander) = match deck_name.as_str() {
-        "brimaz" => sample::brimaz_commander_deck(),
+    let (deck, commander, tutor_targets) = match deck_name.as_str() {
+        "brimaz" => {
+            let (d, c) = sample::brimaz_commander_deck();
+            (d, c, Vec::new())
+        }
         _ => sample::kinnan_commander_deck(),
     };
 
@@ -77,6 +89,8 @@ fn main() {
     let mut state = GameState::new_commander(2);
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+    rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+    rules::set_tutor_targets(&mut state, 1, &tutor_targets);
 
     let config = McfrConfig {
         max_depth,

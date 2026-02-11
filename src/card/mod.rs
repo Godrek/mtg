@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod sample;
 
 use serde::{Deserialize, Serialize};
@@ -188,25 +189,21 @@ impl DynamicValue {
         F: Fn(u64) -> Option<&'a CardDef>,
     {
         match self {
-            DynamicValue::CardsInHand => {
-                ctx.map(|c| c.hand_size as i32).unwrap_or(0)
-            }
-            DynamicValue::CreaturesControlled => {
-                battlefield
-                    .iter()
-                    .filter(|&&id| {
-                        if let Some(inst) = objects.get(&id) {
-                            if inst.controller != controller {
-                                return false;
-                            }
-                            if let Some(def) = card_db(inst.card_def_id) {
-                                return def.is_creature();
-                            }
+            DynamicValue::CardsInHand => ctx.map(|c| c.hand_size as i32).unwrap_or(0),
+            DynamicValue::CreaturesControlled => battlefield
+                .iter()
+                .filter(|&&id| {
+                    if let Some(inst) = objects.get(&id) {
+                        if inst.controller != controller {
+                            return false;
                         }
-                        false
-                    })
-                    .count() as i32
-            }
+                        if let Some(def) = card_db(inst.card_def_id) {
+                            return def.is_creature();
+                        }
+                    }
+                    false
+                })
+                .count() as i32,
             DynamicValue::CardTypesInGraveyards => {
                 if let Some(c) = ctx {
                     let mut seen = std::collections::HashSet::new();
@@ -220,19 +217,21 @@ impl DynamicValue {
                     0
                 }
             }
-            DynamicValue::TotalPowerControlled => {
-                battlefield
-                    .iter()
-                    .filter_map(|&id| {
-                        let inst = objects.get(&id)?;
-                        if inst.controller != controller {
-                            return None;
-                        }
-                        let def = card_db(inst.card_def_id)?;
-                        if def.is_creature() { def.power } else { None }
-                    })
-                    .sum()
-            }
+            DynamicValue::TotalPowerControlled => battlefield
+                .iter()
+                .filter_map(|&id| {
+                    let inst = objects.get(&id)?;
+                    if inst.controller != controller {
+                        return None;
+                    }
+                    let def = card_db(inst.card_def_id)?;
+                    if def.is_creature() {
+                        def.power
+                    } else {
+                        None
+                    }
+                })
+                .sum(),
             DynamicValue::SwampsControlled => {
                 battlefield
                     .iter()
@@ -274,42 +273,93 @@ impl DynamicValue {
 /// Effects that abilities and spells can produce.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Effect {
-    DealDamage { amount: u32, target: TargetSpec },
-    GainLife { amount: u32 },
-    LoseLife { amount: u32, target: TargetSpec },
-    DrawCards { count: u32 },
-    DestroyTarget { target: TargetSpec },
+    DealDamage {
+        amount: u32,
+        target: TargetSpec,
+    },
+    GainLife {
+        amount: u32,
+    },
+    LoseLife {
+        amount: u32,
+        target: TargetSpec,
+    },
+    DrawCards {
+        count: u32,
+    },
+    DestroyTarget {
+        target: TargetSpec,
+    },
     /// Exile target (e.g., Swords to Plowshares, Path to Exile).
-    ExileTarget { target: TargetSpec },
+    ExileTarget {
+        target: TargetSpec,
+    },
     /// Destroy all creatures (e.g., Wrath of God, Day of Judgment).
     DestroyAll,
-    BounceTo { zone: ZoneType, target: TargetSpec },
-    Buff { power: i32, toughness: i32, until_eot: bool },
+    BounceTo {
+        zone: ZoneType,
+        target: TargetSpec,
+    },
+    Buff {
+        power: i32,
+        toughness: i32,
+        until_eot: bool,
+    },
     /// Debuff: target creature gets -N/-N until end of turn.
-    Debuff { power: i32, toughness: i32, until_eot: bool },
-    DiscardCards { count: u32, target: TargetSpec },
+    Debuff {
+        power: i32,
+        toughness: i32,
+        until_eot: bool,
+    },
+    DiscardCards {
+        count: u32,
+        target: TargetSpec,
+    },
     CreateToken(TokenDef),
     /// Create N tokens where N is determined by a dynamic value at runtime.
     /// Used for effects like Marrow-Gnawer ("Create X 1/1 Rat tokens, where
     /// X is the number of Rats you control").
-    CreateTokens { token: TokenDef, count: DynamicValue },
-    Counter { target: TargetSpec },
+    CreateTokens {
+        token: TokenDef,
+        count: DynamicValue,
+    },
+    Counter {
+        target: TargetSpec,
+    },
     /// Put +1/+1 counters on target creature.
-    PutCounters { count: i32, target: TargetSpec },
+    PutCounters {
+        count: i32,
+        target: TargetSpec,
+    },
     /// Each player mills N cards.
-    MillCards { count: u32, target: TargetSpec },
+    MillCards {
+        count: u32,
+        target: TargetSpec,
+    },
     /// Each player sacrifices N creatures.
-    SacrificeCreatures { count: u32, target: TargetSpec },
+    SacrificeCreatures {
+        count: u32,
+        target: TargetSpec,
+    },
     /// Prevent all combat damage this turn.
     PreventCombatDamage,
     /// Add mana to the controller's mana pool.
-    AddMana { color: Option<Color>, amount: u32 },
+    AddMana {
+        color: Option<Color>,
+        amount: u32,
+    },
     /// Add mana where the amount is determined dynamically at runtime
     /// (e.g., Cabal Coffers: "{B} for each Swamp you control").
-    AddDynamicMana { color: Color, count: DynamicValue },
+    AddDynamicMana {
+        color: Color,
+        count: DynamicValue,
+    },
     /// Lose life where the amount is determined dynamically
     /// (e.g., Castle Locthwain: "lose life equal to cards in hand").
-    LoseDynamicLife { amount: DynamicValue, target: TargetSpec },
+    LoseDynamicLife {
+        amount: DynamicValue,
+        target: TargetSpec,
+    },
     /// Take an extra turn after this one (e.g., Time Walk, Temporal Manipulation).
     ExtraTurn,
     /// Skip a phase of the controller's next turn (e.g., Stasis skipping untap).
@@ -318,13 +368,19 @@ pub enum Effect {
     /// Search the controller's library and put a card into the destination zone.
     /// Simplified tutor — in practice the strategy chooses; the engine just moves
     /// the top matching card.
-    SearchLibrary { destination: ZoneType },
+    SearchLibrary {
+        destination: ZoneType,
+    },
     /// Bounce all nonland permanents opponents control (e.g., Cyclonic Rift overload).
     BounceAllNonlandOpponents,
     /// Put a card from a graveyard on top of its owner's library.
-    ReturnToTopOfLibrary { target: TargetSpec },
+    ReturnToTopOfLibrary {
+        target: TargetSpec,
+    },
     /// Untap target permanent.
-    UntapTarget { target: TargetSpec },
+    UntapTarget {
+        target: TargetSpec,
+    },
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
@@ -499,8 +555,14 @@ impl CardDef {
         // Mana abilities contribute to color identity (basic land subtypes, duals)
         for ability in &self.mana_abilities {
             match ability {
-                ManaAbility::TapForColor(c) => { colors.insert(*c); }
-                ManaAbility::TapForChoice(cs) => { for c in cs { colors.insert(*c); } }
+                ManaAbility::TapForColor(c) => {
+                    colors.insert(*c);
+                }
+                ManaAbility::TapForChoice(cs) => {
+                    for c in cs {
+                        colors.insert(*c);
+                    }
+                }
                 _ => {}
             }
         }
@@ -552,15 +614,15 @@ impl fmt::Display for CardDef {
 pub struct CardInstance {
     pub object_id: ObjectId,
     pub card_def_id: CardId,
-    pub owner: usize,     // player index
+    pub owner: usize,      // player index
     pub controller: usize, // player index (may differ from owner)
 
     // Battlefield state
     pub tapped: bool,
     pub summoning_sick: bool,
     pub damage_marked: u32,
-    pub plus_counters: i32,   // +1/+1 counters
-    pub minus_counters: i32,  // -1/-1 counters
+    pub plus_counters: i32,  // +1/+1 counters
+    pub minus_counters: i32, // -1/-1 counters
 
     // Temporary effects for the current turn
     pub temp_power_mod: i32,
@@ -648,6 +710,15 @@ pub struct Decklist {
     /// Commander cards (for Commander format decks).
     #[serde(default)]
     pub commanders: Vec<DeckEntry>,
+    /// Cards that tutors can search for. When a tutor effect resolves and this
+    /// list is non-empty, the player chooses from this restricted set (intersected
+    /// with cards actually in their library). MCCFR learns which target is optimal
+    /// in each game state.
+    ///
+    /// If empty, tutors fall back to taking the top card of the library (legacy
+    /// behavior), keeping backward compatibility with existing tests/configs.
+    #[serde(default)]
+    pub tutor_targets: Vec<CardId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

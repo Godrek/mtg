@@ -125,6 +125,10 @@ pub enum CanonicalAction {
         card_id: CardId,
     },
 
+    /// Choose a card from library during tutor resolution.
+    /// Already keyed by CardId — no disambiguation needed.
+    ChooseTutorTarget { card_id: CardId },
+
     Concede,
 
     /// Activate a pre-defined combo as a single macro-action.
@@ -297,6 +301,10 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
                 })
                 .collect();
             CanonicalAction::ChooseReplacementOrder { source_card_ids }
+        }
+
+        Action::ChooseTutorTarget { card_id } => {
+            CanonicalAction::ChooseTutorTarget { card_id: *card_id }
         }
 
         Action::MulliganKeep => CanonicalAction::MulliganKeep,
@@ -485,6 +493,10 @@ pub fn resolve(
                 ordering.push((obj_id, effect_index));
             }
             Some(Action::ChooseReplacementOrder { ordering })
+        }
+
+        CanonicalAction::ChooseTutorTarget { card_id } => {
+            Some(Action::ChooseTutorTarget { card_id: *card_id })
         }
 
         CanonicalAction::MulliganKeep => Some(Action::MulliganKeep),

@@ -47,6 +47,13 @@ pub fn apply_cost_reduction(cost: &crate::mana::ManaCost, reduction: u32) -> cra
 pub fn apply_action(state: &mut GameState, action: &Action) {
     match action {
         Action::PassPriority => {
+            // If there's a pending tutor, passing means "fail to find" —
+            // clear it and return without advancing priority normally.
+            if state.pending_tutor.is_some() {
+                state.pending_tutor = None;
+                return;
+            }
+
             if state.phase == Phase::Cleanup
                 && state.players[state.active_player].hand.len() > 7
             {
@@ -178,6 +185,24 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                     }
                     ManaAbility::TapForColorlessAmount(n) => {
                         state.players[player].mana_pool.colorless += n;
+                    }
+                }
+
+                // Check for ManaFromNonlandBonus (e.g., Kinnan, Bonder Prodigy):
+                // "Whenever you tap a nonland permanent for mana, add one mana
+                // of any type that permanent produced."
+                // Simplified: add +1 colorless if the source is a nonland permanent
+                // and the controller has a permanent with ManaFromNonlandBonus.
+                let source_is_nonland = {
+                    let db = state.card_db();
+                    let inst = &state.objects[&obj_id];
+                    let def = db.get(inst.card_def_id).unwrap();
+                    !def.card_types.contains(&CardType::Land)
+                };
+                if source_is_nonland {
+                    let bonus = mana_from_nonland_bonus_count(state, player);
+                    if bonus > 0 {
+                        state.players[player].mana_pool.colorless += bonus;
                     }
                 }
             }
@@ -433,6 +458,22 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 state.players[player].library.push(*object_id);
             }
             advance_mulligan(state);
+        }
+
+        Action::ChooseTutorTarget { card_id } => {
+            if let Some(pending) = state.pending_tutor.take() {
+                let player = pending.controller;
+                let destination = pending.destination;
+                // Find the first instance of this card in the library
+                if let Some(pos) = state.players[player]
+                    .library
+                    .iter()
+                    .position(|&obj_id| state.objects[&obj_id].card_def_id == *card_id)
+                {
+                    let obj_id = state.players[player].library.remove(pos);
+                    state.move_object(obj_id, ZoneType::Library, destination);
+                }
+            }
         }
 
         Action::Concede => {
@@ -1041,12 +1082,21 @@ fn resolve_effect(
         }
 
         Effect::SearchLibrary { destination } => {
-            // Simplified tutor: move the top card of the library to the destination.
-            // A real implementation would let the player search and choose, but
-            // for simulation purposes we move the first card.
-            if !state.players[controller].library.is_empty() {
-                let card_obj = state.players[controller].library.remove(0);
-                state.move_object(card_obj, ZoneType::Library, *destination);
+            if state.players[controller].tutor_targets.is_empty() {
+                // Legacy behavior: no tutor targets configured, take top card.
+                // Maintains backward compatibility with existing tests/configs.
+                if !state.players[controller].library.is_empty() {
+                    let card_obj = state.players[controller].library.remove(0);
+                    state.move_object(card_obj, ZoneType::Library, *destination);
+                }
+            } else {
+                // Set pending tutor — the player will choose via ChooseTutorTarget.
+                // legal_actions generates choices restricted to tutor_targets ∩ library.
+                // MCCFR learns which target is optimal in each game state.
+                state.pending_tutor = Some(crate::game::PendingTutor {
+                    controller,
+                    destination: *destination,
+                });
             }
         }
 
@@ -1293,6 +1343,33 @@ fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
 pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) -> bool {
     check_triggers(state, condition, source_hint);
     flush_triggers(state)
+}
+
+/// Count how many permanents a player controls that have the
+/// `ManaFromNonlandBonus` static ability (e.g., Kinnan, Bonder Prodigy).
+/// Returns the total bonus amount (typically 1 per source).
+fn mana_from_nonland_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
+    let db = state.card_db();
+    let mut count = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = match state.objects.get(&obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+        if inst.controller != player {
+            continue;
+        }
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        for sa in &def.static_abilities {
+            if matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus) {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Fire spell-cast triggers for a spell that was just cast.
@@ -2469,6 +2546,23 @@ pub fn setup_commander_game(
     state.priority_player = 0;
     state.phase = Phase::Mulligan;
     state.turn_number = 1;
+}
+
+/// Configure tutor targets for a player.
+///
+/// When tutor targets are set, `SearchLibrary` effects present the player with
+/// a choice (`ChooseTutorTarget`) restricted to this set instead of automatically
+/// taking the top card. This allows MCCFR to learn which card to tutor for in
+/// each game state.
+///
+/// Call this after `setup_game` or `setup_commander_game` but before the game
+/// loop begins.
+pub fn set_tutor_targets(
+    state: &mut GameState,
+    player: crate::game::PlayerIndex,
+    targets: &[crate::card::CardId],
+) {
+    state.players[player].tutor_targets = targets.to_vec();
 }
 
 /// Reshuffle opening hands for goldfish training iterations.
