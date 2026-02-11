@@ -76,6 +76,8 @@ fn main() {
         let name = db.get(cmd).map(|d| d.name.as_str()).unwrap_or("?");
         println!("Commander: {}", name);
     }
+    state.solitaire_mode = true;
+
     println!("You are Player 0. The goldfish (Player 1) does nothing.");
     println!("Type the number of the action you want to take.");
     println!("Type 'q' to quit, 'u' to undo last action.");

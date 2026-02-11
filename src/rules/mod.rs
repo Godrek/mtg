@@ -1920,7 +1920,9 @@ fn next_turn(state: &mut GameState) {
     // Check for extra turns (Phase 3A)
     if let Some(extra_turn_player) = state.extra_turns.pop_front() {
         state.active_player = extra_turn_player;
-    } else {
+    } else if !state.solitaire_mode {
+        // In solitaire mode the pilot keeps every turn — the opponent
+        // never gets a turn, so turn_number counts only pilot turns.
         state.active_player = state.opponent(state.active_player);
     }
 

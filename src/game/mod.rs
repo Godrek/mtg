@@ -393,6 +393,13 @@ pub struct GameState {
     /// the relevant phase is added here. `advance_phase()` checks this set.
     pub skip_phases: HashSet<Phase>,
 
+    /// Solitaire mode — when true, `next_turn()` does not alternate
+    /// `active_player`. The pilot keeps every turn and `turn_number`
+    /// increments 1, 2, 3… instead of counting both players' turns.
+    /// Used by goldfish simulations where the opponent is irrelevant.
+    #[serde(default)]
+    pub solitaire_mode: bool,
+
     /// Game over flag.
     pub game_over: bool,
 
@@ -510,6 +517,7 @@ pub struct GameStateSnapshot {
     pending_tutor: Option<PendingTutor>,
     extra_turns: VecDeque<PlayerIndex>,
     skip_phases: HashSet<Phase>,
+    solitaire_mode: bool,
     game_over: bool,
     winner: Option<PlayerIndex>,
 }
@@ -756,6 +764,7 @@ impl GameState {
             pending_tutor: None,
             extra_turns: VecDeque::new(),
             skip_phases: HashSet::new(),
+            solitaire_mode: false,
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -790,6 +799,7 @@ impl GameState {
             pending_tutor: None,
             extra_turns: VecDeque::new(),
             skip_phases: HashSet::new(),
+            solitaire_mode: false,
             game_over: false,
             winner: None,
             pending_events: Vec::new(),
@@ -836,6 +846,7 @@ impl GameState {
             pending_tutor: self.pending_tutor.clone(),
             extra_turns: self.extra_turns.clone(),
             skip_phases: self.skip_phases.clone(),
+            solitaire_mode: self.solitaire_mode,
             game_over: self.game_over,
             winner: self.winner,
         }
@@ -864,6 +875,7 @@ impl GameState {
         self.pending_tutor = snap.pending_tutor;
         self.extra_turns = snap.extra_turns;
         self.skip_phases = snap.skip_phases;
+        self.solitaire_mode = snap.solitaire_mode;
         self.game_over = snap.game_over;
         self.winner = snap.winner;
         self.pending_events.clear();

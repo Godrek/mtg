@@ -429,6 +429,7 @@ fn run_goldfish_loop(
     strategy: &dyn Strategy,
     verbose: bool,
 ) -> GameResult {
+    state.solitaire_mode = true;
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
 
