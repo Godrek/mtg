@@ -567,11 +567,8 @@ fn prune_bruteforce_actions(mut actions: Vec<crate::action::Action>) -> Vec<crat
         return actions;
     }
 
-    // If the player can do anything other than pass, drop pass.
-    let has_non_pass = actions.iter().any(|a| *a != Action::PassPriority);
-    if has_non_pass {
-        actions.retain(|a| *a != Action::PassPriority);
-    }
+    // Keep PassPriority in the search tree. Passing can be strategically
+    // meaningful (e.g., hold up resources or decline low-value plays).
 
     // Mulligan branching dominates the search tree and rarely contributes to
     // tactical line discovery. If keeping is available, prune mulligan choices
@@ -889,14 +886,17 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn test_prune_bruteforce_actions_drops_redundant_pass() {
+    fn test_prune_bruteforce_actions_keeps_pass_priority_branch() {
         let actions = vec![
             Action::PassPriority,
             Action::DeclareAttackers { attackers: vec![1] },
         ];
         let pruned = prune_bruteforce_actions(actions);
-        assert_eq!(pruned.len(), 1);
-        assert!(matches!(pruned[0], Action::DeclareAttackers { .. }));
+        assert_eq!(pruned.len(), 2);
+        assert!(pruned.contains(&Action::PassPriority));
+        assert!(pruned
+            .iter()
+            .any(|a| matches!(a, Action::DeclareAttackers { .. })));
     }
 
     #[test]
