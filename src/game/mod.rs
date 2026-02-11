@@ -443,6 +443,9 @@ pub struct PendingTutor {
     pub controller: PlayerIndex,
     /// Where the found card goes (Hand, Battlefield, etc.).
     pub destination: crate::card::ZoneType,
+    /// When non-empty, only cards with at least one of these subtypes are
+    /// valid targets (e.g., fetch lands searching for Forest/Plains).
+    pub subtype_filter: Vec<crate::card::Subtype>,
 }
 
 /// A simple card database that maps CardId -> CardDef.

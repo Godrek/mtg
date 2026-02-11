@@ -4392,7 +4392,7 @@ fn test_fetchlands_use_activated_abilities() {
             fetch.name
         );
         match &fetch.activated_abilities[0].effect {
-            mtg_gto::card::Effect::SearchLibrary { destination } => {
+            mtg_gto::card::Effect::SearchLibrary { destination, .. } => {
                 assert_eq!(*destination, ZoneType::Battlefield);
             }
             other => panic!(

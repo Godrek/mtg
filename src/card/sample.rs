@@ -2773,7 +2773,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
-            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Plains".into()), Subtype("Island".into())] },
             description: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
         }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
@@ -2827,7 +2827,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
-            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Forest".into()), Subtype("Island".into())] },
             description: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
         }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
@@ -2940,7 +2940,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
-            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Forest".into()), Subtype("Plains".into())] },
             description: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
         }],
         oracle_text: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
@@ -3085,7 +3085,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Moonsilver Key".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand, subtype_filter: vec![] }),
         oracle_text: "{1}, {T}, Sacrifice Moonsilver Key: Search your library for an artifact card with a mana ability or a basic land card, reveal it, put it into your hand, then shuffle.".into(),
         ..Default::default()
     });
@@ -3171,7 +3171,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(5, 0, 1, 0, 0, 1),
             requires_tap: false,
-            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield },
+            effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] },
             description: "{5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom of your library in a random order.".into(),
         }],
         oracle_text: "Whenever you tap a nonland permanent for mana, add one mana of any type that permanent produced. {5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom in a random order.".into(),
@@ -3507,7 +3507,7 @@ pub fn build_sample_db() -> CardDatabase {
         toughness: Some(2),
         triggered_abilities: vec![TriggeredAbility {
             trigger: TriggerCondition::EntersBattlefield,
-            effect: Effect::SearchLibrary { destination: ZoneType::Hand },
+            effect: Effect::SearchLibrary { destination: ZoneType::Hand, subtype_filter: vec![] },
             description: "When Trophy Mage enters, you may search your library for an artifact card with mana value 3, reveal it, put it into your hand, then shuffle.".into(),
         }],
         oracle_text: "When Trophy Mage enters, you may search your library for an artifact card with mana value 3, reveal it, put it into your hand, then shuffle.".into(),
@@ -3565,7 +3565,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Chord of Calling".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 3)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "Convoke. Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3575,7 +3575,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Crop Rotation".into(),
         mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "As an additional cost to cast this spell, sacrifice a land. Search your library for a land card, put that card onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3672,7 +3672,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Mystical Tutor".into(),
         mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library, subtype_filter: vec![] }),
         oracle_text: "Search your library for an instant or sorcery card, reveal it, then shuffle and put that card on top.".into(),
         ..Default::default()
     });
@@ -3722,7 +3722,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Whir of Invention".into(),
         mana_cost: Some(ManaCost::new(3, 0, 3, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "Improvise. Search your library for an artifact card with mana value X or less, put it onto the battlefield, then shuffle.".into(),
         ..Default::default()
     });
@@ -3732,7 +3732,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Worldly Tutor".into(),
         mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Library, subtype_filter: vec![] }),
         oracle_text: "Search your library for a creature card, reveal it, then shuffle and put that card on top.".into(),
         ..Default::default()
     });
@@ -3756,7 +3756,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Finale of Devastation".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "Search your library and/or graveyard for a creature card with mana value X or less and put it onto the battlefield. If you search your library this way, shuffle. If X is 10 or more, creatures you control get +X/+X and gain haste until end of turn.".into(),
         ..Default::default()
     });
@@ -3766,7 +3766,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Green Sun's Zenith".into(),
         mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "Search your library for a green creature card with mana value X or less, put it onto the battlefield, then shuffle. Shuffle Green Sun's Zenith into its owner's library.".into(),
         ..Default::default()
     });
@@ -3776,7 +3776,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Nature's Rhythm".into(),
         mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 2)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] }),
         oracle_text: "Search your library for a creature card with mana value X or less, put it onto the battlefield, then shuffle. Harmonize {X}{G}{G}{G}{G}.".into(),
         ..Default::default()
     });
@@ -3877,7 +3877,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Invasion of Ikoria // Zilortha, Apex of Ikoria".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand }),
+        spell_effect: Some(Effect::SearchLibrary { destination: ZoneType::Hand, subtype_filter: vec![] }),
         oracle_text: "When Invasion of Ikoria enters, search your library for a non-Human creature card with mana value X or less, reveal it, put it into your hand, then shuffle. // Zilortha, Apex of Ikoria — 7/3 Dinosaur. Trample. Each creature you control with power greater than its toughness assigns combat damage equal to its power rather than its toughness.".into(),
         ..Default::default()
     });
@@ -4591,7 +4591,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::BeginningOfUpkeep,
-                effect: Effect::SearchLibrary { destination: ZoneType::Hand },
+                effect: Effect::SearchLibrary { destination: ZoneType::Hand, subtype_filter: vec![] },
                 description: "At the beginning of your upkeep, you may search your library for a Rat card, reveal it, put it into your hand, then shuffle.".into(),
             },
         ],

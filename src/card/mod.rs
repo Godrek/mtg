@@ -368,8 +368,12 @@ pub enum Effect {
     /// Search the controller's library and put a card into the destination zone.
     /// Simplified tutor — in practice the strategy chooses; the engine just moves
     /// the top matching card.
+    ///
+    /// When `subtype_filter` is non-empty, only cards with at least one matching
+    /// subtype are valid targets (e.g., fetch lands searching for Forest/Plains).
     SearchLibrary {
         destination: ZoneType,
+        subtype_filter: Vec<Subtype>,
     },
     /// Bounce all nonland permanents opponents control (e.g., Cyclonic Rift overload).
     BounceAllNonlandOpponents,
