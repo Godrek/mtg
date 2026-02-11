@@ -4985,3 +4985,195 @@ fn test_macro_action_in_goldfish_game() {
     rules::apply_action(&mut state, &Action::PassPriority);
     assert!(!state.game_over, "Game shouldn't be over after pass");
 }
+
+// =====================================================================
+// MCTS goldfish integration tests
+// =====================================================================
+
+#[test]
+fn test_mcts_single_goldfish_game_completes() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 20,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+
+    let result = simulation::run_mcts_goldfish_game(&db, &red, &config, false);
+
+    // Game should complete
+    assert!(result.kill_turn > 0, "Game should last at least 1 turn");
+    assert!(result.actions_taken > 0, "Game should have actions");
+    // Life totals should make sense
+    assert!(
+        result.final_life[0] > 0 || result.won,
+        "Pilot should be alive unless something unusual happened"
+    );
+}
+
+#[test]
+fn test_mcts_goldfish_simulation_produces_valid_results() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 20,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+
+    let results = simulation::simulate_mcts_goldfish(&db, &red, &config, 10);
+
+    assert_eq!(results.total_games, 10);
+    assert_eq!(
+        results.wins + results.losses + results.draws,
+        10,
+        "wins + losses + draws should equal total games"
+    );
+}
+
+#[test]
+fn test_mcts_goldfish_kill_turn_distribution_consistent() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 30,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+
+    let results = simulation::simulate_mcts_goldfish(&db, &red, &config, 20);
+
+    if results.wins > 0 {
+        // Sum of kill-turn distribution should equal total wins
+        let dist_sum: u64 = results.kill_turn_distribution.iter().sum();
+        assert_eq!(
+            dist_sum, results.wins,
+            "Kill-turn distribution sum ({}) should equal wins ({})",
+            dist_sum, results.wins
+        );
+
+        // Fastest kill should be <= slowest kill
+        assert!(
+            results.fastest_kill <= results.slowest_kill,
+            "Fastest kill (T{}) should be <= slowest kill (T{})",
+            results.fastest_kill,
+            results.slowest_kill
+        );
+
+        // Average kill turn should be between fastest and slowest
+        assert!(
+            results.avg_kill_turn >= results.fastest_kill as f64
+                && results.avg_kill_turn <= results.slowest_kill as f64,
+            "Avg kill turn ({:.2}) should be between T{} and T{}",
+            results.avg_kill_turn,
+            results.fastest_kill,
+            results.slowest_kill,
+        );
+    }
+}
+
+#[test]
+fn test_mcts_strategy_plays_legal_actions() {
+    use mtg_gto::solver::mcts::MctsConfig;
+    use mtg_gto::solver::mcts::MctsStrategy;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 10,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+    let mcts = MctsStrategy::new(config);
+
+    // Run a full game using MctsStrategy through the standard simulation path
+    let result = simulation::run_goldfish_game(&db, &red, &mcts);
+
+    // The game should complete without panicking (which would indicate
+    // an illegal action was attempted)
+    assert!(result.turns > 0);
+    assert!(result.actions_taken > 0);
+}
+
+#[test]
+fn test_mcts_decision_stats_populated() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 30,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+
+    let result = simulation::run_mcts_goldfish_game(&db, &red, &config, false);
+
+    // A real goldfish game should have multiple decision points
+    assert!(
+        !result.decision_stats.is_empty(),
+        "MCTS game should record decision statistics"
+    );
+
+    for stat in &result.decision_stats {
+        // Each decision should have at least 2 legal actions (otherwise
+        // it wouldn't be counted as a decision — single-action states are skipped)
+        assert!(
+            stat.num_legal_actions >= 2,
+            "Decision should have >= 2 legal actions, got {}",
+            stat.num_legal_actions
+        );
+
+        // Best action should have been visited at least once
+        assert!(
+            stat.best_action_visits > 0,
+            "Best action should have at least 1 visit"
+        );
+
+        // Average reward should be in [0, 1]
+        assert!(
+            stat.best_action_avg_reward >= 0.0 && stat.best_action_avg_reward <= 1.0,
+            "Best action avg reward should be in [0,1], got {}",
+            stat.best_action_avg_reward
+        );
+    }
+}
+
+#[test]
+fn test_mcts_commander_goldfish_completes() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let (deck, commander) = sample::brimaz_commander_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 10,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+    };
+
+    let result = simulation::run_mcts_commander_goldfish_game(
+        &db, &deck, commander, &config, false,
+    );
+
+    assert!(result.kill_turn > 0);
+    assert!(result.actions_taken > 0);
+}

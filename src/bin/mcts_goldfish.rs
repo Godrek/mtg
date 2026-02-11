@@ -64,7 +64,6 @@ fn main() {
         exploration_constant: explore,
         max_tree_depth: max_depth,
         max_rollout_actions: 5_000,
-        reuse_tree: false,
     };
 
     // Determine deck and format

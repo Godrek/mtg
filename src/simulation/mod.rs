@@ -658,6 +658,8 @@ fn aggregate_mcts_goldfish_results(
     config: &MctsConfig,
     make_state: impl Fn(u64) -> GameState + Send + Sync,
 ) -> MctsGoldfishResults {
+    use std::sync::Mutex;
+
     let wins = AtomicU64::new(0);
     let losses = AtomicU64::new(0);
     let draws = AtomicU64::new(0);
@@ -665,9 +667,9 @@ fn aggregate_mcts_goldfish_results(
     let total_actions = AtomicU64::new(0);
     let fastest = AtomicU64::new(u64::MAX);
     let slowest = AtomicU64::new(0);
-    // Track decisions and reward sums using atomic integers (scaled by 1000 for precision)
     let total_decisions = AtomicU64::new(0);
-    let total_reward_x1000 = AtomicU64::new(0);
+    // Use Mutex<f64> for exact floating-point accumulation (no ×1000 truncation).
+    let total_reward = Mutex::new(0.0f64);
 
     let max_turn = 20u32;
     let distribution: Vec<AtomicU64> = (0..=max_turn)
@@ -688,7 +690,7 @@ fn aggregate_mcts_goldfish_results(
             result.decision_stats.iter().map(|d| d.best_action_avg_reward).sum::<f64>()
                 / result.decision_stats.len() as f64
         };
-        total_reward_x1000.fetch_add((avg_reward * 1000.0) as u64, Ordering::Relaxed);
+        *total_reward.lock().unwrap() += avg_reward;
 
         if result.won {
             wins.fetch_add(1, Ordering::Relaxed);
@@ -710,7 +712,7 @@ fn aggregate_mcts_goldfish_results(
     let fast = fastest.load(Ordering::Relaxed);
     let slow = slowest.load(Ordering::Relaxed);
     let tot_decisions = total_decisions.load(Ordering::Relaxed);
-    let tot_reward = total_reward_x1000.load(Ordering::Relaxed) as f64 / 1000.0;
+    let tot_reward = *total_reward.lock().unwrap();
 
     let kill_turn_dist: Vec<u64> = distribution
         .iter()
@@ -744,10 +746,14 @@ fn aggregate_mcts_goldfish_results(
     }
 }
 
-/// Log a game action to stderr for verbose tracing.
-fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerIndex) {
+/// Format a game action as a human-readable string, resolving card names
+/// from the game state's card database.
+///
+/// Shared by `log_action` (simulation verbose tracing) and MCTS decision
+/// logging so that card-name resolution isn't duplicated.
+pub fn format_action_name(state: &GameState, action: &crate::action::Action) -> String {
     let db = state.card_db();
-    let action_name = match action {
+    match action {
         crate::action::Action::CastSpell { object_id, .. }
         | crate::action::Action::CastCommander { object_id, .. } => {
             let inst = &state.objects[object_id];
@@ -767,6 +773,34 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
                     .unwrap_or("?")
             )
         }
+        crate::action::Action::DeclareAttackers { attackers } => {
+            let names: Vec<String> = attackers
+                .iter()
+                .filter_map(|id| {
+                    state.objects.get(id).and_then(|inst| {
+                        db.get(inst.card_def_id).map(|d| d.name.clone())
+                    })
+                })
+                .collect();
+            if names.is_empty() {
+                "Attack: none".to_string()
+            } else {
+                format!("Attack: {}", names.join(", "))
+            }
+        }
+        crate::action::Action::ActivateAbility { object_id, ability_index, .. } => {
+            let inst = &state.objects[object_id];
+            format!(
+                "Activate {} ability #{}",
+                db.get(inst.card_def_id)
+                    .map(|d| d.name.as_str())
+                    .unwrap_or("?"),
+                ability_index,
+            )
+        }
+        crate::action::Action::ActivateMacro { combo_id } => {
+            format!("Activate combo #{}", combo_id)
+        }
         crate::action::Action::OrderTriggers { ordering } => {
             format!("Order {} triggers", ordering.len())
         }
@@ -778,8 +812,14 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
                     .unwrap_or("?")
             )
         }
+        crate::action::Action::PassPriority => "Pass".to_string(),
         other => format!("{}", other),
-    };
+    }
+}
+
+/// Log a game action to stderr for verbose tracing.
+fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerIndex) {
+    let action_name = format_action_name(state, action);
     eprintln!(
         "T{} {:?} P{}: {} (life: {}/{})",
         state.turn_number,

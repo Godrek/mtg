@@ -28,9 +28,12 @@
 //!   Faster kills get higher rewards (range: ~0.05 to 1.0).
 //! - Draw/loss (game not won by turn limit): `reward = 0.0`
 
+use rand::seq::SliceRandom;
+
 use crate::action::{legal_actions, Action};
 use crate::game::{GameState, Phase, PlayerIndex};
 use crate::rules;
+use crate::simulation::format_action_name;
 use crate::strategy::{GoldfishStrategy, GreedyStrategy, Strategy};
 
 /// Maximum turns for goldfish MCTS games (matches simulation module).
@@ -63,11 +66,6 @@ pub struct MctsConfig {
     /// Maximum number of actions during rollout before declaring a draw.
     /// Prevents runaway rollouts in degenerate game states.
     pub max_rollout_actions: u32,
-
-    /// Whether to reuse the subtree from the previous search.
-    /// When true, the child node corresponding to the chosen action becomes
-    /// the root of the next search, preserving accumulated statistics.
-    pub reuse_tree: bool,
 }
 
 impl Default for MctsConfig {
@@ -77,7 +75,6 @@ impl Default for MctsConfig {
             exploration_constant: 1.0,
             max_tree_depth: 0,
             max_rollout_actions: 5_000,
-            reuse_tree: false,
         }
     }
 }
@@ -150,24 +147,48 @@ impl MctsNode {
 /// where Q_i is the average reward of child i, N_parent is the parent's
 /// visit count, N_i is the child's visit count, and C is the exploration
 /// constant. Unvisited children get infinite UCB1 (selected first).
+///
+/// Ties are broken randomly to improve search diversity (e.g., when
+/// multiple children are unvisited, they're explored in random order
+/// rather than always left-to-right).
 fn ucb1_select(children: &[MctsChild], parent_visits: u32, c: f64) -> usize {
     let ln_parent = (parent_visits as f64).ln();
-    let mut best_idx = 0;
-    let mut best_ucb = f64::NEG_INFINITY;
 
-    for (i, child) in children.iter().enumerate() {
-        let ucb = if child.node.visits == 0 {
-            f64::INFINITY
-        } else {
-            child.node.avg_reward() + c * (ln_parent / child.node.visits as f64).sqrt()
-        };
-        if ucb > best_ucb {
-            best_ucb = ucb;
-            best_idx = i;
-        }
-    }
+    // Compute UCB1 for each child
+    let ucb_scores: Vec<f64> = children
+        .iter()
+        .map(|child| {
+            if child.node.visits == 0 {
+                f64::INFINITY
+            } else {
+                child.node.avg_reward() + c * (ln_parent / child.node.visits as f64).sqrt()
+            }
+        })
+        .collect();
 
-    best_idx
+    let best_ucb = ucb_scores
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    // Collect all indices tied at the best score
+    let tied: Vec<usize> = ucb_scores
+        .iter()
+        .enumerate()
+        .filter(|(_, &score)| {
+            // For infinity (unvisited), check with is_infinite
+            if best_ucb.is_infinite() {
+                score.is_infinite()
+            } else {
+                (score - best_ucb).abs() < 1e-12
+            }
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    // Random tie-breaking among best
+    let mut rng = rand::thread_rng();
+    *tied.choose(&mut rng).unwrap_or(&0)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +257,10 @@ pub(crate) fn mcts_search(
 ///
 /// Returns the reward obtained from this iteration. The caller is responsible
 /// for updating the root node's statistics.
+///
+/// Forced passes and goldfish turns are handled iteratively (loop) to avoid
+/// unbounded recursion that could overflow the stack. Only player-0 decision
+/// points use recursion (bounded by tree depth).
 fn tree_walk(
     state: &mut GameState,
     node: &mut MctsNode,
@@ -244,45 +269,51 @@ fn tree_walk(
     goldfish_strategy: &GoldfishStrategy,
     depth: u32,
 ) -> f64 {
-    // Terminal check
-    if state.game_over || state.turn_number > GOLDFISH_MAX_TURNS {
-        return goldfish_reward(state.winner, state.turn_number);
+    // Advance past forced passes and goldfish turns iteratively.
+    // This loop replaces what was previously tail-recursion through
+    // non-decision states, preventing O(phases × turns) stack depth.
+    loop {
+        // Terminal check
+        if state.game_over || state.turn_number > GOLDFISH_MAX_TURNS {
+            return goldfish_reward(state.winner, state.turn_number);
+        }
+
+        // Depth limit — switch to rollout
+        if config.max_tree_depth > 0 && depth >= config.max_tree_depth {
+            return rollout(state, rollout_strategy, goldfish_strategy, config);
+        }
+
+        let player = state.priority_player;
+        let actions = legal_actions(state);
+
+        // No actions or only pass — advance without branching
+        if actions.is_empty()
+            || (actions.len() == 1 && actions[0] == Action::PassPriority)
+        {
+            rules::apply_action(state, &Action::PassPriority);
+            continue;
+        }
+
+        // Goldfish (player 1) — deterministic, no branching
+        if player != 0 {
+            let action = goldfish_strategy.choose_action(state, player);
+            rules::apply_action(state, &action);
+            continue;
+        }
+
+        // --- Player 0 decision node — break out of loop to handle below ---
+        break;
     }
 
-    // Depth limit — switch to rollout
-    if config.max_tree_depth > 0 && depth >= config.max_tree_depth {
-        return rollout(state, rollout_strategy, goldfish_strategy, config);
-    }
-
-    let player = state.priority_player;
+    // We only reach here at a player-0 decision node.
     let actions = legal_actions(state);
-
-    // No actions or only pass — advance without branching
-    if actions.is_empty()
-        || (actions.len() == 1 && actions[0] == Action::PassPriority)
-    {
-        rules::apply_action(state, &Action::PassPriority);
-        // Don't count forced passes as tree depth
-        return tree_walk(state, node, config, rollout_strategy, goldfish_strategy, depth);
-    }
-
-    // Goldfish (player 1) — deterministic, no branching
-    if player != 0 {
-        let action = goldfish_strategy.choose_action(state, player);
-        rules::apply_action(state, &action);
-        return tree_walk(state, node, config, rollout_strategy, goldfish_strategy, depth);
-    }
-
-    // --- Player 0 decision node ---
 
     // Expand if this is a leaf
     if !node.is_expanded() {
         expand_node(node, &actions);
-        // First visit to a new node: rollout from here
-        let reward = rollout(state, rollout_strategy, goldfish_strategy, config);
-        node.visits += 1;
-        node.total_reward += reward;
-        return reward;
+        // First visit to a new node: rollout from here.
+        // Don't update node stats here — the caller's backpropagation handles it.
+        return rollout(state, rollout_strategy, goldfish_strategy, config);
     }
 
     let children = node.children.as_mut().unwrap();
@@ -291,10 +322,7 @@ fn tree_walk(
     // This shouldn't happen in practice for goldfish since the tree is built
     // deterministically, but handle it defensively.
     if children.is_empty() {
-        let reward = rollout(state, rollout_strategy, goldfish_strategy, config);
-        node.visits += 1;
-        node.total_reward += reward;
-        return reward;
+        return rollout(state, rollout_strategy, goldfish_strategy, config);
     }
 
     // Select child using UCB1
@@ -304,7 +332,7 @@ fn tree_walk(
     let action = children[child_idx].action.clone();
     rules::apply_action(state, &action);
 
-    // Recurse
+    // Recurse (bounded by tree depth — only player-0 decisions increment depth)
     let reward = tree_walk(
         state,
         &mut children[child_idx].node,
@@ -394,9 +422,8 @@ fn best_action_by_visits(root: &MctsNode) -> Option<Action> {
 /// MCTS-based strategy for goldfish solitaire optimization.
 ///
 /// At each decision point, runs MCTS from the current game state to find
-/// the best action. This is an "online" planner — it builds a new search
-/// tree at each decision (no persistent tree across decisions, unless
-/// `reuse_tree` is enabled).
+/// the best action. This is an "online" planner — it builds a fresh search
+/// tree at each decision point.
 ///
 /// For goldfish, only player 0's decisions matter. When used as player 1's
 /// strategy (shouldn't happen), falls back to GoldfishStrategy.
@@ -562,58 +589,9 @@ pub fn run_mcts_goldfish_game(
 }
 
 /// Format an action for human-readable display.
+/// Delegates to the shared `format_action_name` in the simulation module.
 fn format_action(action: &Action, state: &GameState) -> String {
-    let db = state.card_db();
-    match action {
-        Action::CastSpell { object_id, .. } | Action::CastCommander { object_id, .. } => {
-            let inst = &state.objects[object_id];
-            format!(
-                "Cast {}",
-                db.get(inst.card_def_id)
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("?")
-            )
-        }
-        Action::PlayLand { object_id } => {
-            let inst = &state.objects[object_id];
-            format!(
-                "Play {}",
-                db.get(inst.card_def_id)
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("?")
-            )
-        }
-        Action::DeclareAttackers { attackers } => {
-            let names: Vec<String> = attackers
-                .iter()
-                .filter_map(|id| {
-                    state.objects.get(id).and_then(|inst| {
-                        db.get(inst.card_def_id).map(|d| d.name.clone())
-                    })
-                })
-                .collect();
-            if names.is_empty() {
-                "Attack: none".to_string()
-            } else {
-                format!("Attack: {}", names.join(", "))
-            }
-        }
-        Action::ActivateAbility { object_id, ability_index, .. } => {
-            let inst = &state.objects[object_id];
-            format!(
-                "Activate {} ability #{}",
-                db.get(inst.card_def_id)
-                    .map(|d| d.name.as_str())
-                    .unwrap_or("?"),
-                ability_index,
-            )
-        }
-        Action::ActivateMacro { combo_id } => {
-            format!("Activate combo #{}", combo_id)
-        }
-        Action::PassPriority => "Pass".to_string(),
-        other => format!("{:?}", other),
-    }
+    format_action_name(state, action)
 }
 
 // ---------------------------------------------------------------------------
