@@ -573,6 +573,28 @@ fn prune_bruteforce_actions(mut actions: Vec<crate::action::Action>) -> Vec<crat
         actions.retain(|a| *a != Action::PassPriority);
     }
 
+    // Mulligan branching dominates the search tree and rarely contributes to
+    // tactical line discovery. If keeping is available, prune mulligan choices
+    // and proceed with the current hand.
+    if actions.iter().any(|a| matches!(a, Action::MulliganKeep)) {
+        actions.retain(|a| !matches!(a, Action::MulliganMulligan));
+    }
+
+    // Bottom-card selections after a mulligan are largely interchangeable for
+    // brute tactical search; keep only one canonical choice.
+    let first_bottom = actions.iter().find_map(|a| {
+        if let Action::MulliganBottomCard { object_id } = a {
+            Some(*object_id)
+        } else {
+            None
+        }
+    });
+    if let Some(chosen) = first_bottom {
+        actions.retain(
+            |a| !matches!(a, Action::MulliganBottomCard { object_id } if *object_id != chosen),
+        );
+    }
+
     // If there are other choices in declare-attackers/blockers, remove
     // explicit empty declarations as they are equivalent no-ops.
     if actions.len() > 1 {
@@ -875,6 +897,26 @@ mod tests {
         let pruned = prune_bruteforce_actions(actions);
         assert_eq!(pruned.len(), 1);
         assert!(matches!(pruned[0], Action::DeclareAttackers { .. }));
+    }
+
+    #[test]
+    fn test_prune_bruteforce_actions_prunes_mulligan_branches() {
+        let actions = vec![
+            Action::MulliganKeep,
+            Action::MulliganMulligan,
+            Action::MulliganBottomCard { object_id: 3 },
+            Action::MulliganBottomCard { object_id: 9 },
+        ];
+
+        let pruned = prune_bruteforce_actions(actions);
+        assert!(pruned.contains(&Action::MulliganKeep));
+        assert!(!pruned.contains(&Action::MulliganMulligan));
+
+        let bottom_count = pruned
+            .iter()
+            .filter(|a| matches!(a, Action::MulliganBottomCard { .. }))
+            .count();
+        assert_eq!(bottom_count, 1);
     }
 
     #[test]
