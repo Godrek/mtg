@@ -1,7 +1,7 @@
 //! Commander Goldfish Exhaustive Search
 //!
 //! Exhaustively explores every legal pilot action branch (no MCCFR) up to turn 20,
-//! while treating the opponent as deterministic goldfish.
+//! while forcing non-pilot players into deterministic passive actions.
 //!
 //! Usage:
 //!   cargo run --release --bin commander_goldfish_exhaustive
@@ -21,7 +21,6 @@ use mtg_gto::action::{legal_actions, Action};
 use mtg_gto::card::sample;
 use mtg_gto::game::{GameState, PlayerIndex};
 use mtg_gto::rules;
-use mtg_gto::strategy::{GoldfishStrategy, Strategy};
 use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
@@ -212,8 +211,7 @@ fn explore_all_branches(
         return;
     }
 
-    // Collapse opponent actions deterministically (goldfish).
-    let goldfish = GoldfishStrategy;
+    // Collapse non-pilot actions deterministically as passive actions.
     while state.priority_player != pilot && !state.game_over {
         if is_terminal_or_limited(
             &state,
@@ -224,7 +222,7 @@ fn explore_all_branches(
             record_terminal(stats, &state, pilot, actions_taken, path, state_index);
             return;
         }
-        let action = goldfish.choose_action(&state, state.priority_player);
+        let action = choose_non_pilot_action(&state);
         rules::apply_action(&mut state, &action);
     }
 
@@ -285,6 +283,38 @@ fn explore_all_branches(
     }
 
     seen_hashes.remove(&state_hash);
+}
+
+fn choose_non_pilot_action(state: &GameState) -> Action {
+    let actions = legal_actions(state);
+    if actions.is_empty() {
+        return Action::PassPriority;
+    }
+
+    if let Some(action) = actions.iter().find(|a| matches!(a, Action::MulliganKeep)) {
+        return action.clone();
+    }
+    if let Some(action) = actions.iter().find(|a| matches!(a, Action::PassPriority)) {
+        return action.clone();
+    }
+    if let Some(action) = actions.iter().find(|a| {
+        matches!(
+            a,
+            Action::DeclareAttackers { attackers } if attackers.is_empty()
+        )
+    }) {
+        return action.clone();
+    }
+    if let Some(action) = actions.iter().find(|a| {
+        matches!(
+            a,
+            Action::DeclareBlockers { blocks } if blocks.is_empty()
+        )
+    }) {
+        return action.clone();
+    }
+
+    actions.into_iter().next().unwrap_or(Action::PassPriority)
 }
 
 fn is_terminal_or_limited(
@@ -361,5 +391,40 @@ fn merge_stats(total: &mut ExhaustiveStats, local: ExhaustiveStats) {
         if replace {
             total.best_win = Some(candidate);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mtg_gto::card::sample;
+
+    #[test]
+    fn test_choose_non_pilot_action_prefers_pass_priority() {
+        let db = sample::build_sample_db();
+        let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
+
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+        rules::set_tutor_targets(&mut state, 1, &tutor_targets);
+
+        let pilot = 0;
+        while state.phase == mtg_gto::game::Phase::Mulligan && !state.game_over {
+            if state.priority_player == pilot {
+                rules::apply_action(&mut state, &Action::MulliganKeep);
+            } else {
+                let action = choose_non_pilot_action(&state);
+                rules::apply_action(&mut state, &action);
+            }
+        }
+
+        while state.priority_player == pilot && !state.game_over {
+            rules::apply_action(&mut state, &Action::PassPriority);
+        }
+
+        let action = choose_non_pilot_action(&state);
+        assert_eq!(action, Action::PassPriority);
     }
 }
