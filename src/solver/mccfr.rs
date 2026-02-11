@@ -113,9 +113,7 @@ pub enum RolloutMode {
     /// Use the static heuristic (life + board presence). Phase 1B default.
     Heuristic,
     /// Play out with the given strategy pair for up to `max_rollout_actions` actions.
-    Strategy {
-        max_rollout_actions: u32,
-    },
+    Strategy { max_rollout_actions: u32 },
 }
 
 /// Extended configuration for Phase 2B training.
@@ -157,7 +155,14 @@ pub fn run_iteration(
     regret_tables: &mut [RegretTable; 2],
     config: &McfrConfig,
 ) {
-    run_iteration_with_abstraction(initial_state, regret_tables, config, &IdentityAbstraction, &RolloutMode::Heuristic, None)
+    run_iteration_with_abstraction(
+        initial_state,
+        regret_tables,
+        config,
+        &IdentityAbstraction,
+        &RolloutMode::Heuristic,
+        None,
+    )
 }
 
 /// Run one MCCFR iteration with info set abstraction and rollout support.
@@ -257,10 +262,7 @@ fn traverse(
     }
 
     // Canonicalize all legal actions for stable regret table keying
-    let canonical_actions: Vec<_> = actions
-        .iter()
-        .map(|a| canonicalize(a, &state))
-        .collect();
+    let canonical_actions: Vec<_> = actions.iter().map(|a| canonicalize(a, &state)).collect();
 
     // Compute information set for the acting player, apply abstraction
     let view = state.visible_state(player);
@@ -350,9 +352,9 @@ fn evaluate_at_depth_limit(
 ) -> f64 {
     match rollout_mode {
         RolloutMode::Heuristic => heuristic_utility(state, traverser),
-        RolloutMode::Strategy { max_rollout_actions } => {
-            rollout_utility(state, traverser, rollout_strategies, *max_rollout_actions)
-        }
+        RolloutMode::Strategy {
+            max_rollout_actions,
+        } => rollout_utility(state, traverser, rollout_strategies, *max_rollout_actions),
     }
 }
 
@@ -380,9 +382,7 @@ fn rollout_utility(
         let player = rollout_state.priority_player;
         let actions = legal_actions(&rollout_state);
 
-        if actions.is_empty()
-            || (actions.len() == 1 && actions[0] == Action::PassPriority)
-        {
+        if actions.is_empty() || (actions.len() == 1 && actions[0] == Action::PassPriority) {
             rules::apply_action(&mut rollout_state, &Action::PassPriority);
             actions_taken += 1;
             continue;
@@ -511,9 +511,7 @@ pub fn train_extended(
         );
 
         // Checkpoint at configured intervals
-        if train_config.checkpoint_interval > 0
-            && (i + 1) % train_config.checkpoint_interval == 0
-        {
+        if train_config.checkpoint_interval > 0 && (i + 1) % train_config.checkpoint_interval == 0 {
             if let Some(ref dir) = train_config.checkpoint_dir {
                 let _ = save_checkpoint(&regret_tables, dir, i + 1);
             }
@@ -630,11 +628,7 @@ fn merge_regret_tables(shard_results: &[[RegretTable; 2]]) -> [RegretTable; 2] {
 // =========================================================================
 
 /// Save regret tables to disk as a checkpoint.
-pub fn save_checkpoint(
-    tables: &[RegretTable; 2],
-    dir: &str,
-    iteration: u32,
-) -> Result<(), String> {
+pub fn save_checkpoint(tables: &[RegretTable; 2], dir: &str, iteration: u32) -> Result<(), String> {
     let path = Path::new(dir);
     std::fs::create_dir_all(path).map_err(|e| format!("mkdir: {}", e))?;
 
@@ -648,10 +642,7 @@ pub fn save_checkpoint(
 }
 
 /// Load a checkpoint from disk.
-pub fn load_checkpoint(
-    dir: &str,
-    iteration: u32,
-) -> Result<[RegretTable; 2], String> {
+pub fn load_checkpoint(dir: &str, iteration: u32) -> Result<[RegretTable; 2], String> {
     let path = Path::new(dir);
     let mut tables = [RegretTable::new(), RegretTable::new()];
 
@@ -903,10 +894,8 @@ pub fn warm_start_from_greedy(
             }
 
             // Canonicalize actions
-            let canonical_actions: Vec<_> = actions
-                .iter()
-                .map(|a| canonicalize(a, &state))
-                .collect();
+            let canonical_actions: Vec<_> =
+                actions.iter().map(|a| canonicalize(a, &state)).collect();
 
             // Compute info set hash
             let view = state.visible_state(player);
@@ -957,9 +946,7 @@ pub fn train_warm_started(
             train_config.rollout_strategies,
         );
 
-        if train_config.checkpoint_interval > 0
-            && (i + 1) % train_config.checkpoint_interval == 0
-        {
+        if train_config.checkpoint_interval > 0 && (i + 1) % train_config.checkpoint_interval == 0 {
             if let Some(ref dir) = train_config.checkpoint_dir {
                 let _ = save_checkpoint(&regret_tables, dir, i + 1);
             }
@@ -1032,7 +1019,8 @@ impl OpponentModel {
 
         let sig = self.signature_likelihood;
         let non_sig = self.non_signature_likelihood;
-        let likelihoods: Vec<f64> = self.archetypes
+        let likelihoods: Vec<f64> = self
+            .archetypes
             .iter()
             .map(|arch| {
                 if arch.signature_cards.contains(&card_id) {
@@ -1043,7 +1031,8 @@ impl OpponentModel {
             })
             .collect();
 
-        let mut unnormalized: Vec<f64> = self.posteriors
+        let mut unnormalized: Vec<f64> = self
+            .posteriors
             .iter()
             .zip(likelihoods.iter())
             .map(|(&post, &lik)| post * lik)
@@ -1069,7 +1058,8 @@ impl OpponentModel {
 
     /// Get the posterior probability distribution.
     pub fn distribution(&self) -> Vec<(&str, f64)> {
-        let mut result: Vec<(&str, f64)> = self.archetypes
+        let mut result: Vec<(&str, f64)> = self
+            .archetypes
             .iter()
             .zip(self.posteriors.iter())
             .map(|(arch, &prob)| (arch.name.as_str(), prob))
@@ -1122,10 +1112,7 @@ pub fn collect_policy_snapshots(
             continue;
         }
 
-        let canonical_actions: Vec<_> = actions
-            .iter()
-            .map(|a| canonicalize(a, &state))
-            .collect();
+        let canonical_actions: Vec<_> = actions.iter().map(|a| canonicalize(a, &state)).collect();
 
         let view = state.visible_state(player);
         let info_set = InformationSet::from_view(&view, state.card_db());
@@ -1216,7 +1203,14 @@ pub fn train_goldfish_with_abstraction(
     abstraction: &dyn InfoSetAbstraction,
     pilot: PlayerIndex,
 ) -> [RegretTable; 2] {
-    train_goldfish_with_progress(initial_state, num_iterations, config, abstraction, pilot, |_, _, _| {})
+    train_goldfish_with_progress(
+        initial_state,
+        num_iterations,
+        config,
+        abstraction,
+        pilot,
+        |_, _, _| {},
+    )
 }
 
 /// Train goldfish MCCFR with information set abstraction and a progress callback.
@@ -1275,101 +1269,75 @@ where
 /// straightforward (accept a `RolloutMode` parameter and call
 /// `rollout_utility` at the depth limit) if deeper search is ever needed.
 fn traverse_goldfish(
-    state: GameState,
+    mut state: GameState,
     regret_table: &mut RegretTable,
     config: &McfrConfig,
     abstraction: &dyn InfoSetAbstraction,
     goldfish: &dyn Strategy,
     pilot: PlayerIndex,
     depth: u32,
-    actions_taken: u32,
+    mut actions_taken: u32,
     nodes_visited: &mut u32,
 ) -> f64 {
-    // Terminal check
-    if state.game_over {
-        return terminal_utility(&state, pilot);
-    }
+    // Collapse deterministic stretches into a loop so recursion depth tracks
+    // pilot branch points rather than raw action count. This prevents stack
+    // overflows on deep goldfish lines with many forced/pass actions.
+    let actions = loop {
+        // Terminal check
+        if state.game_over {
+            return terminal_utility(&state, pilot);
+        }
 
-    // Action limit
-    if actions_taken >= config.max_actions {
-        return heuristic_utility(&state, pilot);
-    }
+        // Action limit
+        if actions_taken >= config.max_actions {
+            return heuristic_utility(&state, pilot);
+        }
 
-    // Node budget: fall back to heuristic when iteration budget is exhausted.
-    // This prevents exponential blowup with high-branching hands.
-    *nodes_visited += 1;
-    if config.max_nodes_per_iteration > 0 && *nodes_visited >= config.max_nodes_per_iteration {
-        return heuristic_utility(&state, pilot);
-    }
+        // Node budget: fall back to heuristic when iteration budget is exhausted.
+        // This prevents exponential blowup with high-branching hands.
+        *nodes_visited += 1;
+        if config.max_nodes_per_iteration > 0 && *nodes_visited >= config.max_nodes_per_iteration {
+            return heuristic_utility(&state, pilot);
+        }
 
-    let player = state.priority_player;
+        let player = state.priority_player;
 
-    // Opponent (goldfish): deterministic, no regret tracking
-    if player != pilot {
-        let action = goldfish.choose_action(&state, player);
-        let mut next_state = state;
-        rules::apply_action(&mut next_state, &action);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth, // don't increment depth for opponent actions
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // Opponent (goldfish): deterministic, no regret tracking
+        if player != pilot {
+            let action = goldfish.choose_action(&state, player);
+            rules::apply_action(&mut state, &action);
+            actions_taken += 1;
+            continue;
+        }
 
-    // Pilot: MCCFR decision node
-    let actions = legal_actions_abstracted(&state);
+        // Pilot: MCCFR decision node
+        let actions = legal_actions_abstracted(&state);
 
-    // No actions — pass
-    if actions.is_empty() {
-        let mut next_state = state;
-        rules::apply_action(&mut next_state, &Action::PassPriority);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth,
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // No actions — pass
+        if actions.is_empty() {
+            rules::apply_action(&mut state, &Action::PassPriority);
+            actions_taken += 1;
+            continue;
+        }
 
-    // Single action — no decision to make
-    if actions.len() == 1 {
-        let mut next_state = state.clone();
-        rules::apply_action(&mut next_state, &actions[0]);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth,
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // Single action — no decision to make
+        if actions.len() == 1 {
+            rules::apply_action(&mut state, &actions[0]);
+            actions_taken += 1;
+            continue;
+        }
 
-    // Depth limit — uses heuristic_utility directly; see doc comment above
-    // for rationale on omitting rollout support.
-    if config.max_depth > 0 && depth >= config.max_depth {
-        return heuristic_utility(&state, pilot);
-    }
+        // Depth limit — uses heuristic_utility directly; see doc comment above
+        // for rationale on omitting rollout support.
+        if config.max_depth > 0 && depth >= config.max_depth {
+            return heuristic_utility(&state, pilot);
+        }
+
+        break actions;
+    };
 
     // Canonicalize actions
-    let canonical_actions: Vec<_> = actions
-        .iter()
-        .map(|a| canonicalize(a, &state))
-        .collect();
+    let canonical_actions: Vec<_> = actions.iter().map(|a| canonicalize(a, &state)).collect();
 
     // Compute info set
     let view = state.visible_state(pilot);
@@ -1516,9 +1484,11 @@ pub fn training_stats(tables: &[RegretTable; 2]) -> TrainingStats {
         // Rough memory estimate (lower bound). Does not account for HashMap
         // overhead (load factor, bucket metadata), so actual RSS may be 1.5-2x
         // higher. Suitable for relative comparisons, not absolute sizing.
-        let estimated = tables[i].data.iter().map(|(_, d)| {
-            8 + 8 + d.action_data.len() * 48
-        }).sum();
+        let estimated = tables[i]
+            .data
+            .iter()
+            .map(|(_, d)| 8 + 8 + d.action_data.len() * 48)
+            .sum();
         stats.memory_bytes[i] = estimated;
     }
 
@@ -1552,7 +1522,11 @@ mod tests {
 
         // Equal life totals, no creatures — should be close to 0
         let util = heuristic_utility(&state, 0);
-        assert!(util.abs() < 0.01, "Equal game should have ~0 utility, got {}", util);
+        assert!(
+            util.abs() < 0.01,
+            "Equal game should have ~0 utility, got {}",
+            util
+        );
     }
 
     #[test]
@@ -1567,7 +1541,10 @@ mod tests {
         state.players[1].life = 10;
 
         let util = heuristic_utility(&state, 0);
-        assert!(util > 0.0, "Player with more life should have positive utility");
+        assert!(
+            util > 0.0,
+            "Player with more life should have positive utility"
+        );
     }
 
     #[test]
@@ -1620,7 +1597,11 @@ mod tests {
 
         let abstraction = BucketedAbstraction;
         let train_cfg = TrainConfig {
-            mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+            mccfr: McfrConfig {
+                max_depth: 8,
+                max_actions: 200,
+                max_nodes_per_iteration: 0,
+            },
             abstraction: &abstraction,
             rollout_mode: RolloutMode::Heuristic,
             rollout_strategies: None,
@@ -1655,7 +1636,8 @@ mod tests {
         let util = rollout_utility(&state, 0, Some((&greedy, &random)), 500);
         assert!(
             util >= -1.0 && util <= 1.0,
-            "Rollout utility should be in [-1, 1], got {}", util
+            "Rollout utility should be in [-1, 1], got {}",
+            util
         );
     }
 
@@ -1672,7 +1654,11 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+        let config = McfrConfig {
+            max_depth: 8,
+            max_actions: 200,
+            max_nodes_per_iteration: 0,
+        };
         let tables = train(&state, 5, &config);
 
         let stats = training_stats(&tables);
@@ -1694,15 +1680,29 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
+        let config = McfrConfig {
+            max_depth: 8,
+            max_actions: 1000,
+            max_nodes_per_iteration: 0,
+        };
         let tables = train_goldfish_parallel(&state, 8, 4, &config);
 
         // Pilot's table should have entries
-        assert!(tables[0].num_info_sets() > 0, "Parallel goldfish training should create info sets");
+        assert!(
+            tables[0].num_info_sets() > 0,
+            "Parallel goldfish training should create info sets"
+        );
         let total_visits: u64 = tables[0].data.values().map(|d| d.visit_count).sum();
-        assert!(total_visits > 0, "Parallel goldfish training should accumulate visits");
+        assert!(
+            total_visits > 0,
+            "Parallel goldfish training should accumulate visits"
+        );
         // Opponent's table should remain empty (goldfish)
-        assert_eq!(tables[1].num_info_sets(), 0, "Opponent table should be empty in goldfish mode");
+        assert_eq!(
+            tables[1].num_info_sets(),
+            0,
+            "Opponent table should be empty in goldfish mode"
+        );
     }
 
     #[test]
@@ -1718,12 +1718,19 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+        let config = McfrConfig {
+            max_depth: 8,
+            max_actions: 200,
+            max_nodes_per_iteration: 0,
+        };
         let tables = train_parallel_basic(&state, 8, 4, &config);
 
         // Both players should have info set entries
         let total_info_sets: usize = tables.iter().map(|t| t.num_info_sets()).sum();
-        assert!(total_info_sets > 0, "Parallel basic training should create entries");
+        assert!(
+            total_info_sets > 0,
+            "Parallel basic training should create entries"
+        );
     }
 
     #[test]
@@ -1738,9 +1745,39 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 1000, max_nodes_per_iteration: 0 };
+        let config = McfrConfig {
+            max_depth: 8,
+            max_actions: 1000,
+            max_nodes_per_iteration: 0,
+        };
         // 2 iterations spread across 8 shards: should not panic
         let tables = train_goldfish_parallel(&state, 2, 8, &config);
+        assert!(tables[0].num_info_sets() > 0);
+    }
+
+    #[test]
+    fn test_train_goldfish_parallel_deep_config_no_stack_overflow() {
+        use crate::card::sample;
+        use std::sync::Arc;
+
+        let db = sample::build_sample_db();
+        let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
+
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::new(db));
+        rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+        rules::set_tutor_targets(&mut state, 1, &tutor_targets);
+
+        let config = McfrConfig {
+            max_depth: 40,
+            max_actions: 2_000,
+            max_nodes_per_iteration: 20_000,
+        };
+
+        // Regression test: deterministic stretches should not recurse deeply
+        // enough to overflow thread stacks.
+        let tables = train_goldfish_parallel(&state, 1, 2, &config);
         assert!(tables[0].num_info_sets() > 0);
     }
 }
