@@ -268,6 +268,90 @@ pub mod ids {
     pub const HYDROELECTRIC_SPECIMEN: u64 = 802;
     pub const INVASION_OF_IKORIA: u64 = 803;
     pub const SINK_INTO_STUPOR: u64 = 804;
+
+    // =====================================================================
+    // Ashcoat of the Shadow Swarm Commander Deck
+    // =====================================================================
+
+    // --- Commander ---
+    pub const ASHCOAT_OF_THE_SHADOW_SWARM: u64 = 900;
+
+    // --- Creatures ---
+    pub const ASSASSIN_INITIATE: u64 = 901;
+    pub const AYARA_FIRST_OF_LOCTHWAIN: u64 = 902;
+    pub const BLOOD_ARTIST: u64 = 903;
+    pub const BLOODLINE_PRETENDER: u64 = 904;
+    pub const BURGLAR_RAT: u64 = 905;
+    pub const CHANGELING_OUTCAST: u64 = 906;
+    pub const CHITTERING_RATS: u64 = 907;
+    pub const CHITTERING_WITCH: u64 = 908;
+    pub const CRYPT_GHAST: u64 = 909;
+    pub const FALKENRATH_NOBLE: u64 = 910;
+    pub const GNAT_MISER: u64 = 911;
+    pub const INK_EYES_SERVANT_OF_ONI: u64 = 912;
+    pub const KARUMONIX_THE_RAT_KING: u64 = 913;
+    pub const LORD_SKITTER_SEWER_KING: u64 = 914;
+    pub const MARROW_GNAWER: u64 = 915;
+    pub const MIKAEUS_THE_UNHALLOWED: u64 = 916;
+    pub const NASHI_MOON_SAGES_SCION: u64 = 917;
+    pub const NEZUMI_BONE_READER: u64 = 918;
+    pub const NEZUMI_CUTTHROAT: u64 = 919;
+    pub const NEZUMI_GRAVEROBBER: u64 = 920;
+    pub const NEZUMI_SHORTFANG: u64 = 921;
+    pub const NIRKANA_REVENANT: u64 = 922;
+    pub const OGRE_SLUMLORD: u64 = 923;
+    pub const PACK_RAT: u64 = 924;
+    pub const RATCATCHER: u64 = 925;
+    pub const RAVENOUS_RATS: u64 = 926;
+    pub const REFURBISHED_FAMILIAR: u64 = 927;
+    pub const ROAMING_THRONE: u64 = 928;
+    pub const SKULLSNATCHER: u64 = 929;
+    pub const SPECIES_SPECIALIST: u64 = 930;
+    pub const TYPHOID_RATS: u64 = 931;
+    pub const VALLEY_ROTCALLER: u64 = 932;
+    pub const ZULAPORT_CUTTHROAT: u64 = 933;
+
+    // --- Artifacts ---
+    pub const BONTUS_MONUMENT: u64 = 950;
+    pub const CAGED_SUN: u64 = 951;
+    pub const COAT_OF_ARMS: u64 = 952;
+    pub const CRYPTOLITH_FRAGMENT: u64 = 953;
+    pub const DARKSTEEL_INGOT: u64 = 954;
+    pub const DOOR_OF_DESTINIES: u64 = 955;
+    pub const HERALDS_HORN: u64 = 956;
+    pub const JET_MEDALLION: u64 = 957;
+    pub const NIM_DEATHMANTLE: u64 = 958;
+    pub const SEMBLANCE_ANVIL: u64 = 959;
+    pub const SKULLCLAMP: u64 = 960;
+    pub const STRIONIC_RESONATOR: u64 = 961;
+    pub const THE_IMMORTAL_SUN: u64 = 962;
+    pub const THORNBITE_STAFF: u64 = 963;
+    pub const THRAN_DYNAMO: u64 = 964;
+    pub const THRONE_OF_THE_GOD_PHARAOH: u64 = 965;
+    pub const URZAS_INCUBATOR: u64 = 966;
+    pub const VANQUISHERS_BANNER: u64 = 967;
+
+    // --- Enchantments ---
+    pub const BLACK_MARKET: u64 = 980;
+    pub const BLACK_MARKET_CONNECTIONS: u64 = 981;
+    pub const DICTATE_OF_EREBOS: u64 = 982;
+    pub const GRAVE_PACT: u64 = 983;
+    pub const PHYREXIAN_ARENA: u64 = 984;
+    pub const PHYREXIAN_RECLAMATION: u64 = 985;
+    pub const POSTS_CITADEL: u64 = 986;
+
+    // --- Lands ---
+    pub const CABAL_COFFERS: u64 = 1000;
+    pub const CASTLE_LOCTHWAIN: u64 = 1001;
+    pub const CRYPT_OF_AGADEEM: u64 = 1002;
+    pub const MIKOKORO_CENTER_OF_THE_SEA: u64 = 1003;
+    pub const NYKTHOS_SHRINE_TO_NYX: u64 = 1004;
+    pub const PATH_OF_ANCESTRY: u64 = 1005;
+    pub const SWARMYARD: u64 = 1006;
+
+    // --- Instants / Sorceries ---
+    pub const CHAIN_ASSASSINATION: u64 = 1010;
+    pub const LIVING_DEATH: u64 = 1011;
 }
 
 pub fn build_sample_db() -> CardDatabase {
@@ -4093,6 +4177,1584 @@ pub fn build_sample_db() -> CardDatabase {
         ..Default::default()
     });
 
+    // =====================================================================
+    // Ashcoat of the Shadow Swarm Commander Deck
+    // =====================================================================
+
+    // --- Commander ---
+    // Ashcoat of the Shadow Swarm {3}{B}{B}
+    // Legendary Creature — Rat 4/4
+    // Whenever Ashcoat attacks, other Rats you control get +2/+2 until EOT.
+    // Whenever a Rat you control dies, you may draw a card. If you do, discard a card.
+    // {1}{B}, Exile four cards from your graveyard: Return a Rat creature card from
+    // your graveyard to the battlefield.
+    db.insert(CardDef {
+        id: ids::ASHCOAT_OF_THE_SHADOW_SWARM,
+        name: "Ashcoat of the Shadow Swarm".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Rat".into())],
+        power: Some(4),
+        toughness: Some(4),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::Attacks,
+                effect: Effect::Unimplemented("Other Rats you control get +2/+2 until end of turn.".into()),
+                description: "Whenever Ashcoat of the Shadow Swarm attacks, other Rats you control get +2/+2 until end of turn.".into(),
+            },
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Multiple(vec![
+                    Effect::DrawCards { count: 1 },
+                    Effect::DiscardCards { count: 1, target: TargetSpec::Controller },
+                ]),
+                description: "Whenever a Rat you control dies, you may draw a card. If you do, discard a card.".into(),
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Unimplemented("Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into()),
+                description: "{1}{B}, Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into(),
+            },
+        ],
+        oracle_text: "Whenever Ashcoat of the Shadow Swarm attacks, other Rats you control get +2/+2 until end of turn. Whenever a Rat you control dies, you may draw a card. If you do, discard a card. {1}{B}, Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into(),
+        ..Default::default()
+    });
+
+    // --- Creatures ---
+
+    // Assassin Initiate {B}
+    // Creature — Rat Assassin 1/1
+    // Deathtouch
+    db.insert(CardDef {
+        id: ids::ASSASSIN_INITIATE,
+        name: "Assassin Initiate".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Assassin".into())],
+        keywords: vec![KeywordAbility::Deathtouch],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Deathtouch".into(),
+        ..Default::default()
+    });
+
+    // Ayara, First of Locthwain {B}{B}{B}
+    // Legendary Creature — Elf Noble 2/3
+    // Whenever another black creature enters the battlefield under your control,
+    // each opponent loses 1 life and you gain 1 life.
+    // {T}, Sacrifice another black creature: Draw a card.
+    db.insert(CardDef {
+        id: ids::AYARA_FIRST_OF_LOCTHWAIN,
+        name: "Ayara, First of Locthwain".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 3, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Elf".into()), Subtype("Noble".into())],
+        power: Some(2),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureEnters,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Whenever another black creature enters the battlefield under your control, each opponent loses 1 life and you gain 1 life.".into(),
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::zero(),
+                requires_tap: true,
+                effect: Effect::DrawCards { count: 1 },
+                description: "{T}, Sacrifice another black creature: Draw a card.".into(),
+            },
+        ],
+        oracle_text: "Whenever another black creature enters the battlefield under your control, each opponent loses 1 life and you gain 1 life. {T}, Sacrifice another black creature: Draw a card.".into(),
+        ..Default::default()
+    });
+
+    // Blood Artist {1}{B}
+    // Creature — Vampire 0/1
+    // Whenever Blood Artist or another creature dies, target opponent loses 1 life
+    // and you gain 1 life.
+    db.insert(CardDef {
+        id: ids::BLOOD_ARTIST,
+        name: "Blood Artist".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Vampire".into())],
+        power: Some(0),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Whenever Blood Artist or another creature dies, target opponent loses 1 life and you gain 1 life.".into(),
+            },
+        ],
+        oracle_text: "Whenever Blood Artist or another creature dies, target opponent loses 1 life and you gain 1 life.".into(),
+        ..Default::default()
+    });
+
+    // Bloodline Pretender {3}
+    // Artifact Creature — Shapeshifter 2/2
+    // Changeling. Whenever another creature with a shared creature type enters
+    // the battlefield under your control, put a +1/+1 counter on Bloodline Pretender.
+    db.insert(CardDef {
+        id: ids::BLOODLINE_PRETENDER,
+        name: "Bloodline Pretender".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureEnters,
+                effect: Effect::PutCounters { count: 1, target: TargetSpec::Controller },
+                description: "Whenever another creature with a creature type that's shared with Bloodline Pretender enters the battlefield under your control, put a +1/+1 counter on Bloodline Pretender.".into(),
+            },
+        ],
+        oracle_text: "Changeling. Whenever another creature that shares a creature type with Bloodline Pretender enters the battlefield under your control, put a +1/+1 counter on Bloodline Pretender.".into(),
+        ..Default::default()
+    });
+
+    // Burglar Rat {1}{B}
+    // Creature — Rat 1/1
+    // When Burglar Rat enters the battlefield, each opponent discards a card.
+    db.insert(CardDef {
+        id: ids::BURGLAR_RAT,
+        name: "Burglar Rat".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        power: Some(1),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
+                description: "When Burglar Rat enters the battlefield, each opponent discards a card.".into(),
+            },
+        ],
+        oracle_text: "When Burglar Rat enters the battlefield, each opponent discards a card.".into(),
+        ..Default::default()
+    });
+
+    // Changeling Outcast {B}
+    // Creature — Shapeshifter 1/1
+    // Changeling. Can't be blocked.
+    db.insert(CardDef {
+        id: ids::CHANGELING_OUTCAST,
+        name: "Changeling Outcast".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Changeling. Changeling Outcast can't be blocked.".into(),
+        ..Default::default()
+    });
+
+    // Chittering Rats {1}{B}{B}
+    // Creature — Rat 2/2
+    // When Chittering Rats enters the battlefield, target opponent puts a card
+    // from their hand on top of their library.
+    db.insert(CardDef {
+        id: ids::CHITTERING_RATS,
+        name: "Chittering Rats".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::Unimplemented("Target opponent puts a card from their hand on top of their library.".into()),
+                description: "When Chittering Rats enters the battlefield, target opponent puts a card from their hand on top of their library.".into(),
+            },
+        ],
+        oracle_text: "When Chittering Rats enters the battlefield, target opponent puts a card from their hand on top of their library.".into(),
+        ..Default::default()
+    });
+
+    // Chittering Witch {3}{B}
+    // Creature — Human Witch 2/2
+    // When Chittering Witch enters the battlefield, create a number of 1/1 black
+    // Rat creature tokens equal to the number of opponents you have.
+    // {1}{B}, Sacrifice a creature: Target creature gets -2/-2 until end of turn.
+    db.insert(CardDef {
+        id: ids::CHITTERING_WITCH,
+        name: "Chittering Witch".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Witch".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Rat".into(),
+                    power: 1,
+                    toughness: 1,
+                    colors: vec![Color::Black],
+                    subtypes: vec![Subtype("Rat".into())],
+                    keywords: vec![],
+                }),
+                description: "When Chittering Witch enters the battlefield, create a number of 1/1 black Rat creature tokens equal to the number of opponents you have.".into(),
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Debuff { power: 2, toughness: 2, until_eot: true },
+                description: "{1}{B}, Sacrifice a creature: Target creature gets -2/-2 until end of turn.".into(),
+            },
+        ],
+        oracle_text: "When Chittering Witch enters the battlefield, create a number of 1/1 black Rat creature tokens equal to the number of opponents you have. {1}{B}, Sacrifice a creature: Target creature gets -2/-2 until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Crypt Ghast {3}{B}
+    // Creature — Spirit 2/2
+    // Extort. Whenever you tap a Swamp for mana, add an additional {B}.
+    db.insert(CardDef {
+        id: ids::CRYPT_GHAST,
+        name: "Crypt Ghast".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Spirit".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Extort — Whenever you cast a spell, you may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into(),
+            },
+        ],
+        oracle_text: "Extort. Whenever you tap a Swamp for mana, add an additional {B}.".into(),
+        ..Default::default()
+    });
+
+    // Falkenrath Noble {3}{B}
+    // Creature — Vampire Noble 2/2
+    // Flying. Whenever Falkenrath Noble or another creature dies, target opponent
+    // loses 1 life and you gain 1 life.
+    db.insert(CardDef {
+        id: ids::FALKENRATH_NOBLE,
+        name: "Falkenrath Noble".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Vampire".into()), Subtype("Noble".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Whenever Falkenrath Noble or another creature dies, target opponent loses 1 life and you gain 1 life.".into(),
+            },
+        ],
+        oracle_text: "Flying. Whenever Falkenrath Noble or another creature dies, target opponent loses 1 life and you gain 1 life.".into(),
+        ..Default::default()
+    });
+
+    // Gnat Miser {B}
+    // Creature — Rat Shaman 1/1
+    // Each opponent's maximum hand size is reduced by one.
+    db.insert(CardDef {
+        id: ids::GNAT_MISER,
+        name: "Gnat Miser".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Shaman".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Each opponent's maximum hand size is reduced by one.".into(),
+        ..Default::default()
+    });
+
+    // Ink-Eyes, Servant of Oni {4}{B}{B}
+    // Legendary Creature — Rat Ninja 5/4
+    // Ninjutsu {3}{B}{B}. Whenever Ink-Eyes deals combat damage to a player, put
+    // target creature card from that player's graveyard onto the battlefield under
+    // your control. Regenerate {1}{B}.
+    db.insert(CardDef {
+        id: ids::INK_EYES_SERVANT_OF_ONI,
+        name: "Ink-Eyes, Servant of Oni".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Ninja".into())],
+        power: Some(5),
+        toughness: Some(4),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::DealsCombatDamageToPlayer,
+                effect: Effect::Unimplemented("Put target creature card from that player's graveyard onto the battlefield under your control.".into()),
+                description: "Whenever Ink-Eyes, Servant of Oni deals combat damage to a player, put target creature card from that player's graveyard onto the battlefield under your control.".into(),
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Unimplemented("Regenerate Ink-Eyes, Servant of Oni.".into()),
+                description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
+            },
+        ],
+        oracle_text: "Ninjutsu {3}{B}{B}. Whenever Ink-Eyes, Servant of Oni deals combat damage to a player, put target creature card from that player's graveyard onto the battlefield under your control. {1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
+        ..Default::default()
+    });
+
+    // Karumonix, the Rat King {1}{B}{B}
+    // Legendary Creature — Phyrexian Rat 3/3
+    // Toxic 1. When Karumonix enters, look at the top five cards of your library.
+    // You may reveal any number of Rat cards from among them and put them into your
+    // hand. Put the rest on the bottom in a random order. Other Rats you control
+    // have toxic 1.
+    db.insert(CardDef {
+        id: ids::KARUMONIX_THE_RAT_KING,
+        name: "Karumonix, the Rat King".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Phyrexian".into()), Subtype("Rat".into())],
+        power: Some(3),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::Unimplemented("Look at the top five cards of your library. Reveal any number of Rat cards from among them and put them into your hand. Put the rest on the bottom in a random order.".into()),
+                description: "When Karumonix enters the battlefield, look at the top five cards of your library. Reveal Rat cards and put them into your hand, the rest go on the bottom.".into(),
+            },
+        ],
+        oracle_text: "Toxic 1. When Karumonix, the Rat King enters the battlefield, look at the top five cards of your library. You may reveal any number of Rat cards from among them and put the revealed cards into your hand. Put the rest on the bottom of your library in a random order. Other Rats you control have toxic 1.".into(),
+        ..Default::default()
+    });
+
+    // Lord Skitter, Sewer King {2}{B}
+    // Legendary Creature — Rat Noble 3/3
+    // When Lord Skitter enters the battlefield, exile target card from each
+    // opponent's graveyard. At the beginning of combat on your turn, create a
+    // 1/1 black Rat creature token.
+    db.insert(CardDef {
+        id: ids::LORD_SKITTER_SEWER_KING,
+        name: "Lord Skitter, Sewer King".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Noble".into())],
+        power: Some(3),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::Unimplemented("Exile target card from each opponent's graveyard.".into()),
+                description: "When Lord Skitter, Sewer King enters the battlefield, exile target card from each opponent's graveyard.".into(),
+            },
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Rat".into(),
+                    power: 1,
+                    toughness: 1,
+                    colors: vec![Color::Black],
+                    subtypes: vec![Subtype("Rat".into())],
+                    keywords: vec![],
+                }),
+                description: "At the beginning of combat on your turn, create a 1/1 black Rat creature token.".into(),
+            },
+        ],
+        oracle_text: "When Lord Skitter, Sewer King enters the battlefield, exile target card from each opponent's graveyard. At the beginning of combat on your turn, create a 1/1 black Rat creature token.".into(),
+        ..Default::default()
+    });
+
+    // Marrow-Gnawer {3}{B}{B}
+    // Legendary Creature — Rat Rogue 2/3
+    // All Rats have fear.
+    // {T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is
+    // the number of Rats you control.
+    db.insert(CardDef {
+        id: ids::MARROW_GNAWER,
+        name: "Marrow-Gnawer".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Rogue".into())],
+        power: Some(2),
+        toughness: Some(3),
+        static_abilities: vec![
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Fear,
+                affected: AffectedObjects::AllCreatures, // All Rats — simplified
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::zero(),
+                requires_tap: true,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Rat".into(),
+                    power: 1,
+                    toughness: 1,
+                    colors: vec![Color::Black],
+                    subtypes: vec![Subtype("Rat".into())],
+                    keywords: vec![],
+                }),
+                description: "{T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into(),
+            },
+        ],
+        oracle_text: "All Rats have fear. {T}, Sacrifice a Rat: Create X 1/1 black Rat creature tokens, where X is the number of Rats you control.".into(),
+        ..Default::default()
+    });
+
+    // Mikaeus, the Unhallowed {3}{B}{B}{B}
+    // Legendary Creature — Zombie Cleric 5/5
+    // Intimidate. Whenever a Human deals damage to you, destroy it. Other
+    // non-Human creatures you control get +1/+1 and have undying.
+    db.insert(CardDef {
+        id: ids::MIKAEUS_THE_UNHALLOWED,
+        name: "Mikaeus, the Unhallowed".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 3, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Zombie".into()), Subtype("Cleric".into())],
+        keywords: vec![KeywordAbility::Intimidate],
+        power: Some(5),
+        toughness: Some(5),
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 1,
+                toughness: 1,
+                affected: AffectedObjects::OtherCreaturesControlledBy(0),
+            },
+        ],
+        oracle_text: "Intimidate. Whenever a Human deals damage to you, destroy it. Other non-Human creatures you control get +1/+1 and have undying.".into(),
+        ..Default::default()
+    });
+
+    // Nashi, Moon Sage's Scion {2}{B}{B}
+    // Legendary Creature — Rat Ninja 3/2
+    // Ninjutsu {3}{B}. Whenever Nashi deals combat damage to a player, exile the
+    // top card of each player's library. You may play those cards for as long as
+    // they remain exiled, and you may spend mana as though it were mana of any type.
+    db.insert(CardDef {
+        id: ids::NASHI_MOON_SAGES_SCION,
+        name: "Nashi, Moon Sage's Scion".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Ninja".into())],
+        power: Some(3),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::DealsCombatDamageToPlayer,
+                effect: Effect::Unimplemented("Exile the top card of each player's library. You may play those cards and spend mana as though it were mana of any type.".into()),
+                description: "Whenever Nashi, Moon Sage's Scion deals combat damage to a player, exile the top card of each player's library. You may play those cards.".into(),
+            },
+        ],
+        oracle_text: "Ninjutsu {3}{B}. Whenever Nashi, Moon Sage's Scion deals combat damage to a player, exile the top card of each player's library. For each card exiled this way, you may play that card for as long as it remains exiled, and you may spend mana as though it were mana of any type to cast those spells.".into(),
+        ..Default::default()
+    });
+
+    // Nezumi Bone-Reader {1}{B}
+    // Creature — Rat Shaman 1/1
+    // {B}, Sacrifice a creature: Target player discards a card.
+    db.insert(CardDef {
+        id: ids::NEZUMI_BONE_READER,
+        name: "Nezumi Bone-Reader".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Shaman".into())],
+        power: Some(1),
+        toughness: Some(1),
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
+                description: "{B}, Sacrifice a creature: Target player discards a card.".into(),
+            },
+        ],
+        oracle_text: "{B}, Sacrifice a creature: Target player discards a card.".into(),
+        ..Default::default()
+    });
+
+    // Nezumi Cutthroat {1}{B}
+    // Creature — Rat Rogue 2/1
+    // Fear. Nezumi Cutthroat can't block.
+    db.insert(CardDef {
+        id: ids::NEZUMI_CUTTHROAT,
+        name: "Nezumi Cutthroat".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Rogue".into())],
+        keywords: vec![KeywordAbility::Fear, KeywordAbility::CantBlock],
+        power: Some(2),
+        toughness: Some(1),
+        oracle_text: "Fear. Nezumi Cutthroat can't block.".into(),
+        ..Default::default()
+    });
+
+    // Nezumi Graverobber {1}{B}
+    // Creature — Rat Rogue 2/1
+    // {1}{B}: Exile target card from an opponent's graveyard. If no cards are in
+    // that graveyard, flip Nezumi Graverobber.
+    db.insert(CardDef {
+        id: ids::NEZUMI_GRAVEROBBER,
+        name: "Nezumi Graverobber".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Rogue".into())],
+        power: Some(2),
+        toughness: Some(1),
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Unimplemented("Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into()),
+                description: "{1}{B}: Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into(),
+            },
+        ],
+        oracle_text: "{1}{B}: Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into(),
+        ..Default::default()
+    });
+
+    // Nezumi Shortfang {1}{B}
+    // Creature — Rat Rogue 1/1
+    // {1}{B}, {T}: Target opponent discards a card. Then if that player has no
+    // cards in hand, flip Nezumi Shortfang.
+    db.insert(CardDef {
+        id: ids::NEZUMI_SHORTFANG,
+        name: "Nezumi Shortfang".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Rogue".into())],
+        power: Some(1),
+        toughness: Some(1),
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: true,
+                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
+                description: "{1}{B}, {T}: Target opponent discards a card. Then if that player has no cards in hand, flip Nezumi Shortfang.".into(),
+            },
+        ],
+        oracle_text: "{1}{B}, {T}: Target opponent discards a card. Then if that player has no cards in hand, flip Nezumi Shortfang.".into(),
+        ..Default::default()
+    });
+
+    // Nirkana Revenant {4}{B}{B}
+    // Creature — Vampire Shade 4/4
+    // Whenever you tap a Swamp for mana, add an additional {B}.
+    // {B}: Nirkana Revenant gets +1/+1 until end of turn.
+    db.insert(CardDef {
+        id: ids::NIRKANA_REVENANT,
+        name: "Nirkana Revenant".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Vampire".into()), Subtype("Shade".into())],
+        power: Some(4),
+        toughness: Some(4),
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Buff { power: 1, toughness: 1, until_eot: true },
+                description: "{B}: Nirkana Revenant gets +1/+1 until end of turn.".into(),
+            },
+        ],
+        oracle_text: "Whenever you tap a Swamp for mana, add an additional {B}. {B}: Nirkana Revenant gets +1/+1 until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Ogre Slumlord {3}{B}{B}
+    // Creature — Ogre Rogue 3/3
+    // Whenever another nontoken creature dies, you may create a 1/1 black Rat
+    // creature token. Rats you control have deathtouch.
+    db.insert(CardDef {
+        id: ids::OGRE_SLUMLORD,
+        name: "Ogre Slumlord".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Ogre".into()), Subtype("Rogue".into())],
+        power: Some(3),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Rat".into(),
+                    power: 1,
+                    toughness: 1,
+                    colors: vec![Color::Black],
+                    subtypes: vec![Subtype("Rat".into())],
+                    keywords: vec![],
+                }),
+                description: "Whenever another nontoken creature dies, you may create a 1/1 black Rat creature token.".into(),
+            },
+        ],
+        static_abilities: vec![
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Deathtouch,
+                affected: AffectedObjects::CreaturesControlledBy(0), // Rats you control — simplified
+            },
+        ],
+        oracle_text: "Whenever another nontoken creature dies, you may create a 1/1 black Rat creature token. Rats you control have deathtouch.".into(),
+        ..Default::default()
+    });
+
+    // Pack Rat {1}{B}
+    // Creature — Rat */*
+    // Pack Rat's power and toughness are each equal to the number of Rats you control.
+    // {2}{B}, Discard a card: Create a token that's a copy of Pack Rat.
+    db.insert(CardDef {
+        id: ids::PACK_RAT,
+        name: "Pack Rat".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        power: Some(0),
+        toughness: Some(0),
+        dynamic_power: Some(DynamicValue::CreaturesControlled),
+        dynamic_toughness: Some(DynamicValue::CreaturesControlled),
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Rat".into(),
+                    power: 0,
+                    toughness: 0,
+                    colors: vec![Color::Black],
+                    subtypes: vec![Subtype("Rat".into())],
+                    keywords: vec![],
+                }),
+                description: "{2}{B}, Discard a card: Create a token that's a copy of Pack Rat.".into(),
+            },
+        ],
+        oracle_text: "Pack Rat's power and toughness are each equal to the number of Rats you control. {2}{B}, Discard a card: Create a token that's a copy of Pack Rat.".into(),
+        ..Default::default()
+    });
+
+    // Ratcatcher {4}{B}{B}
+    // Creature — Ogre Rogue 4/4
+    // Fear. At the beginning of your upkeep, you may search your library for a Rat
+    // card, reveal it, put it into your hand, then shuffle.
+    db.insert(CardDef {
+        id: ids::RATCATCHER,
+        name: "Ratcatcher".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Ogre".into()), Subtype("Rogue".into())],
+        keywords: vec![KeywordAbility::Fear],
+        power: Some(4),
+        toughness: Some(4),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::SearchLibrary { destination: ZoneType::Hand },
+                description: "At the beginning of your upkeep, you may search your library for a Rat card, reveal it, put it into your hand, then shuffle.".into(),
+            },
+        ],
+        oracle_text: "Fear. At the beginning of your upkeep, you may search your library for a Rat card, reveal it, put it into your hand, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    // Ravenous Rats {1}{B}
+    // Creature — Rat 1/1
+    // When Ravenous Rats enters the battlefield, target opponent discards a card.
+    db.insert(CardDef {
+        id: ids::RAVENOUS_RATS,
+        name: "Ravenous Rats".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        power: Some(1),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
+                description: "When Ravenous Rats enters the battlefield, target opponent discards a card.".into(),
+            },
+        ],
+        oracle_text: "When Ravenous Rats enters the battlefield, target opponent discards a card.".into(),
+        ..Default::default()
+    });
+
+    // Refurbished Familiar {2}{B}
+    // Creature — Rat 2/1
+    // Flying. When Refurbished Familiar enters the battlefield, if an artifact or
+    // creature was put into your graveyard from the battlefield this turn, draw a card.
+    db.insert(CardDef {
+        id: ids::REFURBISHED_FAMILIAR,
+        name: "Refurbished Familiar".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(2),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::DrawCards { count: 1 },
+                description: "When Refurbished Familiar enters the battlefield, if an artifact or creature was put into your graveyard from the battlefield this turn, draw a card.".into(),
+            },
+        ],
+        oracle_text: "Flying. When Refurbished Familiar enters the battlefield, if an artifact or creature was put into your graveyard from the battlefield this turn, draw a card.".into(),
+        ..Default::default()
+    });
+
+    // Roaming Throne {4}
+    // Artifact Creature — Golem 4/4
+    // Changeling. As Roaming Throne enters the battlefield, choose a creature type.
+    // If a triggered ability of a creature you control with the chosen type triggers,
+    // it triggers an additional time.
+    db.insert(CardDef {
+        id: ids::ROAMING_THRONE,
+        name: "Roaming Throne".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Golem".into())],
+        power: Some(4),
+        toughness: Some(4),
+        oracle_text: "Changeling. As Roaming Throne enters the battlefield, choose a creature type. If a triggered ability of a creature you control with the chosen type triggers, it triggers an additional time.".into(),
+        ..Default::default()
+    });
+
+    // Skullsnatcher {1}{B}
+    // Creature — Rat Ninja 2/1
+    // Ninjutsu {B}. Whenever Skullsnatcher deals combat damage to a player, exile
+    // up to two target cards from that player's graveyard.
+    db.insert(CardDef {
+        id: ids::SKULLSNATCHER,
+        name: "Skullsnatcher".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Ninja".into())],
+        power: Some(2),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::DealsCombatDamageToPlayer,
+                effect: Effect::Unimplemented("Exile up to two target cards from that player's graveyard.".into()),
+                description: "Whenever Skullsnatcher deals combat damage to a player, exile up to two target cards from that player's graveyard.".into(),
+            },
+        ],
+        oracle_text: "Ninjutsu {B}. Whenever Skullsnatcher deals combat damage to a player, exile up to two target cards from that player's graveyard.".into(),
+        ..Default::default()
+    });
+
+    // Species Specialist {2}{B}{B}
+    // Creature — Human Warrior 2/3
+    // As Species Specialist enters the battlefield, choose a creature type.
+    // Whenever a creature of the chosen type dies, you may draw a card.
+    db.insert(CardDef {
+        id: ids::SPECIES_SPECIALIST,
+        name: "Species Specialist".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Warrior".into())],
+        power: Some(2),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::DrawCards { count: 1 },
+                description: "Whenever a creature of the chosen type dies, you may draw a card.".into(),
+            },
+        ],
+        oracle_text: "As Species Specialist enters the battlefield, choose a creature type. Whenever a creature of the chosen type dies, you may draw a card.".into(),
+        ..Default::default()
+    });
+
+    // Typhoid Rats {B}
+    // Creature — Rat 1/1
+    // Deathtouch.
+    db.insert(CardDef {
+        id: ids::TYPHOID_RATS,
+        name: "Typhoid Rats".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into())],
+        keywords: vec![KeywordAbility::Deathtouch],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Deathtouch".into(),
+        ..Default::default()
+    });
+
+    // Valley Rotcaller {1}{B}
+    // Creature — Rat Warlock 2/2
+    // At the beginning of combat on your turn, each Rat you control gets +1/+0
+    // and gains menace until end of turn.
+    db.insert(CardDef {
+        id: ids::VALLEY_ROTCALLER,
+        name: "Valley Rotcaller".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Rat".into()), Subtype("Warlock".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Unimplemented("Each Rat you control gets +1/+0 and gains menace until end of turn.".into()),
+                description: "At the beginning of combat on your turn, each Rat you control gets +1/+0 and gains menace until end of turn.".into(),
+            },
+        ],
+        oracle_text: "At the beginning of combat on your turn, each Rat you control gets +1/+0 and gains menace until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Zulaport Cutthroat {1}{B}
+    // Creature — Human Rogue Ally 1/1
+    // Whenever Zulaport Cutthroat or another creature you control dies, each
+    // opponent loses 1 life and you gain 1 life.
+    db.insert(CardDef {
+        id: ids::ZULAPORT_CUTTHROAT,
+        name: "Zulaport Cutthroat".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Rogue".into()), Subtype("Ally".into())],
+        power: Some(1),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Whenever Zulaport Cutthroat or another creature you control dies, each opponent loses 1 life and you gain 1 life.".into(),
+            },
+        ],
+        oracle_text: "Whenever Zulaport Cutthroat or another creature you control dies, each opponent loses 1 life and you gain 1 life.".into(),
+        ..Default::default()
+    });
+
+    // --- Artifacts ---
+
+    // Bontu's Monument {3}
+    // Legendary Artifact
+    // Black creature spells you cast cost {1} less to cast.
+    // Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.
+    db.insert(CardDef {
+        id: ids::BONTUS_MONUMENT,
+        name: "Bontu's Monument".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
+                description: "Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.".into(),
+            },
+        ],
+        oracle_text: "Black creature spells you cast cost {1} less to cast. Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.".into(),
+        ..Default::default()
+    });
+
+    // Caged Sun {6}
+    // Artifact
+    // As Caged Sun enters the battlefield, choose a color.
+    // Creatures you control of the chosen color get +1/+1.
+    // Whenever you tap a land for mana of the chosen color, add one additional mana of that color.
+    db.insert(CardDef {
+        id: ids::CAGED_SUN,
+        name: "Caged Sun".into(),
+        mana_cost: Some(ManaCost::new(6, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 1,
+                toughness: 1,
+                affected: AffectedObjects::CreaturesControlledBy(0),
+            },
+        ],
+        oracle_text: "As Caged Sun enters the battlefield, choose a color. Creatures you control of the chosen color get +1/+1. Whenever you tap a land for mana of the chosen color, add one additional mana of that color.".into(),
+        ..Default::default()
+    });
+
+    // Coat of Arms {5}
+    // Artifact
+    // Each creature gets +1/+1 for each other creature on the battlefield that
+    // shares at least one creature type with it.
+    db.insert(CardDef {
+        id: ids::COAT_OF_ARMS,
+        name: "Coat of Arms".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Each creature gets +1/+1 for each other creature on the battlefield that shares at least one creature type with it.".into(),
+        ..Default::default()
+    });
+
+    // Cryptolith Fragment {3}
+    // Artifact
+    // {T}: Add one mana of any color. Each player loses 1 life.
+    db.insert(CardDef {
+        id: ids::CRYPTOLITH_FRAGMENT,
+        name: "Cryptolith Fragment".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color. Each player loses 1 life. // Aurora of Emrakul.".into(),
+        ..Default::default()
+    });
+
+    // Darksteel Ingot {3}
+    // Artifact
+    // Indestructible. {T}: Add one mana of any color.
+    db.insert(CardDef {
+        id: ids::DARKSTEEL_INGOT,
+        name: "Darksteel Ingot".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        keywords: vec![KeywordAbility::Indestructible],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "Indestructible. {T}: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Door of Destinies {4}
+    // Artifact
+    // As Door of Destinies enters the battlefield, choose a creature type.
+    // Whenever you cast a spell of the chosen creature type, put a charge counter
+    // on Door of Destinies. Creatures you control of the chosen type get +1/+1
+    // for each charge counter on Door of Destinies.
+    db.insert(CardDef {
+        id: ids::DOOR_OF_DESTINIES,
+        name: "Door of Destinies".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::PutCounters { count: 1, target: TargetSpec::Controller },
+                description: "Whenever you cast a spell of the chosen creature type, put a charge counter on Door of Destinies.".into(),
+            },
+        ],
+        oracle_text: "As Door of Destinies enters the battlefield, choose a creature type. Whenever you cast a spell of the chosen creature type, put a charge counter on Door of Destinies. Creatures you control of the chosen type get +1/+1 for each charge counter on Door of Destinies.".into(),
+        ..Default::default()
+    });
+
+    // Herald's Horn {3}
+    // Artifact
+    // As Herald's Horn enters the battlefield, choose a creature type.
+    // Creature spells of the chosen type cost {1} less to cast.
+    // At the beginning of your upkeep, reveal the top card. If it's a creature
+    // of the chosen type, put it into your hand.
+    db.insert(CardDef {
+        id: ids::HERALDS_HORN,
+        name: "Herald's Horn".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Unimplemented("Reveal the top card of your library. If it's a creature card of the chosen type, put it into your hand. Otherwise, you may put it on the bottom of your library.".into()),
+                description: "At the beginning of your upkeep, reveal the top card of your library. If it's a creature of the chosen type, put it into your hand.".into(),
+            },
+        ],
+        oracle_text: "As Herald's Horn enters the battlefield, choose a creature type. Creature spells of the chosen type cost {1} less to cast. At the beginning of your upkeep, reveal the top card of your library. If it's a creature card of the chosen type, put it into your hand. Otherwise, you may put it on the bottom of your library.".into(),
+        ..Default::default()
+    });
+
+    // Jet Medallion {2}
+    // Artifact
+    // Black spells you cast cost {1} less to cast.
+    db.insert(CardDef {
+        id: ids::JET_MEDALLION,
+        name: "Jet Medallion".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Black spells you cast cost {1} less to cast.".into(),
+        ..Default::default()
+    });
+
+    // Nim Deathmantle {2}
+    // Artifact — Equipment
+    // Equipped creature gets +2/+2, is black, is a Zombie in addition to its other
+    // types, and has intimidate. Whenever a nontoken creature is put into your
+    // graveyard from the battlefield, you may pay {4}. If you do, return that card
+    // to the battlefield and attach Nim Deathmantle to it. Equip {4}.
+    db.insert(CardDef {
+        id: ids::NIM_DEATHMANTLE,
+        name: "Nim Deathmantle".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Unimplemented("You may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it.".into()),
+                description: "Whenever a nontoken creature is put into your graveyard from the battlefield, you may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it.".into(),
+            },
+        ],
+        oracle_text: "Equipped creature gets +2/+2, is black, is a Zombie in addition to its other types, and has intimidate. Whenever a nontoken creature is put into your graveyard from the battlefield, you may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it. Equip {4}.".into(),
+        ..Default::default()
+    });
+
+    // Semblance Anvil {3}
+    // Artifact
+    // Imprint — When Semblance Anvil enters the battlefield, you may exile a
+    // nonland card from your hand. Spells you cast that share a card type with
+    // the exiled card cost {2} less to cast.
+    db.insert(CardDef {
+        id: ids::SEMBLANCE_ANVIL,
+        name: "Semblance Anvil".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::Unimplemented("You may exile a nonland card from your hand. Spells you cast that share a card type with the exiled card cost {2} less to cast.".into()),
+                description: "When Semblance Anvil enters the battlefield, you may exile a nonland card from your hand.".into(),
+            },
+        ],
+        oracle_text: "Imprint — When Semblance Anvil enters the battlefield, you may exile a nonland card from your hand. Spells you cast that share a card type with the exiled card cost {2} less to cast.".into(),
+        ..Default::default()
+    });
+
+    // Skullclamp {1}
+    // Artifact — Equipment
+    // Equipped creature gets +1/-1.
+    // Whenever equipped creature dies, draw two cards.
+    // Equip {1}.
+    db.insert(CardDef {
+        id: ids::SKULLCLAMP,
+        name: "Skullclamp".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::DrawCards { count: 2 },
+                description: "Whenever equipped creature dies, draw two cards.".into(),
+            },
+        ],
+        oracle_text: "Equipped creature gets +1/-1. Whenever equipped creature dies, draw two cards. Equip {1}.".into(),
+        ..Default::default()
+    });
+
+    // Strionic Resonator {2}
+    // Artifact
+    // {2}, {T}: Copy target triggered ability you control. You may choose new
+    // targets for the copy.
+    db.insert(CardDef {
+        id: ids::STRIONIC_RESONATOR,
+        name: "Strionic Resonator".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                effect: Effect::Unimplemented("Copy target triggered ability you control. You may choose new targets for the copy.".into()),
+                description: "{2}, {T}: Copy target triggered ability you control. You may choose new targets for the copy.".into(),
+            },
+        ],
+        oracle_text: "{2}, {T}: Copy target triggered ability you control. You may choose new targets for the copy.".into(),
+        ..Default::default()
+    });
+
+    // The Immortal Sun {6}
+    // Legendary Artifact
+    // Players can't activate planeswalker loyalty abilities.
+    // At the beginning of your draw step, draw an additional card.
+    // Spells you cast cost {1} less to cast.
+    // Creatures you control get +1/+1.
+    db.insert(CardDef {
+        id: ids::THE_IMMORTAL_SUN,
+        name: "The Immortal Sun".into(),
+        mana_cost: Some(ManaCost::new(6, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::DrawCards { count: 1 },
+                description: "At the beginning of your draw step, draw an additional card.".into(),
+            },
+        ],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 1,
+                toughness: 1,
+                affected: AffectedObjects::CreaturesControlledBy(0),
+            },
+        ],
+        oracle_text: "Players can't activate planeswalker loyalty abilities. At the beginning of your draw step, draw an additional card. Spells you cast cost {1} less to cast. Creatures you control get +1/+1.".into(),
+        ..Default::default()
+    });
+
+    // Thornbite Staff {2}
+    // Artifact — Equipment
+    // Equipped creature has "{2}, {T}: This creature deals 1 damage to any target."
+    // Whenever a creature dies, untap equipped creature. Equip {4}.
+    db.insert(CardDef {
+        id: ids::THORNBITE_STAFF,
+        name: "Thornbite Staff".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::Unimplemented("Untap equipped creature.".into()),
+                description: "Whenever a creature dies, untap equipped creature.".into(),
+            },
+        ],
+        oracle_text: "Equipped creature has \"{2}, {T}: This creature deals 1 damage to any target.\" Whenever a creature dies, untap equipped creature. Equip {4}.".into(),
+        ..Default::default()
+    });
+
+    // Thran Dynamo {4}
+    // Artifact
+    // {T}: Add {C}{C}{C}.
+    db.insert(CardDef {
+        id: ids::THRAN_DYNAMO,
+        name: "Thran Dynamo".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(3)],
+        oracle_text: "{T}: Add {C}{C}{C}.".into(),
+        ..Default::default()
+    });
+
+    // Throne of the God-Pharaoh {2}
+    // Legendary Artifact
+    // At the beginning of your end step, each opponent loses life equal to the
+    // number of tapped creatures you control.
+    db.insert(CardDef {
+        id: ids::THRONE_OF_THE_GOD_PHARAOH,
+        name: "Throne of the God-Pharaoh".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EndOfTurn,
+                effect: Effect::Unimplemented("Each opponent loses life equal to the number of tapped creatures you control.".into()),
+                description: "At the beginning of your end step, each opponent loses life equal to the number of tapped creatures you control.".into(),
+            },
+        ],
+        oracle_text: "At the beginning of your end step, each opponent loses life equal to the number of tapped creatures you control.".into(),
+        ..Default::default()
+    });
+
+    // Urza's Incubator {3}
+    // Artifact
+    // As Urza's Incubator enters the battlefield, choose a creature type.
+    // Creature spells of the chosen type cost {2} less to cast.
+    db.insert(CardDef {
+        id: ids::URZAS_INCUBATOR,
+        name: "Urza's Incubator".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "As Urza's Incubator enters the battlefield, choose a creature type. Creature spells of the chosen type cost {2} less to cast.".into(),
+        ..Default::default()
+    });
+
+    // Vanquisher's Banner {5}
+    // Artifact
+    // As Vanquisher's Banner enters the battlefield, choose a creature type.
+    // Creatures you control of the chosen type get +1/+1.
+    // Whenever you cast a creature spell of the chosen type, draw a card.
+    db.insert(CardDef {
+        id: ids::VANQUISHERS_BANNER,
+        name: "Vanquisher's Banner".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 1,
+                toughness: 1,
+                affected: AffectedObjects::CreaturesControlledBy(0),
+            },
+        ],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::DrawCards { count: 1 },
+                description: "Whenever you cast a creature spell of the chosen type, draw a card.".into(),
+            },
+        ],
+        oracle_text: "As Vanquisher's Banner enters the battlefield, choose a creature type. Creatures you control of the chosen type get +1/+1. Whenever you cast a creature spell of the chosen type, draw a card.".into(),
+        ..Default::default()
+    });
+
+    // --- Enchantments ---
+
+    // Black Market {3}{B}{B}
+    // Enchantment
+    // Whenever a creature dies, put a charge counter on Black Market.
+    // At the beginning of your precombat main phase, add {B} for each charge
+    // counter on Black Market.
+    db.insert(CardDef {
+        id: ids::BLACK_MARKET,
+        name: "Black Market".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::PutCounters { count: 1, target: TargetSpec::Controller },
+                description: "Whenever a creature dies, put a charge counter on Black Market.".into(),
+            },
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::AddMana { color: Some(Color::Black), amount: 1 },
+                description: "At the beginning of your precombat main phase, add {B} for each charge counter on Black Market.".into(),
+            },
+        ],
+        oracle_text: "Whenever a creature dies, put a charge counter on Black Market. At the beginning of your precombat main phase, add {B} for each charge counter on Black Market.".into(),
+        ..Default::default()
+    });
+
+    // Black Market Connections {2}{B}
+    // Enchantment
+    // At the beginning of your precombat main phase, choose one or more —
+    // • Sell Contraband — Create a Treasure token. You lose 1 life.
+    // • Buy Information — Draw a card. You lose 2 life.
+    // • Hire a Mercenary — Create a 3/2 black Shapeshifter creature token with
+    //   changeling. You lose 3 life.
+    db.insert(CardDef {
+        id: ids::BLACK_MARKET_CONNECTIONS,
+        name: "Black Market Connections".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Multiple(vec![
+                    Effect::DrawCards { count: 1 },
+                    Effect::LoseLife { amount: 2, target: TargetSpec::Controller },
+                ]),
+                description: "At the beginning of your precombat main phase, choose one or more — Buy Information: Draw a card, lose 2 life. Sell Contraband: Create a Treasure, lose 1 life. Hire a Mercenary: Create a 3/2 changeling, lose 3 life.".into(),
+            },
+        ],
+        oracle_text: "At the beginning of your precombat main phase, choose one or more — Sell Contraband: Create a Treasure token. You lose 1 life. Buy Information: Draw a card. You lose 2 life. Hire a Mercenary: Create a 3/2 black Shapeshifter creature token with changeling. You lose 3 life.".into(),
+        ..Default::default()
+    });
+
+    // Dictate of Erebos {3}{B}{B}
+    // Enchantment
+    // Flash. Whenever a creature you control dies, each opponent sacrifices a creature.
+    db.insert(CardDef {
+        id: ids::DICTATE_OF_EREBOS,
+        name: "Dictate of Erebos".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        keywords: vec![KeywordAbility::Flash],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::SacrificeCreatures { count: 1, target: TargetSpec::Opponent },
+                description: "Whenever a creature you control dies, each opponent sacrifices a creature.".into(),
+            },
+        ],
+        oracle_text: "Flash. Whenever a creature you control dies, each opponent sacrifices a creature.".into(),
+        ..Default::default()
+    });
+
+    // Grave Pact {1}{B}{B}{B}
+    // Enchantment
+    // Whenever a creature you control dies, each other player sacrifices a creature.
+    db.insert(CardDef {
+        id: ids::GRAVE_PACT,
+        name: "Grave Pact".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 3, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ACreatureDies,
+                effect: Effect::SacrificeCreatures { count: 1, target: TargetSpec::Opponent },
+                description: "Whenever a creature you control dies, each other player sacrifices a creature.".into(),
+            },
+        ],
+        oracle_text: "Whenever a creature you control dies, each other player sacrifices a creature.".into(),
+        ..Default::default()
+    });
+
+    // Phyrexian Arena {1}{B}{B}
+    // Enchantment
+    // At the beginning of your upkeep, you draw a card and you lose 1 life.
+    db.insert(CardDef {
+        id: ids::PHYREXIAN_ARENA,
+        name: "Phyrexian Arena".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect: Effect::Multiple(vec![
+                    Effect::DrawCards { count: 1 },
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Controller },
+                ]),
+                description: "At the beginning of your upkeep, you draw a card and you lose 1 life.".into(),
+            },
+        ],
+        oracle_text: "At the beginning of your upkeep, you draw a card and you lose 1 life.".into(),
+        ..Default::default()
+    });
+
+    // Phyrexian Reclamation {B}
+    // Enchantment
+    // {1}{B}, Pay 2 life: Return target creature card from your graveyard to your hand.
+    db.insert(CardDef {
+        id: ids::PHYREXIAN_RECLAMATION,
+        name: "Phyrexian Reclamation".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 1, 0, 0),
+                requires_tap: false,
+                effect: Effect::Unimplemented("Return target creature card from your graveyard to your hand. (Pay 2 life as additional cost.)".into()),
+                description: "{1}{B}, Pay 2 life: Return target creature card from your graveyard to your hand.".into(),
+            },
+        ],
+        oracle_text: "{1}{B}, Pay 2 life: Return target creature card from your graveyard to your hand.".into(),
+        ..Default::default()
+    });
+
+    // Bolas's Citadel {3}{B}{B}{B}
+    // Legendary Artifact (listed as "Post's Citadel" in the decklist)
+    // You may look at the top card of your library at any time.
+    // You may play lands and cast spells from the top of your library. Whenever
+    // you cast a spell this way, pay life equal to its mana value rather than
+    // paying its mana cost. {T}, Sacrifice ten nonland permanents: Each opponent
+    // loses 10 life.
+    db.insert(CardDef {
+        id: ids::POSTS_CITADEL,
+        name: "Post's Citadel".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 3, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::zero(),
+                requires_tap: true,
+                effect: Effect::LoseLife { amount: 10, target: TargetSpec::Opponent },
+                description: "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life.".into(),
+            },
+        ],
+        oracle_text: "You may look at the top card of your library at any time. You may play lands and cast spells from the top of your library. Whenever you cast a spell this way, pay life equal to its mana value rather than paying its mana cost. {T}, Sacrifice ten nonland permanents: Each opponent loses 10 life.".into(),
+        ..Default::default()
+    });
+
+    // --- Lands ---
+
+    // Cabal Coffers
+    // Land
+    // {2}, {T}: Add {B} for each Swamp you control.
+    db.insert(CardDef {
+        id: ids::CABAL_COFFERS,
+        name: "Cabal Coffers".into(),
+        card_types: vec![CardType::Land],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                effect: Effect::AddMana { color: Some(Color::Black), amount: 4 },
+                description: "{2}, {T}: Add {B} for each Swamp you control.".into(),
+            },
+        ],
+        oracle_text: "{2}, {T}: Add {B} for each Swamp you control.".into(),
+        ..Default::default()
+    });
+
+    // Castle Locthwain
+    // Land
+    // Castle Locthwain enters the battlefield tapped unless you control a Swamp.
+    // {T}: Add {B}.
+    // {1}{B}{B}, {T}: Draw a card, then you lose life equal to the number of
+    // cards in your hand.
+    db.insert(CardDef {
+        id: ids::CASTLE_LOCTHWAIN,
+        name: "Castle Locthwain".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Black)],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 2, 0, 0),
+                requires_tap: true,
+                effect: Effect::Multiple(vec![
+                    Effect::DrawCards { count: 1 },
+                    Effect::LoseLife { amount: 3, target: TargetSpec::Controller },
+                ]),
+                description: "{1}{B}{B}, {T}: Draw a card, then you lose life equal to the number of cards in your hand.".into(),
+            },
+        ],
+        oracle_text: "Castle Locthwain enters the battlefield tapped unless you control a Swamp. {T}: Add {B}. {1}{B}{B}, {T}: Draw a card, then you lose life equal to the number of cards in your hand.".into(),
+        ..Default::default()
+    });
+
+    // Crypt of Agadeem
+    // Land
+    // Crypt of Agadeem enters the battlefield tapped.
+    // {T}: Add {B}.
+    // {2}, {T}: Add {B} for each black creature card in your graveyard.
+    db.insert(CardDef {
+        id: ids::CRYPT_OF_AGADEEM,
+        name: "Crypt of Agadeem".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Black)],
+        enters_tapped: true,
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                effect: Effect::AddMana { color: Some(Color::Black), amount: 2 },
+                description: "{2}, {T}: Add {B} for each black creature card in your graveyard.".into(),
+            },
+        ],
+        oracle_text: "Crypt of Agadeem enters the battlefield tapped. {T}: Add {B}. {2}, {T}: Add {B} for each black creature card in your graveyard.".into(),
+        ..Default::default()
+    });
+
+    // Mikokoro, Center of the Sea
+    // Legendary Land
+    // {T}: Add {C}.
+    // {2}, {T}: Each player draws a card.
+    db.insert(CardDef {
+        id: ids::MIKOKORO_CENTER_OF_THE_SEA,
+        name: "Mikokoro, Center of the Sea".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                effect: Effect::DrawCards { count: 1 },
+                description: "{2}, {T}: Each player draws a card.".into(),
+            },
+        ],
+        oracle_text: "{T}: Add {C}. {2}, {T}: Each player draws a card.".into(),
+        ..Default::default()
+    });
+
+    // Nykthos, Shrine to Nyx
+    // Legendary Land
+    // {T}: Add {C}.
+    // {2}, {T}: Choose a color. Add an amount of mana of that color equal to
+    // your devotion to that color.
+    db.insert(CardDef {
+        id: ids::NYKTHOS_SHRINE_TO_NYX,
+        name: "Nykthos, Shrine to Nyx".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                effect: Effect::AddMana { color: Some(Color::Black), amount: 3 },
+                description: "{2}, {T}: Choose a color. Add an amount of mana of that color equal to your devotion to that color.".into(),
+            },
+        ],
+        oracle_text: "{T}: Add {C}. {2}, {T}: Choose a color. Add an amount of mana of that color equal to your devotion to that color.".into(),
+        ..Default::default()
+    });
+
+    // Path of Ancestry
+    // Land
+    // Path of Ancestry enters the battlefield tapped.
+    // {T}: Add one mana of any color in your commander's color identity.
+    db.insert(CardDef {
+        id: ids::PATH_OF_ANCESTRY,
+        name: "Path of Ancestry".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        enters_tapped: true,
+        oracle_text: "Path of Ancestry enters the battlefield tapped. {T}: Add one mana of any color in your commander's color identity. When that mana is spent to cast a creature spell that shares a creature type with your commander, scry 1.".into(),
+        ..Default::default()
+    });
+
+    // Swarmyard
+    // Land
+    // {T}: Add {C}.
+    // {T}: Regenerate target Insect, Rat, Spider, or Squirrel.
+    db.insert(CardDef {
+        id: ids::SWARMYARD,
+        name: "Swarmyard".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::zero(),
+                requires_tap: true,
+                effect: Effect::Unimplemented("Regenerate target Insect, Rat, Spider, or Squirrel.".into()),
+                description: "{T}: Regenerate target Insect, Rat, Spider, or Squirrel.".into(),
+            },
+        ],
+        oracle_text: "{T}: Add {C}. {T}: Regenerate target Insect, Rat, Spider, or Squirrel.".into(),
+        ..Default::default()
+    });
+
+    // --- Instants / Sorceries ---
+
+    // Chain Assassination {2}{B}
+    // Sorcery
+    // Destroy target creature. Draw a card.
+    db.insert(CardDef {
+        id: ids::CHAIN_ASSASSINATION,
+        name: "Chain Assassination".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 1, 0, 0)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::Multiple(vec![
+            Effect::DestroyTarget { target: TargetSpec::AnyCreature },
+            Effect::DrawCards { count: 1 },
+        ])),
+        oracle_text: "Destroy target creature. Draw a card.".into(),
+        ..Default::default()
+    });
+
+    // Living Death {3}{B}{B}
+    // Sorcery
+    // Each player exiles all creature cards from their graveyard, then sacrifices
+    // all creatures they control, then puts all cards they exiled this way onto
+    // the battlefield.
+    db.insert(CardDef {
+        id: ids::LIVING_DEATH,
+        name: "Living Death".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::Unimplemented("Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.".into())),
+        oracle_text: "Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.".into(),
+        ..Default::default()
+    });
+
     db
 }
 
@@ -4500,4 +6162,106 @@ pub fn kinnan_commander_deck() -> (Vec<CardId>, CardId, Vec<CardId>) {
     ];
 
     (deck, commander, tutor_targets)
+}
+
+/// Build the Ashcoat of the Shadow Swarm Commander deck (100-card singleton).
+/// Mono-black Rat tribal.
+///
+/// Returns (deck, commander_id).
+pub fn ashcoat_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::ASHCOAT_OF_THE_SHADOW_SWARM;
+    let mut deck = Vec::new();
+
+    // Commander
+    deck.push(commander);
+
+    // Creatures (34 total including commander)
+    deck.push(ids::ASSASSIN_INITIATE);
+    deck.push(ids::AYARA_FIRST_OF_LOCTHWAIN);
+    deck.push(ids::BLOOD_ARTIST);
+    deck.push(ids::BLOODLINE_PRETENDER);
+    deck.push(ids::BURGLAR_RAT);
+    deck.push(ids::CHANGELING_OUTCAST);
+    deck.push(ids::CHITTERING_RATS);
+    deck.push(ids::CHITTERING_WITCH);
+    deck.push(ids::CRYPT_GHAST);
+    deck.push(ids::FALKENRATH_NOBLE);
+    deck.push(ids::GNAT_MISER);
+    deck.push(ids::INK_EYES_SERVANT_OF_ONI);
+    deck.push(ids::KARUMONIX_THE_RAT_KING);
+    deck.push(ids::LORD_SKITTER_SEWER_KING);
+    deck.push(ids::MARROW_GNAWER);
+    deck.push(ids::MIKAEUS_THE_UNHALLOWED);
+    deck.push(ids::NASHI_MOON_SAGES_SCION);
+    deck.push(ids::NEZUMI_BONE_READER);
+    deck.push(ids::NEZUMI_CUTTHROAT);
+    deck.push(ids::NEZUMI_GRAVEROBBER);
+    deck.push(ids::NEZUMI_SHORTFANG);
+    deck.push(ids::NIRKANA_REVENANT);
+    deck.push(ids::OGRE_SLUMLORD);
+    deck.push(ids::PACK_RAT);
+    deck.push(ids::RATCATCHER);
+    deck.push(ids::RAVENOUS_RATS);
+    deck.push(ids::REFURBISHED_FAMILIAR);
+    deck.push(ids::ROAMING_THRONE);
+    deck.push(ids::SKULLSNATCHER);
+    deck.push(ids::SPECIES_SPECIALIST);
+    deck.push(ids::TYPHOID_RATS);
+    deck.push(ids::VALLEY_ROTCALLER);
+    deck.push(ids::ZULAPORT_CUTTHROAT);
+
+    // Artifacts (19 total)
+    deck.push(ids::BONTUS_MONUMENT);
+    deck.push(ids::CAGED_SUN);
+    deck.push(ids::COAT_OF_ARMS);
+    deck.push(ids::CRYPTOLITH_FRAGMENT);
+    deck.push(ids::DARKSTEEL_INGOT);
+    deck.push(ids::DOOR_OF_DESTINIES);
+    deck.push(ids::HERALDS_HORN);
+    deck.push(ids::JET_MEDALLION);
+    deck.push(ids::NIM_DEATHMANTLE);
+    deck.push(ids::SEMBLANCE_ANVIL);
+    deck.push(ids::SKULLCLAMP);
+    deck.push(ids::SOL_RING);
+    deck.push(ids::STRIONIC_RESONATOR);
+    deck.push(ids::THE_IMMORTAL_SUN);
+    deck.push(ids::THORNBITE_STAFF);
+    deck.push(ids::THRAN_DYNAMO);
+    deck.push(ids::THRONE_OF_THE_GOD_PHARAOH);
+    deck.push(ids::URZAS_INCUBATOR);
+    deck.push(ids::VANQUISHERS_BANNER);
+
+    // Enchantments (7 total)
+    deck.push(ids::BLACK_MARKET);
+    deck.push(ids::BLACK_MARKET_CONNECTIONS);
+    deck.push(ids::DICTATE_OF_EREBOS);
+    deck.push(ids::GRAVE_PACT);
+    deck.push(ids::PHYREXIAN_ARENA);
+    deck.push(ids::PHYREXIAN_RECLAMATION);
+    deck.push(ids::POSTS_CITADEL);
+
+    // Lands (7 nonbasic)
+    deck.push(ids::CABAL_COFFERS);
+    deck.push(ids::CASTLE_LOCTHWAIN);
+    deck.push(ids::CRYPT_OF_AGADEEM);
+    deck.push(ids::MIKOKORO_CENTER_OF_THE_SEA);
+    deck.push(ids::NYKTHOS_SHRINE_TO_NYX);
+    deck.push(ids::PATH_OF_ANCESTRY);
+    deck.push(ids::SWARMYARD);
+
+    // Instants / Sorceries (3 total)
+    deck.push(ids::DARK_RITUAL);
+    deck.push(ids::CHAIN_ASSASSINATION);
+    deck.push(ids::LIVING_DEATH);
+
+    // Mana artifacts already in database
+    deck.push(ids::LOTUS_PETAL);
+
+    // 28 Swamps
+    for _ in 0..28 {
+        deck.push(ids::SWAMP);
+    }
+
+    assert_eq!(deck.len(), 100);
+    (deck, commander)
 }
