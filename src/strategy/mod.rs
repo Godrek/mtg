@@ -1,4 +1,5 @@
 use rand::seq::SliceRandom;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::action::canonical::canonicalize;
 use crate::action::{legal_actions, legal_actions_abstracted, Action};
@@ -267,6 +268,13 @@ pub struct AbstractedMcfrStrategy {
     abstraction: Box<dyn crate::info_set::InfoSetAbstraction>,
     /// Optional fallback strategy for untrained info sets.
     fallback: Option<Box<dyn Strategy>>,
+    /// Minimum visit count to trust the trained policy.
+    /// Info sets with fewer visits use the fallback instead.
+    min_visits: u64,
+    /// Count of decisions where the trained policy was used.
+    policy_hits: AtomicU64,
+    /// Count of decisions where the fallback was used (info set not trained).
+    fallback_hits: AtomicU64,
 }
 
 impl AbstractedMcfrStrategy {
@@ -279,6 +287,9 @@ impl AbstractedMcfrStrategy {
             policy,
             abstraction,
             fallback: None,
+            min_visits: 0,
+            policy_hits: AtomicU64::new(0),
+            fallback_hits: AtomicU64::new(0),
         }
     }
 
@@ -292,7 +303,32 @@ impl AbstractedMcfrStrategy {
             policy,
             abstraction,
             fallback: Some(fallback),
+            min_visits: 0,
+            policy_hits: AtomicU64::new(0),
+            fallback_hits: AtomicU64::new(0),
         }
+    }
+
+    /// Set the minimum visit count threshold.
+    /// Info sets with fewer visits than this will use the fallback strategy.
+    pub fn set_min_visits(&mut self, min_visits: u64) {
+        self.min_visits = min_visits;
+    }
+
+    /// Number of decisions where the trained policy table was used.
+    pub fn policy_hit_count(&self) -> u64 {
+        self.policy_hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of decisions where the fallback strategy was used.
+    pub fn fallback_hit_count(&self) -> u64 {
+        self.fallback_hits.load(Ordering::Relaxed)
+    }
+
+    /// Reset the hit/miss counters to zero.
+    pub fn reset_counters(&self) {
+        self.policy_hits.store(0, Ordering::Relaxed);
+        self.fallback_hits.store(0, Ordering::Relaxed);
     }
 }
 
@@ -315,15 +351,22 @@ impl Strategy for AbstractedMcfrStrategy {
         let info_set = InformationSet::from_view(&view, state.card_db());
         let info_hash = self.abstraction.abstract_info_set(&info_set);
 
-        match self.policy.get(info_hash) {
+        let use_policy = match self.policy.get(info_hash) {
+            Some(data) if data.visit_count >= self.min_visits => Some(data),
+            _ => None,
+        };
+
+        match use_policy {
             Some(data) => {
+                self.policy_hits.fetch_add(1, Ordering::Relaxed);
                 let distribution = data.average_strategy(&canonical_actions);
                 let mut rng = rand::thread_rng();
                 let idx = sample_from_distribution(&distribution, &mut rng);
                 actions[idx].clone()
             }
             None => {
-                // Untrained state: use fallback or uniform random
+                self.fallback_hits.fetch_add(1, Ordering::Relaxed);
+                // Untrained or under-trained state: use fallback or uniform random
                 if let Some(ref fb) = self.fallback {
                     fb.choose_action(state, player)
                 } else {
@@ -469,4 +512,164 @@ fn evaluate_blocks(state: &GameState, blocks: &[(ObjectId, ObjectId)]) -> i32 {
     }
 
     score
+}
+
+/// Lookahead strategy: 1-ply search with greedy rollout evaluation.
+///
+/// At each decision point with multiple legal actions, this strategy:
+/// 1. Tries each candidate action
+/// 2. Plays out the next few turns with GreedyStrategy (for the pilot)
+///    and GoldfishStrategy (for the opponent)
+/// 3. Evaluates the resulting board position
+/// 4. Picks the action that leads to the best outcome
+///
+/// This is much stronger than pure Greedy because it can evaluate
+/// multi-step consequences (e.g., "play land now so I can cast creature next turn"
+/// vs "cast a cheaper creature now").
+///
+/// For single-action or forced decisions, falls back to Greedy for speed.
+pub struct LookaheadStrategy {
+    /// Number of turns to simulate in the rollout.
+    pub rollout_turns: u32,
+    /// Maximum actions in the rollout before stopping.
+    pub rollout_max_actions: u32,
+}
+
+impl Default for LookaheadStrategy {
+    fn default() -> Self {
+        LookaheadStrategy {
+            rollout_turns: 4,
+            rollout_max_actions: 150,
+        }
+    }
+}
+
+impl LookaheadStrategy {
+    /// Evaluate a game state by rolling out with greedy play for a few turns.
+    /// Returns a score in [-1, 1] where higher is better for `pilot`.
+    fn rollout_evaluate(&self, state: &GameState, pilot: PlayerIndex) -> f64 {
+        use crate::rules;
+
+        if state.game_over {
+            return if state.winner == Some(pilot) { 1.0 } else { -1.0 };
+        }
+
+        let mut s = state.clone();
+        let greedy = GreedyStrategy;
+        let goldfish = GoldfishStrategy;
+        let end_turn = s.turn_number + self.rollout_turns;
+        let mut actions_taken = 0u32;
+
+        while !s.game_over && s.turn_number <= end_turn && actions_taken < self.rollout_max_actions {
+            let player = s.priority_player;
+            let action = if player == pilot {
+                greedy.choose_action(&s, player)
+            } else {
+                goldfish.choose_action(&s, player)
+            };
+            rules::apply_action(&mut s, &action);
+            actions_taken += 1;
+        }
+
+        if s.game_over {
+            if s.winner == Some(pilot) { 1.0 } else { -1.0 }
+        } else {
+            // Heuristic score based on board state
+            self.heuristic_score(&s, pilot)
+        }
+    }
+
+    /// Static evaluation of a board state. Higher = better for pilot.
+    fn heuristic_score(&self, state: &GameState, pilot: PlayerIndex) -> f64 {
+        let opp = 1 - pilot;
+        let starting_life = match state.format {
+            crate::game::GameFormat::Commander => 40.0,
+            _ => 20.0,
+        };
+        let opp_life = state.players[opp].life as f64;
+
+        // Damage dealt (most important)
+        let damage_frac = ((starting_life - opp_life) / starting_life).clamp(0.0, 1.0);
+        let damage_score = damage_frac.sqrt();
+
+        // Board power
+        let my_power: i32 = state.creatures_controlled_by(pilot)
+            .iter()
+            .map(|&id| state.effective_power(id))
+            .sum();
+        let power_score = (my_power as f64 / 15.0).clamp(0.0, 1.0);
+
+        // Lands in play
+        let db = state.card_db();
+        let lands_in_play = state.battlefield.iter()
+            .filter(|&&obj_id| {
+                if let Some(inst) = state.objects.get(&obj_id) {
+                    inst.controller == pilot
+                        && db.get(inst.card_def_id).map_or(false, |d| d.is_land())
+                } else {
+                    false
+                }
+            })
+            .count() as f64;
+        let mana_score = (lands_in_play / 5.0).clamp(0.0, 1.0);
+
+        // Non-land permanents
+        let nonland_perms = state.battlefield.iter()
+            .filter(|&&obj_id| {
+                if let Some(inst) = state.objects.get(&obj_id) {
+                    inst.controller == pilot
+                        && !db.get(inst.card_def_id).map_or(true, |d| d.is_land())
+                } else {
+                    false
+                }
+            })
+            .count() as f64;
+        let perm_score = (nonland_perms / 4.0).clamp(0.0, 1.0);
+
+        damage_score * 0.35 + power_score * 0.30 + mana_score * 0.20 + perm_score * 0.15
+    }
+}
+
+impl Strategy for LookaheadStrategy {
+    fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action {
+        use crate::action::legal_actions_abstracted;
+
+        let actions = legal_actions_abstracted(state);
+        if actions.is_empty() {
+            return Action::PassPriority;
+        }
+        if actions.len() == 1 {
+            return actions[0].clone();
+        }
+
+        // For forced/mechanical decisions, use Greedy for speed
+        for action in &actions {
+            if matches!(action, Action::OrderTriggers { .. } | Action::ChooseReplacementOrder { .. }) {
+                return action.clone();
+            }
+        }
+        if state.phase == crate::game::Phase::Mulligan {
+            return GreedyStrategy.choose_action(state, player);
+        }
+
+        // 1-ply lookahead: try each action and evaluate
+        let mut best_score = f64::NEG_INFINITY;
+        let mut best_action = actions[0].clone();
+
+        for action in &actions {
+            let mut child = state.clone();
+            crate::rules::apply_action(&mut child, action);
+            let score = self.rollout_evaluate(&child, player);
+            if score > best_score {
+                best_score = score;
+                best_action = action.clone();
+            }
+        }
+
+        best_action
+    }
+
+    fn name(&self) -> &str {
+        "Lookahead"
+    }
 }

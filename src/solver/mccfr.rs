@@ -79,6 +79,13 @@ pub struct McfrConfig {
     /// When exceeded, remaining branches fall back to heuristic evaluation.
     /// 0 = unlimited. Prevents exponential blowup with high-branching hands.
     pub max_nodes_per_iteration: u32,
+    /// Use outcome sampling instead of full traversal for goldfish training.
+    /// Outcome sampling follows a single sampled trajectory per iteration,
+    /// allowing full-depth exploration without exponential branching.
+    pub outcome_sampling: bool,
+    /// Exploration parameter for outcome sampling (default 0.6).
+    /// Higher values explore more uniformly; lower values follow the current strategy.
+    pub epsilon: f64,
 }
 
 /// Default maximum actions before declaring a draw in MCCFR training.
@@ -99,6 +106,8 @@ impl Default for McfrConfig {
             max_depth: 0, // unlimited
             max_actions: DEFAULT_MAX_ACTIONS,
             max_nodes_per_iteration: 0, // unlimited
+            outcome_sampling: false,
+            epsilon: 0.6,
         }
     }
 }
@@ -907,18 +916,31 @@ where
                 // Reshuffle opening hand each iteration so the solver trains on diverse
                 // starting hands rather than memorizing one fixed deal.
                 rules::reshuffle_opening_hand(&mut state);
-                let mut nodes_visited = 0u32;
-                traverse_goldfish(
-                    state,
-                    &mut regret_tables[pilot as usize],
-                    config,
-                    abstraction,
-                    &goldfish,
-                    pilot,
-                    0,
-                    0,
-                    &mut nodes_visited,
-                );
+                if config.outcome_sampling {
+                    traverse_goldfish_outcome_sampling(
+                        state,
+                        &mut regret_tables[pilot as usize],
+                        config,
+                        abstraction,
+                        &goldfish,
+                        pilot,
+                        0,
+                        config.epsilon,
+                    );
+                } else {
+                    let mut nodes_visited = 0u32;
+                    traverse_goldfish(
+                        state,
+                        &mut regret_tables[pilot as usize],
+                        config,
+                        abstraction,
+                        &goldfish,
+                        pilot,
+                        0,
+                        0,
+                        &mut nodes_visited,
+                    );
+                }
 
                 let completed = progress.fetch_add(1, Ordering::Relaxed) + 1;
                 on_progress(completed, num_iterations, &progress);
@@ -1389,18 +1411,31 @@ where
         // Reshuffle opening hand each iteration so the solver trains on diverse
         // starting hands rather than memorizing one fixed deal.
         rules::reshuffle_opening_hand(&mut state);
-        let mut nodes_visited = 0u32;
-        traverse_goldfish(
-            state,
-            &mut regret_tables[pilot as usize],
-            config,
-            abstraction,
-            &goldfish,
-            pilot,
-            0,
-            0,
-            &mut nodes_visited,
-        );
+        if config.outcome_sampling {
+            traverse_goldfish_outcome_sampling(
+                state,
+                &mut regret_tables[pilot as usize],
+                config,
+                abstraction,
+                &goldfish,
+                pilot,
+                0,
+                config.epsilon,
+            );
+        } else {
+            let mut nodes_visited = 0u32;
+            traverse_goldfish(
+                state,
+                &mut regret_tables[pilot as usize],
+                config,
+                abstraction,
+                &goldfish,
+                pilot,
+                0,
+                0,
+                &mut nodes_visited,
+            );
+        }
         on_progress(i + 1, num_iterations, &regret_tables);
     }
 
@@ -1624,6 +1659,183 @@ fn traverse_goldfish(
     }
 }
 
+/// Outcome sampling MCCFR traversal for goldfish mode.
+///
+/// Unlike full traversal which explores ALL actions at each pilot decision node,
+/// outcome sampling follows a single sampled trajectory per iteration. This allows
+/// exploring the full game depth without exponential branching blowup.
+///
+/// At each pilot decision node:
+/// 1. Compute the current strategy via regret matching
+/// 2. Sample one action using epsilon-on-policy exploration:
+///    P(a) = (1-epsilon) * strategy(a) + epsilon / |actions|
+/// 3. Compute counterfactual values for ALL actions using the sampled outcome
+/// 4. Update regrets based on the difference from the sampled trajectory value
+///
+/// The epsilon exploration (default 0.6) ensures all actions are visited often
+/// enough for regret estimates to converge, while biasing towards actions the
+/// current strategy prefers.
+///
+/// Returns `(utility, tail_reach_prob)` where `tail_reach_prob` is the product
+/// of sampling probabilities from this node to the terminal, used for
+/// importance-weighted regret updates.
+fn traverse_goldfish_outcome_sampling(
+    mut state: GameState,
+    regret_table: &mut RegretTable,
+    config: &McfrConfig,
+    abstraction: &dyn InfoSetAbstraction,
+    goldfish: &dyn Strategy,
+    pilot: PlayerIndex,
+    mut actions_taken: u32,
+    epsilon: f64,
+) -> f64 {
+    let mut rng = rand::thread_rng();
+
+    loop {
+        // Terminal check
+        if state.game_over {
+            return terminal_utility(&state, pilot);
+        }
+
+        // Action limit
+        if actions_taken >= config.max_actions {
+            return goldfish_rollout_utility(&state, pilot);
+        }
+
+        let player = state.priority_player;
+
+        // Opponent (goldfish): deterministic, no regret tracking.
+        if player != pilot {
+            let action = goldfish.choose_action(&state, player);
+            rules::apply_action(&mut state, &action);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Pilot: MCCFR decision node
+        let actions = prune_goldfish_actions(legal_actions_abstracted(&state), &state, pilot);
+
+        if actions.is_empty() {
+            rules::apply_action(&mut state, &Action::PassPriority);
+            actions_taken += 1;
+            continue;
+        }
+
+        if actions.len() == 1 {
+            rules::apply_action(&mut state, &actions[0]);
+            actions_taken += 1;
+            continue;
+        }
+
+        let num_actions = actions.len();
+
+        // Canonicalize actions
+        let canonical_actions: Vec<_> = actions
+            .iter()
+            .map(|a| canonicalize(a, &state))
+            .collect();
+
+        // Compute info set
+        let view = state.visible_state(pilot);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = abstraction.abstract_info_set(&info_set);
+
+        // Get current strategy via regret matching
+        let strategy = {
+            let entry = regret_table.get_or_create(info_hash);
+            entry.current_strategy(&canonical_actions)
+        };
+
+        // Epsilon-on-policy sampling: explore all actions with minimum probability
+        let uniform_prob = 1.0 / num_actions as f64;
+        let sample_probs: Vec<f64> = strategy
+            .iter()
+            .map(|&s| (1.0 - epsilon) * s + epsilon * uniform_prob)
+            .collect();
+
+        // Sample action index
+        let r: f64 = rng.gen();
+        let mut cumulative = 0.0;
+        let mut sampled_idx = num_actions - 1;
+        for (i, &p) in sample_probs.iter().enumerate() {
+            cumulative += p;
+            if r < cumulative {
+                sampled_idx = i;
+                break;
+            }
+        }
+
+        // Follow the sampled action to get utility
+        let mut child_state = state.clone();
+        rules::apply_action(&mut child_state, &actions[sampled_idx]);
+        let sampled_utility = traverse_goldfish_outcome_sampling(
+            child_state,
+            regret_table,
+            config,
+            abstraction,
+            goldfish,
+            pilot,
+            actions_taken + 1,
+            epsilon,
+        );
+
+        // Compute counterfactual values for all actions.
+        // For the sampled action, we know the utility.
+        // For unsampled actions, we estimate using the baseline (sampled utility).
+        // This is the "optimistic" variant — unsampled actions get the same
+        // estimate as the sampled action, which has low bias but higher variance.
+        //
+        // Update regrets: for each action a,
+        //   regret(a) += (estimated_utility(a) - weighted_node_utility)
+        //
+        // With outcome sampling, the standard update weights by 1/sample_prob
+        // for importance correction, but for the traverser in goldfish (single-player
+        // optimization), we use the simpler baseline-subtracted update:
+        //   regret(a) += W * (I(a==sampled) * u / q(a) - u_node)
+        // where u_node = sum_a strategy(a) * estimated_u(a).
+        //
+        // Simplified: for sampled action, regret += u/q - u_node
+        //             for unsampled actions, regret += 0 - u_node * ...
+        //
+        // We use the robust "estimate all actions" approach:
+        // estimated_u(a) = sampled_utility for a == sampled_idx
+        //                = sampled_utility for a != sampled_idx (pessimistic baseline)
+        // node_utility = sampled_utility (since all estimates are the same)
+        // regret(sampled) += sampled_utility - node_utility = 0
+        //
+        // That doesn't work. Instead, use importance-weighted regret update:
+        // For the sampled action:
+        //   counterfactual_value = sampled_utility / sample_prob(sampled)
+        //   but we must be careful with the weighting.
+        //
+        // Actually for single-player outcome sampling, the cleanest approach is:
+        // We only update the regret of the sampled action relative to the node value.
+        // This is the standard outcome sampling MCCFR update:
+        //
+        // W = 1 / sample_prob(sampled_action)  (importance weight)
+        // For each action a:
+        //   if a == sampled: regret(a) += W * (1 - strategy(a)) * sampled_utility
+        //   if a != sampled: regret(a) += W * (0 - strategy(a)) * sampled_utility
+        //                  = -W * strategy(a) * sampled_utility
+        //
+        // Equivalently: regret(a) += W * (I(a==sampled) - strategy(a)) * sampled_utility
+
+        let w = 1.0 / sample_probs[sampled_idx];
+
+        let entry = regret_table.get_or_create(info_hash);
+        for (i, ca) in canonical_actions.iter().enumerate() {
+            let indicator = if i == sampled_idx { 1.0 } else { 0.0 };
+            let regret_delta = w * (indicator - strategy[i]) * sampled_utility;
+            let action_entry = entry.get_or_create_action(ca);
+            action_entry.cumulative_regret += regret_delta;
+            action_entry.cumulative_strategy += strategy[i];
+        }
+        entry.visit_count += 1;
+
+        return sampled_utility;
+    }
+}
+
 // =========================================================================
 // Phase 3B.4 — Multi-Abstraction
 // =========================================================================
@@ -1823,7 +2035,7 @@ mod tests {
 
         let abstraction = BucketedAbstraction;
         let train_cfg = TrainConfig {
-            mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+            mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
             abstraction: &abstraction,
             rollout_mode: RolloutMode::Heuristic,
             rollout_strategies: None,
@@ -1875,7 +2087,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() };
         let tables = train(&state, 5, &config);
 
         let stats = training_stats(&tables);
@@ -1897,7 +2109,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000 };
+        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000, ..Default::default() };
         let tables = train_goldfish_parallel(&state, 8, 4, &config);
 
         // Pilot's table should have entries
@@ -1921,7 +2133,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck0, &deck1);
 
-        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+        let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() };
         let tables = train_parallel_basic(&state, 8, 4, &config);
 
         // Both players should have info set entries
@@ -1941,7 +2153,7 @@ mod tests {
         state.card_db = Some(Arc::new(db));
         rules::setup_game(&mut state, &deck, &deck);
 
-        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000 };
+        let config = McfrConfig { max_depth: 4, max_actions: 1000, max_nodes_per_iteration: 5000, ..Default::default() };
         // 2 iterations spread across 8 shards: should not panic
         let tables = train_goldfish_parallel(&state, 2, 8, &config);
         assert!(tables[0].num_info_sets() > 0);

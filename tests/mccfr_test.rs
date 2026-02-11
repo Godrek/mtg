@@ -111,6 +111,7 @@ fn test_mccfr_single_iteration_runs() {
         max_depth: 10,
         max_actions: 500,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let mut tables = [RegretTable::new(), RegretTable::new()];
@@ -132,6 +133,7 @@ fn test_mccfr_training_loop() {
         max_depth: 8,
         max_actions: 300,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables = mccfr::train(&state, 10, &config);
@@ -162,6 +164,7 @@ fn test_mccfr_exploitability_decreases() {
         max_depth: 8,
         max_actions: 200,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables_5 = mccfr::train(&state, 5, &config);
@@ -190,6 +193,7 @@ fn test_mcfr_strategy_plays_legal_games() {
         max_depth: 8,
         max_actions: 200,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables = mccfr::train(&state, 20, &config);
@@ -220,6 +224,7 @@ fn test_mcfr_strategy_vs_random() {
         max_depth: 8,
         max_actions: 200,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables = mccfr::train(&state, 20, &config);
@@ -261,6 +266,7 @@ fn test_mcfr_strategy_vs_greedy() {
         max_depth: 8,
         max_actions: 300,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables = mccfr::train(&state, 50, &config);
@@ -304,6 +310,7 @@ fn test_mcfr_mirror_match_convergence() {
         max_depth: 8,
         max_actions: 300,
         max_nodes_per_iteration: 0,
+        ..Default::default()
     };
 
     let tables = mccfr::train(&state, 50, &config);
@@ -459,7 +466,7 @@ fn test_bucketed_abstraction_reduces_info_sets() {
     // Train with identity vs bucketed abstraction on mini decks.
     // Bucketed should produce fewer unique info set entries.
     let state = setup_mini_game();
-    let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() };
 
     let identity_tables = mccfr::train(&state, 10, &config);
     let identity_info_sets: usize = identity_tables.iter().map(|t| t.num_info_sets()).sum();
@@ -499,7 +506,7 @@ fn test_60card_training_with_bucketed_abstraction() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -539,7 +546,7 @@ fn test_60card_rollout_training() {
     let bucketed = BucketedAbstraction;
 
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 4, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 4, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Strategy { max_rollout_actions: 500 },
         rollout_strategies: Some((&greedy, &random)),
@@ -565,7 +572,7 @@ fn test_parallel_training_produces_results() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -595,7 +602,7 @@ fn test_parallel_training_60card() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 5, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 5, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -625,7 +632,7 @@ fn test_abstracted_mcfr_strategy_plays_legal_games() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -662,7 +669,7 @@ fn test_60card_abstracted_strategy_vs_greedy() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 5, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 5, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -708,7 +715,7 @@ fn test_60card_abstracted_strategy_vs_greedy() {
 fn test_checkpoint_save_load() {
     // Phase 2B.2: Verify checkpoint serialization round-trip.
     let state = setup_mini_game();
-    let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train(&state, 5, &config);
 
     let dir = "/tmp/mtg_mccfr_test_checkpoint";
@@ -744,7 +751,7 @@ fn test_training_with_checkpointing() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -784,7 +791,7 @@ fn test_parallel_vs_sequential_consistency() {
 
     let bucketed = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig { max_depth: 8, max_actions: 200, max_nodes_per_iteration: 0, ..Default::default() },
         abstraction: &bucketed,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -823,7 +830,7 @@ fn test_goldfish_mccfr_training_runs() {
     state.card_db = Some(Arc::new(db));
     rules::setup_game(&mut state, &deck, &deck);
 
-    let config = McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish(&state, 10, &config);
 
     let p0_info_sets = tables[0].num_info_sets();
@@ -849,7 +856,7 @@ fn test_goldfish_mccfr_strategy_plays_legal_games() {
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_game(&mut state, &deck, &deck);
 
-    let config = McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 6, max_actions: 300, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish(&state, 15, &config);
 
     let mccfr_strat = McfrStrategy::new(tables[0].clone());
@@ -878,7 +885,7 @@ fn test_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_game(&mut state, &deck, &deck);
 
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish(&state, 20, &config);
     let mccfr_strat = McfrStrategy::new(tables[0].clone());
 
@@ -974,7 +981,7 @@ fn test_goldfish_mccfr_with_abstraction() {
     rules::setup_game(&mut state, &deck, &deck);
 
     let bucketed = BucketedAbstraction;
-    let config = McfrConfig { max_depth: 6, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 6, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish_with_abstraction(
         &state, 30, &config, &bucketed, 0,
     );
@@ -1007,7 +1014,7 @@ fn test_goldfish_mccfr_green_stompy() {
     state.card_db = Some(Arc::new(db.clone()));
     rules::setup_game(&mut state, &deck, &deck);
 
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish(&state, 20, &config);
     let mccfr_strat = McfrStrategy::new(tables[0].clone());
 
@@ -1061,7 +1068,7 @@ fn test_commander_goldfish_mccfr_training_runs() {
     assert_eq!(state.players[1].life, 40);
     assert!(!state.players[0].command_zone.is_empty(), "Commander should be in command zone");
 
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish(&state, 5, &config);
 
     let p0_info_sets = tables[0].num_info_sets();
@@ -1085,7 +1092,7 @@ fn test_commander_goldfish_mccfr_with_abstraction() {
     let state = setup_commander_goldfish_game(&deck, commander);
 
     let bucketed = BucketedAbstraction;
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish_with_abstraction(
         &state, 10, &config, &bucketed, 0,
     );
@@ -1125,7 +1132,7 @@ fn test_commander_goldfish_mccfr_vs_greedy_vs_random_kill_turns() {
 
     // --- Train MCCFR against goldfish ---
     let bucketed = BucketedAbstraction;
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish_with_abstraction(
         &state, 20, &config, &bucketed, 0,
     );
@@ -1197,7 +1204,7 @@ fn test_commander_goldfish_kinnan_deck() {
     let state = setup_commander_goldfish_game(&deck, commander);
 
     let bucketed = BucketedAbstraction;
-    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 5, max_actions: 500, max_nodes_per_iteration: 0, ..Default::default() };
     let tables = mccfr::train_goldfish_with_abstraction(
         &state, 10, &config, &bucketed, 0,
     );
@@ -1238,7 +1245,7 @@ fn test_commander_goldfish_deep_training_convergence() {
     let state = setup_commander_goldfish_game(&deck, commander);
 
     let bucketed = BucketedAbstraction;
-    let config = McfrConfig { max_depth: 6, max_actions: 800, max_nodes_per_iteration: 0 };
+    let config = McfrConfig { max_depth: 6, max_actions: 800, max_nodes_per_iteration: 0, ..Default::default() };
 
     // Train with fewer iterations
     let tables_10 = mccfr::train_goldfish_with_abstraction(

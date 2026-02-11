@@ -74,13 +74,18 @@ fn main() {
     };
 
     let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
+    let use_outcome_sampling = std::env::var("OUTCOME_SAMPLING")
+        .ok()
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(true); // default: outcome sampling ON
 
     println!("Commander Goldfish MCCFR Training");
     println!("==================================");
     println!("Deck:       {} ({})", deck_name, commander_name);
     println!("Iterations: {}", iterations);
-    println!("Depth:      {}", max_depth);
+    println!("Depth:      {}{}", max_depth, if use_outcome_sampling { " (ignored with outcome sampling)" } else { "" });
     println!("Node budget:{}", if max_nodes == 0 { "unlimited".to_string() } else { format!("{}", max_nodes) });
+    println!("Traversal:  {}", if use_outcome_sampling { "Outcome Sampling" } else { "Full Traversal" });
     println!("Sim games:  {}", num_games);
     println!();
 
@@ -100,6 +105,8 @@ fn main() {
         max_depth,
         max_actions: 2000,
         max_nodes_per_iteration: max_nodes,
+        outcome_sampling: use_outcome_sampling,
+        ..Default::default()
     };
     let abstraction = GoldfishBucketedAbstraction;
 
@@ -166,12 +173,23 @@ fn main() {
     println!("  Exploitability: {:.6}", exploit);
     println!();
 
-    // ── 2. Simulate all three strategies ─────────────────────────────────
+    // ── 2. Simulate all strategies ──────────────────────────────────────
     let mccfr_strat = AbstractedMcfrStrategy::with_fallback(
         tables[0].clone(),
         Box::new(GoldfishBucketedAbstraction),
         Box::new(GreedyStrategy),
     );
+    let mccfr_only_strat = AbstractedMcfrStrategy::new(
+        tables[0].clone(),
+        Box::new(GoldfishBucketedAbstraction),
+    );
+    // MCCFR with high visit threshold: only use policy for well-trained info sets
+    let mut mccfr_confident = AbstractedMcfrStrategy::with_fallback(
+        tables[0].clone(),
+        Box::new(GoldfishBucketedAbstraction),
+        Box::new(GreedyStrategy),
+    );
+    mccfr_confident.set_min_visits(1000);
 
     println!("Simulating {} games per strategy...", num_games);
     let t0 = Instant::now();
@@ -181,6 +199,10 @@ fn main() {
         simulate_commander_goldfish(&db, &deck, commander, &GreedyStrategy, num_games);
     let mccfr_results =
         simulate_commander_goldfish(&db, &deck, commander, &mccfr_strat, num_games);
+    let mccfr_only_results =
+        simulate_commander_goldfish(&db, &deck, commander, &mccfr_only_strat, num_games);
+    let mccfr_confident_results =
+        simulate_commander_goldfish(&db, &deck, commander, &mccfr_confident, num_games);
     let sim_time = t0.elapsed();
     println!("Simulation complete in {:.1}s\n", sim_time.as_secs_f64());
 
@@ -189,7 +211,40 @@ fn main() {
     println!("───────────────────");
     print_strategy_row("Random", &random_results);
     print_strategy_row("Greedy", &greedy_results);
-    print_strategy_row("MCCFR", &mccfr_results);
+    print_strategy_row("MCCFR+G", &mccfr_results);
+    print_strategy_row("MCF1k+G", &mccfr_confident_results);
+    print_strategy_row("MCCFR", &mccfr_only_results);
+    println!();
+
+    // ── 3b. Fallback diagnostics ─────────────────────────────────────────
+    let policy_hits = mccfr_strat.policy_hit_count();
+    let fallback_hits = mccfr_strat.fallback_hit_count();
+    let total_decisions = policy_hits + fallback_hits;
+    let policy_rate = if total_decisions > 0 {
+        policy_hits as f64 / total_decisions as f64 * 100.0
+    } else {
+        0.0
+    };
+    println!("MCCFR+Greedy Fallback Diagnostics ({} games)", num_games);
+    println!("─────────────────────────────────────────────");
+    println!("  Total decisions:   {}", total_decisions);
+    println!("  Policy table used: {} ({:.1}%)", policy_hits, policy_rate);
+    println!("  Greedy fallback:   {} ({:.1}%)", fallback_hits, 100.0 - policy_rate);
+    println!();
+
+    let policy_only_hits = mccfr_only_strat.policy_hit_count();
+    let fallback_only_hits = mccfr_only_strat.fallback_hit_count();
+    let total_only = policy_only_hits + fallback_only_hits;
+    let policy_only_rate = if total_only > 0 {
+        policy_only_hits as f64 / total_only as f64 * 100.0
+    } else {
+        0.0
+    };
+    println!("MCCFR-Only (no fallback) Diagnostics ({} games)", num_games);
+    println!("────────────────────────────────────────────────");
+    println!("  Total decisions:   {}", total_only);
+    println!("  Policy table used: {} ({:.1}%)", policy_only_hits, policy_only_rate);
+    println!("  Uniform random:    {} ({:.1}%)", fallback_only_hits, 100.0 - policy_only_rate);
     println!();
 
     // ── 4. Per-turn kill probability distribution ────────────────────────
@@ -201,7 +256,7 @@ fn main() {
     // Side-by-side comparison
     println!("Kill Turn Distribution Comparison (cumulative P(win by turn X))");
     println!("───────────────────────────────────────────────────────────────");
-    print_distribution_comparison(&random_results, &greedy_results, &mccfr_results);
+    print_distribution_comparison(&random_results, &greedy_results, &mccfr_results, &mccfr_only_results);
     println!();
 
     // ── 5. Sample game trace ─────────────────────────────────────────────
@@ -357,14 +412,16 @@ fn print_distribution_comparison(
     random: &GoldfishResults,
     greedy: &GoldfishResults,
     mccfr: &GoldfishResults,
+    mccfr_only: &GoldfishResults,
 ) {
-    println!("  Turn │   Random   │   Greedy   │    MCCFR");
-    println!("  ─────┼────────────┼────────────┼────────────");
+    println!("  Turn │   Random   │   Greedy   │  MCCFR+G   │  MCCFR-only");
+    println!("  ─────┼────────────┼────────────┼────────────┼────────────");
 
     let max_turn = [
         random.slowest_kill,
         greedy.slowest_kill,
         mccfr.slowest_kill,
+        mccfr_only.slowest_kill,
         20,
     ]
     .into_iter()
@@ -374,26 +431,30 @@ fn print_distribution_comparison(
     let mut cum_r = 0u64;
     let mut cum_g = 0u64;
     let mut cum_m = 0u64;
+    let mut cum_mo = 0u64;
 
     for turn in 1..=max_turn {
         let rc = random.kill_turn_distribution.get(turn).copied().unwrap_or(0);
         let gc = greedy.kill_turn_distribution.get(turn).copied().unwrap_or(0);
         let mc = mccfr.kill_turn_distribution.get(turn).copied().unwrap_or(0);
+        let moc = mccfr_only.kill_turn_distribution.get(turn).copied().unwrap_or(0);
         cum_r += rc;
         cum_g += gc;
         cum_m += mc;
+        cum_mo += moc;
 
-        if cum_r == 0 && cum_g == 0 && cum_m == 0 {
+        if cum_r == 0 && cum_g == 0 && cum_m == 0 && cum_mo == 0 {
             continue;
         }
 
         let pr = cum_r as f64 / random.total_games as f64 * 100.0;
         let pg = cum_g as f64 / greedy.total_games as f64 * 100.0;
         let pm = cum_m as f64 / mccfr.total_games as f64 * 100.0;
+        let pmo = cum_mo as f64 / mccfr_only.total_games as f64 * 100.0;
 
         println!(
-            "  T{:<3} │  {:>5.1}%     │  {:>5.1}%     │  {:>5.1}%",
-            turn, pr, pg, pm,
+            "  T{:<3} │  {:>5.1}%     │  {:>5.1}%     │  {:>5.1}%     │  {:>5.1}%",
+            turn, pr, pg, pm, pmo,
         );
     }
 }

@@ -3424,6 +3424,7 @@ fn test_policy_snapshot_collection() {
             max_depth: 6,
             max_actions: 100,
             max_nodes_per_iteration: 0,
+            ..Default::default()
         },
         abstraction: &abstraction,
         rollout_mode: RolloutMode::Heuristic,
