@@ -533,7 +533,7 @@ fn search_goldfish_branches_rec(
         return;
     }
 
-    let actions = legal_actions(&state);
+    let actions = prune_bruteforce_actions(legal_actions(&state));
     if actions.is_empty() {
         let mut next = state;
         let action = crate::action::Action::PassPriority;
@@ -554,6 +554,57 @@ fn search_goldfish_branches_rec(
             return;
         }
     }
+}
+
+/// Remove dominated bookkeeping actions from brute-force pilot branching.
+///
+/// This keeps exhaustive search focused on meaningful choices and avoids
+/// exploding the tree on redundant "pass vs equivalent no-op" branches.
+fn prune_bruteforce_actions(mut actions: Vec<crate::action::Action>) -> Vec<crate::action::Action> {
+    use crate::action::Action;
+
+    if actions.len() <= 1 {
+        return actions;
+    }
+
+    // If the player can do anything other than pass, drop pass.
+    let has_non_pass = actions.iter().any(|a| *a != Action::PassPriority);
+    if has_non_pass {
+        actions.retain(|a| *a != Action::PassPriority);
+    }
+
+    // If there are other choices in declare-attackers/blockers, remove
+    // explicit empty declarations as they are equivalent no-ops.
+    if actions.len() > 1 {
+        let has_non_empty_attack = actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::DeclareAttackers {
+                    attackers
+                } if !attackers.is_empty()
+            )
+        });
+        if has_non_empty_attack {
+            actions.retain(|a| {
+                !matches!(
+                    a,
+                    Action::DeclareAttackers {
+                        attackers
+                    } if attackers.is_empty()
+                )
+            });
+        }
+
+        let has_non_empty_blocks = actions
+            .iter()
+            .any(|a| matches!(a, Action::DeclareBlockers { blocks } if !blocks.is_empty()));
+        if has_non_empty_blocks {
+            actions
+                .retain(|a| !matches!(a, Action::DeclareBlockers { blocks } if blocks.is_empty()));
+        }
+    }
+
+    actions
 }
 
 fn record_goldfish_terminal(
@@ -811,8 +862,20 @@ fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerI
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action::Action;
     use crate::card::sample;
     use std::sync::Arc;
+
+    #[test]
+    fn test_prune_bruteforce_actions_drops_redundant_pass() {
+        let actions = vec![
+            Action::PassPriority,
+            Action::DeclareAttackers { attackers: vec![1] },
+        ];
+        let pruned = prune_bruteforce_actions(actions);
+        assert_eq!(pruned.len(), 1);
+        assert!(matches!(pruned[0], Action::DeclareAttackers { .. }));
+    }
 
     #[test]
     fn test_search_goldfish_branches_runs_on_commander_setup() {
