@@ -15,7 +15,7 @@
 //!   DEPTH=10          Max tree depth per traversal (default: 10)
 //!   NODES=100000      Max nodes per iteration, 0=unlimited (default: 100000)
 //!   GAMES=1000        Number of simulation games (default: 1000)
-//!   DECK=kinnan       Deck to use: "kinnan" or "brimaz" (default: kinnan)
+//!   DECK=kinnan       Deck to use: "kinnan", "brimaz", or "ashcoat" (default: kinnan)
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -64,6 +64,10 @@ fn main() {
     let (deck, commander, tutor_targets) = match deck_name.as_str() {
         "brimaz" => {
             let (d, c) = sample::brimaz_commander_deck();
+            (d, c, Vec::new())
+        }
+        "ashcoat" => {
+            let (d, c) = sample::ashcoat_commander_deck();
             (d, c, Vec::new())
         }
         _ => sample::kinnan_commander_deck(),
