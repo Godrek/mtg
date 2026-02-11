@@ -33,6 +33,15 @@ use mtg_gto::solver::mccfr::{self, collect_policy_snapshots, McfrConfig};
 use mtg_gto::strategy::{AbstractedMcfrStrategy, GreedyStrategy, RandomStrategy};
 
 fn main() {
+    // Configure rayon thread pool with larger stack size (8 MB) for deep MCCFR
+    // traversal. The default thread stack (512 KB on macOS, 2 MB on Linux) can
+    // overflow at high DEPTH values because each recursive decision node keeps
+    // a GameState clone on the stack.
+    rayon::ThreadPoolBuilder::new()
+        .stack_size(8 * 1024 * 1024)
+        .build_global()
+        .expect("Failed to configure rayon thread pool");
+
     let iterations: u32 = std::env::var("ITERATIONS")
         .ok()
         .and_then(|v| v.parse().ok())

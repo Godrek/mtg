@@ -191,153 +191,123 @@ pub fn run_iteration_with_abstraction(
 ///
 /// Returns the counterfactual utility for the `traverser` at this node.
 fn traverse(
-    state: GameState,
+    mut state: GameState,
     traverser: PlayerIndex,
     regret_tables: &mut [RegretTable; 2],
     config: &McfrConfig,
     abstraction: &dyn InfoSetAbstraction,
     rollout_mode: &RolloutMode,
     rollout_strategies: Option<(&dyn Strategy, &dyn Strategy)>,
-    depth: u32,
-    actions_taken: u32,
+    mut depth: u32,
+    mut actions_taken: u32,
     rng: &mut impl Rng,
 ) -> f64 {
-    // Terminal check: game over
-    if state.game_over {
-        return terminal_utility(&state, traverser);
-    }
-
-    // Action limit: use heuristic evaluation
-    if actions_taken >= config.max_actions {
-        return heuristic_utility(&state, traverser);
-    }
-
-    let player = state.priority_player;
-    let actions = legal_actions_abstracted(&state);
-
-    // No actions available — pass priority (not a decision node)
-    if actions.is_empty() {
-        let mut next_state = state;
-        rules::apply_action(&mut next_state, &Action::PassPriority);
-        return traverse(
-            next_state,
-            traverser,
-            regret_tables,
-            config,
-            abstraction,
-            rollout_mode,
-            rollout_strategies,
-            depth, // don't increment depth for forced pass
-            actions_taken + 1,
-            rng,
-        );
-    }
-
-    // Only one legal action — no decision to make, skip CFR node
-    if actions.len() == 1 {
-        let mut next_state = state.clone();
-        rules::apply_action(&mut next_state, &actions[0]);
-        return traverse(
-            next_state,
-            traverser,
-            regret_tables,
-            config,
-            abstraction,
-            rollout_mode,
-            rollout_strategies,
-            depth, // don't increment depth for forced action
-            actions_taken + 1,
-            rng,
-        );
-    }
-
-    // Depth limit at multi-action decision nodes
-    if config.max_depth > 0 && depth >= config.max_depth {
-        return evaluate_at_depth_limit(&state, traverser, rollout_mode, rollout_strategies);
-    }
-
-    // Canonicalize all legal actions for stable regret table keying
-    let canonical_actions: Vec<_> = actions
-        .iter()
-        .map(|a| canonicalize(a, &state))
-        .collect();
-
-    // Compute information set for the acting player, apply abstraction
-    let view = state.visible_state(player);
-    let info_set = InformationSet::from_view(&view, state.card_db());
-    let info_hash = abstraction.abstract_info_set(&info_set);
-
-    // Get or create regret table entry and compute current strategy
-    let strategy = {
-        let entry = regret_tables[player].get_or_create(info_hash);
-        entry.current_strategy(&canonical_actions)
-    };
-
-    if player == traverser {
-        // Traverser node: explore ALL actions, compute counterfactual regret
-        let num_actions = actions.len();
-        let mut action_utilities = vec![0.0f64; num_actions];
-
-        for (i, action) in actions.iter().enumerate() {
-            let mut child_state = state.clone();
-            rules::apply_action(&mut child_state, action);
-            action_utilities[i] = traverse(
-                child_state,
-                traverser,
-                regret_tables,
-                config,
-                abstraction,
-                rollout_mode,
-                rollout_strategies,
-                depth + 1,
-                actions_taken + 1,
-                rng,
-            );
+    loop {
+        // Terminal check: game over
+        if state.game_over {
+            return terminal_utility(&state, traverser);
         }
 
-        // Expected utility under current strategy
-        let node_utility: f64 = strategy
+        // Action limit: use heuristic evaluation
+        if actions_taken >= config.max_actions {
+            return heuristic_utility(&state, traverser);
+        }
+
+        let player = state.priority_player;
+        let actions = legal_actions_abstracted(&state);
+
+        // No actions available — pass priority (not a decision node)
+        // Loop instead of recursing to avoid stack overflow at high depth.
+        if actions.is_empty() {
+            rules::apply_action(&mut state, &Action::PassPriority);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Only one legal action — no decision to make, skip CFR node
+        if actions.len() == 1 {
+            rules::apply_action(&mut state, &actions[0]);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Depth limit at multi-action decision nodes
+        if config.max_depth > 0 && depth >= config.max_depth {
+            return evaluate_at_depth_limit(&state, traverser, rollout_mode, rollout_strategies);
+        }
+
+        // Canonicalize all legal actions for stable regret table keying
+        let canonical_actions: Vec<_> = actions
             .iter()
-            .zip(action_utilities.iter())
-            .map(|(&s, &u)| s * u)
-            .sum();
+            .map(|a| canonicalize(a, &state))
+            .collect();
 
-        // Update cumulative regret and strategy for each action via canonical key
-        let entry = regret_tables[player].get_or_create(info_hash);
-        for (i, ca) in canonical_actions.iter().enumerate() {
-            let action_entry = entry.get_or_create_action(ca);
-            action_entry.cumulative_regret += action_utilities[i] - node_utility;
-            action_entry.cumulative_strategy += strategy[i];
+        // Compute information set for the acting player, apply abstraction
+        let view = state.visible_state(player);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = abstraction.abstract_info_set(&info_set);
+
+        // Get or create regret table entry and compute current strategy
+        let strategy = {
+            let entry = regret_tables[player].get_or_create(info_hash);
+            entry.current_strategy(&canonical_actions)
+        };
+
+        if player == traverser {
+            // Traverser node: explore ALL actions, compute counterfactual regret
+            let num_actions = actions.len();
+            let mut action_utilities = vec![0.0f64; num_actions];
+
+            for (i, action) in actions.iter().enumerate() {
+                let mut child_state = state.clone();
+                rules::apply_action(&mut child_state, action);
+                action_utilities[i] = traverse(
+                    child_state,
+                    traverser,
+                    regret_tables,
+                    config,
+                    abstraction,
+                    rollout_mode,
+                    rollout_strategies,
+                    depth + 1,
+                    actions_taken + 1,
+                    rng,
+                );
+            }
+
+            // Expected utility under current strategy
+            let node_utility: f64 = strategy
+                .iter()
+                .zip(action_utilities.iter())
+                .map(|(&s, &u)| s * u)
+                .sum();
+
+            // Update cumulative regret and strategy for each action via canonical key
+            let entry = regret_tables[player].get_or_create(info_hash);
+            for (i, ca) in canonical_actions.iter().enumerate() {
+                let action_entry = entry.get_or_create_action(ca);
+                action_entry.cumulative_regret += action_utilities[i] - node_utility;
+                action_entry.cumulative_strategy += strategy[i];
+            }
+            entry.visit_count += 1;
+
+            return node_utility;
+        } else {
+            // Opponent node: sample ONE action from their current strategy
+            let action_idx = sample_from_distribution(&strategy, rng);
+
+            // Update opponent's cumulative strategy via canonical keys
+            let entry = regret_tables[player].get_or_create(info_hash);
+            for (i, ca) in canonical_actions.iter().enumerate() {
+                entry.get_or_create_action(ca).cumulative_strategy += strategy[i];
+            }
+            entry.visit_count += 1;
+
+            rules::apply_action(&mut state, &actions[action_idx]);
+            depth += 1;
+            actions_taken += 1;
+            continue;
         }
-        entry.visit_count += 1;
-
-        node_utility
-    } else {
-        // Opponent node: sample ONE action from their current strategy
-        let action_idx = sample_from_distribution(&strategy, rng);
-        let action = &actions[action_idx];
-
-        // Update opponent's cumulative strategy via canonical keys
-        let entry = regret_tables[player].get_or_create(info_hash);
-        for (i, ca) in canonical_actions.iter().enumerate() {
-            entry.get_or_create_action(ca).cumulative_strategy += strategy[i];
-        }
-        entry.visit_count += 1;
-
-        let mut child_state = state.clone();
-        rules::apply_action(&mut child_state, action);
-        traverse(
-            child_state,
-            traverser,
-            regret_tables,
-            config,
-            abstraction,
-            rollout_mode,
-            rollout_strategies,
-            depth + 1,
-            actions_taken + 1,
-            rng,
-        )
     }
 }
 
@@ -1275,150 +1245,126 @@ where
 /// straightforward (accept a `RolloutMode` parameter and call
 /// `rollout_utility` at the depth limit) if deeper search is ever needed.
 fn traverse_goldfish(
-    state: GameState,
+    mut state: GameState,
     regret_table: &mut RegretTable,
     config: &McfrConfig,
     abstraction: &dyn InfoSetAbstraction,
     goldfish: &dyn Strategy,
     pilot: PlayerIndex,
     depth: u32,
-    actions_taken: u32,
+    mut actions_taken: u32,
     nodes_visited: &mut u32,
 ) -> f64 {
-    // Terminal check
-    if state.game_over {
-        return terminal_utility(&state, pilot);
-    }
+    loop {
+        // Terminal check
+        if state.game_over {
+            return terminal_utility(&state, pilot);
+        }
 
-    // Action limit
-    if actions_taken >= config.max_actions {
-        return heuristic_utility(&state, pilot);
-    }
+        // Action limit
+        if actions_taken >= config.max_actions {
+            return heuristic_utility(&state, pilot);
+        }
 
-    // Node budget: fall back to heuristic when iteration budget is exhausted.
-    // This prevents exponential blowup with high-branching hands.
-    *nodes_visited += 1;
-    if config.max_nodes_per_iteration > 0 && *nodes_visited >= config.max_nodes_per_iteration {
-        return heuristic_utility(&state, pilot);
-    }
+        // Node budget: fall back to heuristic when iteration budget is exhausted.
+        // This prevents exponential blowup with high-branching hands.
+        *nodes_visited += 1;
+        if config.max_nodes_per_iteration > 0
+            && *nodes_visited >= config.max_nodes_per_iteration
+        {
+            return heuristic_utility(&state, pilot);
+        }
 
-    let player = state.priority_player;
+        let player = state.priority_player;
 
-    // Opponent (goldfish): deterministic, no regret tracking
-    if player != pilot {
-        let action = goldfish.choose_action(&state, player);
-        let mut next_state = state;
-        rules::apply_action(&mut next_state, &action);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth, // don't increment depth for opponent actions
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // Opponent (goldfish): deterministic, no regret tracking.
+        // Loop instead of recursing to avoid stack overflow at high depth.
+        if player != pilot {
+            let action = goldfish.choose_action(&state, player);
+            rules::apply_action(&mut state, &action);
+            // depth unchanged for opponent actions
+            actions_taken += 1;
+            continue;
+        }
 
-    // Pilot: MCCFR decision node
-    let actions = legal_actions_abstracted(&state);
+        // Pilot: MCCFR decision node
+        let actions = legal_actions_abstracted(&state);
 
-    // No actions — pass
-    if actions.is_empty() {
-        let mut next_state = state;
-        rules::apply_action(&mut next_state, &Action::PassPriority);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth,
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // No actions — pass
+        if actions.is_empty() {
+            rules::apply_action(&mut state, &Action::PassPriority);
+            actions_taken += 1;
+            continue;
+        }
 
-    // Single action — no decision to make
-    if actions.len() == 1 {
-        let mut next_state = state.clone();
-        rules::apply_action(&mut next_state, &actions[0]);
-        return traverse_goldfish(
-            next_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth,
-            actions_taken + 1,
-            nodes_visited,
-        );
-    }
+        // Single action — no decision to make
+        if actions.len() == 1 {
+            rules::apply_action(&mut state, &actions[0]);
+            actions_taken += 1;
+            continue;
+        }
 
-    // Depth limit — uses heuristic_utility directly; see doc comment above
-    // for rationale on omitting rollout support.
-    if config.max_depth > 0 && depth >= config.max_depth {
-        return heuristic_utility(&state, pilot);
-    }
+        // Depth limit — uses heuristic_utility directly; see doc comment above
+        // for rationale on omitting rollout support.
+        if config.max_depth > 0 && depth >= config.max_depth {
+            return heuristic_utility(&state, pilot);
+        }
 
-    // Canonicalize actions
-    let canonical_actions: Vec<_> = actions
-        .iter()
-        .map(|a| canonicalize(a, &state))
-        .collect();
+        // Canonicalize actions
+        let canonical_actions: Vec<_> = actions
+            .iter()
+            .map(|a| canonicalize(a, &state))
+            .collect();
 
-    // Compute info set
-    let view = state.visible_state(pilot);
-    let info_set = InformationSet::from_view(&view, state.card_db());
-    let info_hash = abstraction.abstract_info_set(&info_set);
+        // Compute info set
+        let view = state.visible_state(pilot);
+        let info_set = InformationSet::from_view(&view, state.card_db());
+        let info_hash = abstraction.abstract_info_set(&info_set);
 
-    // Get current strategy via regret matching
-    let strategy = {
+        // Get current strategy via regret matching
+        let strategy = {
+            let entry = regret_table.get_or_create(info_hash);
+            entry.current_strategy(&canonical_actions)
+        };
+
+        // Explore ALL actions (traverser node)
+        let num_actions = actions.len();
+        let mut action_utilities = vec![0.0f64; num_actions];
+
+        for (i, action) in actions.iter().enumerate() {
+            let mut child_state = state.clone();
+            rules::apply_action(&mut child_state, action);
+            action_utilities[i] = traverse_goldfish(
+                child_state,
+                regret_table,
+                config,
+                abstraction,
+                goldfish,
+                pilot,
+                depth + 1,
+                actions_taken + 1,
+                nodes_visited,
+            );
+        }
+
+        // Expected utility under current strategy
+        let node_utility: f64 = strategy
+            .iter()
+            .zip(action_utilities.iter())
+            .map(|(&s, &u)| s * u)
+            .sum();
+
+        // Update regrets and cumulative strategy
         let entry = regret_table.get_or_create(info_hash);
-        entry.current_strategy(&canonical_actions)
-    };
+        for (i, ca) in canonical_actions.iter().enumerate() {
+            let action_entry = entry.get_or_create_action(ca);
+            action_entry.cumulative_regret += action_utilities[i] - node_utility;
+            action_entry.cumulative_strategy += strategy[i];
+        }
+        entry.visit_count += 1;
 
-    // Explore ALL actions (traverser node)
-    let num_actions = actions.len();
-    let mut action_utilities = vec![0.0f64; num_actions];
-
-    for (i, action) in actions.iter().enumerate() {
-        let mut child_state = state.clone();
-        rules::apply_action(&mut child_state, action);
-        action_utilities[i] = traverse_goldfish(
-            child_state,
-            regret_table,
-            config,
-            abstraction,
-            goldfish,
-            pilot,
-            depth + 1,
-            actions_taken + 1,
-            nodes_visited,
-        );
+        return node_utility;
     }
-
-    // Expected utility under current strategy
-    let node_utility: f64 = strategy
-        .iter()
-        .zip(action_utilities.iter())
-        .map(|(&s, &u)| s * u)
-        .sum();
-
-    // Update regrets and cumulative strategy
-    let entry = regret_table.get_or_create(info_hash);
-    for (i, ca) in canonical_actions.iter().enumerate() {
-        let action_entry = entry.get_or_create_action(ca);
-        action_entry.cumulative_regret += action_utilities[i] - node_utility;
-        action_entry.cumulative_strategy += strategy[i];
-    }
-    entry.visit_count += 1;
-
-    node_utility
 }
 
 // =========================================================================
