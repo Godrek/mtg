@@ -107,16 +107,25 @@ pub enum TriggerCondition {
     LeavesBattlefield,
     Dies,
     /// "Whenever a creature dies" — watcher trigger (e.g., Blood Artist).
+    /// Fires for ANY creature dying regardless of controller.
     ACreatureDies,
+    /// "Whenever a creature you control dies" — filtered watcher trigger
+    /// (e.g., Dictate of Erebos, Grave Pact). Only fires when the
+    /// controller of the trigger source loses a creature.
+    ACreatureYouControlDies,
     AttacksAlone,
     Attacks,
     BeginningOfUpkeep,
+    /// "At the beginning of combat on your turn" (e.g., Lord Skitter).
+    BeginningOfCombat,
     EndOfTurn,
     DealsDamage,
     DealsCombatDamage,
     DealsCombatDamageToPlayer,
     /// Whenever the controller casts any spell (e.g., Tidespout Tyrant).
     YouCastSpell,
+    /// Whenever the controller casts a creature spell (e.g., Bontu's Monument).
+    YouCastCreatureSpell,
     /// Whenever an opponent casts a noncreature spell (e.g., Mystic Remora, Nezahal).
     OpponentCastsNoncreatureSpell,
     /// Whenever an opponent casts any spell (e.g., Rhystic Study).
@@ -139,6 +148,13 @@ pub enum DynamicValue {
     CardTypesInGraveyards,
     /// Total power among creatures the controller controls.
     TotalPowerControlled,
+    /// Number of Swamps the controller controls (e.g., Cabal Coffers).
+    SwampsControlled,
+    /// Devotion to a color — count of mana symbols of that color among
+    /// permanents the controller controls (e.g., Nykthos, Shrine to Nyx).
+    DevotionTo(Color),
+    /// Number of creature cards in the controller's graveyard (e.g., Crypt of Agadeem).
+    CreaturesInGraveyard,
     /// A fixed value (for testing / compatibility).
     Fixed(i32),
 }
@@ -151,6 +167,8 @@ pub struct DynamicContext {
     /// All card type sets across all graveyards, flattened for counting
     /// distinct types. Each inner Vec is one card's types.
     pub graveyard_card_types: Vec<Vec<CardType>>,
+    /// Number of creature cards in the controller's graveyard.
+    pub creatures_in_graveyard: usize,
 }
 
 impl DynamicValue {
@@ -214,6 +232,39 @@ impl DynamicValue {
                     }
                 })
                 .sum(),
+            DynamicValue::SwampsControlled => {
+                battlefield
+                    .iter()
+                    .filter(|&&id| {
+                        if let Some(inst) = objects.get(&id) {
+                            if inst.controller != controller {
+                                return false;
+                            }
+                            if let Some(def) = card_db(inst.card_def_id) {
+                                return def.is_land()
+                                    && def.subtypes.iter().any(|s| s.0 == "Swamp");
+                            }
+                        }
+                        false
+                    })
+                    .count() as i32
+            }
+            DynamicValue::DevotionTo(color) => {
+                battlefield
+                    .iter()
+                    .filter_map(|&id| {
+                        let inst = objects.get(&id)?;
+                        if inst.controller != controller {
+                            return None;
+                        }
+                        let def = card_db(inst.card_def_id)?;
+                        def.mana_cost.as_ref().map(|cost| cost.color_amount(*color))
+                    })
+                    .sum::<u32>() as i32
+            }
+            DynamicValue::CreaturesInGraveyard => {
+                ctx.map(|c| c.creatures_in_graveyard as i32).unwrap_or(0)
+            }
             DynamicValue::Fixed(val) => *val,
         }
     }
@@ -265,6 +316,13 @@ pub enum Effect {
         target: TargetSpec,
     },
     CreateToken(TokenDef),
+    /// Create N tokens where N is determined by a dynamic value at runtime.
+    /// Used for effects like Marrow-Gnawer ("Create X 1/1 Rat tokens, where
+    /// X is the number of Rats you control").
+    CreateTokens {
+        token: TokenDef,
+        count: DynamicValue,
+    },
     Counter {
         target: TargetSpec,
     },
@@ -289,6 +347,18 @@ pub enum Effect {
     AddMana {
         color: Option<Color>,
         amount: u32,
+    },
+    /// Add mana where the amount is determined dynamically at runtime
+    /// (e.g., Cabal Coffers: "{B} for each Swamp you control").
+    AddDynamicMana {
+        color: Color,
+        count: DynamicValue,
+    },
+    /// Lose life where the amount is determined dynamically
+    /// (e.g., Castle Locthwain: "lose life equal to cards in hand").
+    LoseDynamicLife {
+        amount: DynamicValue,
+        target: TargetSpec,
     },
     /// Take an extra turn after this one (e.g., Time Walk, Temporal Manipulation).
     ExtraTurn,
@@ -364,6 +434,24 @@ pub struct TokenDef {
     pub keywords: Vec<KeywordAbility>,
 }
 
+/// What spells a cost reduction applies to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CostReductionTarget {
+    /// All spells (e.g., Jet Medallion for black spells in mono-black).
+    AllSpells,
+    /// Only creature spells (e.g., Urza's Incubator, Herald's Horn, Bontu's Monument).
+    CreatureSpells,
+}
+
+/// Cost reduction provided by a permanent on the battlefield.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostReduction {
+    /// How much generic mana to reduce.
+    pub generic_reduction: u32,
+    /// What spells the reduction applies to.
+    pub applies_to: CostReductionTarget,
+}
+
 /// The card definition — the "template" from which game objects are created.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CardDef {
@@ -410,6 +498,11 @@ pub struct CardDef {
     /// Dynamic toughness formula — same as dynamic_power but for toughness.
     #[serde(default)]
     pub dynamic_toughness: Option<DynamicValue>,
+
+    /// Cost reduction this permanent provides while on the battlefield
+    /// (e.g., Jet Medallion: black spells cost {1} less).
+    #[serde(default)]
+    pub cost_reduction: Option<CostReduction>,
 }
 
 impl CardDef {
@@ -501,6 +594,7 @@ impl Default for CardDef {
             oracle_text: String::new(),
             dynamic_power: None,
             dynamic_toughness: None,
+            cost_reduction: None,
         }
     }
 }

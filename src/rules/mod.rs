@@ -8,6 +8,41 @@ use crate::card::{CardDef, CardType, Effect, KeywordAbility, ManaAbility, Object
 use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, PendingTrigger, Phase, PlayerIndex, StackEntry, StackSource, Target};
 
+/// Compute the total generic cost reduction for a spell being cast by `player`.
+/// Checks all permanents the player controls for `CostReduction` abilities.
+pub fn total_cost_reduction(state: &GameState, player: PlayerIndex, is_creature: bool) -> u32 {
+    use crate::card::CostReductionTarget;
+    let db = state.card_db();
+    let mut total = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = &state.objects[&obj_id];
+        if inst.controller != player {
+            continue;
+        }
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        if let Some(ref reduction) = def.cost_reduction {
+            let applies = match reduction.applies_to {
+                CostReductionTarget::AllSpells => true,
+                CostReductionTarget::CreatureSpells => is_creature,
+            };
+            if applies {
+                total += reduction.generic_reduction;
+            }
+        }
+    }
+    total
+}
+
+/// Apply cost reduction to a ManaCost, returning the reduced cost.
+pub fn apply_cost_reduction(cost: &crate::mana::ManaCost, reduction: u32) -> crate::mana::ManaCost {
+    let mut reduced = cost.clone();
+    reduced.generic = reduced.generic.saturating_sub(reduction);
+    reduced
+}
+
 /// Apply an action to the game state, advancing it.
 pub fn apply_action(state: &mut GameState, action: &Action) {
     match action {
@@ -77,12 +112,14 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let def = db.get(inst.card_def_id).unwrap().clone();
             let is_creature = def.is_creature();
 
-            // Pay mana cost
+            // Pay mana cost (with cost reduction from permanents like Jet Medallion)
             if let Some(ref cost) = def.mana_cost {
+                let reduction = total_cost_reduction(state, player, is_creature);
+                let reduced_cost = apply_cost_reduction(cost, reduction);
                 // First, auto-tap lands to generate mana if pool is insufficient
-                auto_tap_lands(state, player, cost);
+                auto_tap_lands(state, player, &reduced_cost);
                 // Then pay from pool — if payment fails, abort the cast
-                if !state.players[player].mana_pool.pay(cost) {
+                if !state.players[player].mana_pool.pay(&reduced_cost) {
                     return;
                 }
             }
@@ -326,13 +363,15 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let def = db.get(inst.card_def_id).unwrap().clone();
             let is_creature = def.is_creature();
 
-            // Pay mana cost with commander tax
+            // Pay mana cost with commander tax (and cost reduction)
             if let Some(ref cost) = def.mana_cost {
                 let tax = state.players[player].commander_tax;
+                let reduction = total_cost_reduction(state, player, is_creature);
                 let mut taxed_cost = cost.clone();
                 taxed_cost.generic += tax * 2;
-                auto_tap_lands(state, player, &taxed_cost);
-                if !state.players[player].mana_pool.pay(&taxed_cost) {
+                let final_cost = apply_cost_reduction(&taxed_cost, reduction);
+                auto_tap_lands(state, player, &final_cost);
+                if !state.players[player].mana_pool.pay(&final_cost) {
                     return;
                 }
             }
@@ -809,6 +848,21 @@ fn resolve_effect(
             create_token(state, token_def, controller);
         }
 
+        Effect::CreateTokens { token, count } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let n = count.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                None,
+            );
+            for _ in 0..n.max(0) {
+                create_token(state, token, controller);
+            }
+        }
+
         Effect::Counter { .. } => {
             // Find the targeted spell on the stack and counter it
             let target_obj_id = targets.iter().find_map(|t| {
@@ -957,6 +1011,58 @@ fn resolve_effect(
                 match color {
                     Some(c) => state.players[controller].mana_pool.add_color(*c, 1),
                     None => state.players[controller].mana_pool.colorless += 1,
+                }
+            }
+        }
+
+        Effect::AddDynamicMana { color, count } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let ctx = build_dynamic_context(state, controller);
+            let n = count.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                Some(&ctx),
+            );
+            for _ in 0..n.max(0) {
+                state.players[controller].mana_pool.add_color(*color, 1);
+            }
+        }
+
+        Effect::LoseDynamicLife { amount, .. } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let ctx = build_dynamic_context(state, controller);
+            let n = amount.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                Some(&ctx),
+            );
+            if n > 0 {
+                for target in targets {
+                    if let Target::Player(p) = target {
+                        let old_life = state.players[*p].life;
+                        state.players[*p].life -= n;
+                        state.emit_event(GameEvent::LifeChanged {
+                            player: *p,
+                            old: old_life,
+                            new: state.players[*p].life,
+                        });
+                    }
+                }
+                // If no explicit targets, apply to controller
+                if targets.is_empty() {
+                    let old_life = state.players[controller].life;
+                    state.players[controller].life -= n;
+                    state.emit_event(GameEvent::LifeChanged {
+                        player: controller,
+                        old: old_life,
+                        new: state.players[controller].life,
+                    });
                 }
             }
         }
@@ -1110,6 +1216,43 @@ fn check_triggers(state: &mut GameState, condition: TriggerCondition, source_hin
     state.pending_triggers.extend(triggers);
 }
 
+/// Check `ACreatureYouControlDies` triggers — only fires for permanents whose
+/// controller matches the dying creature's controller.
+fn check_your_creature_dies_triggers(
+    state: &mut GameState,
+    dying_controllers: &[PlayerIndex],
+) {
+    let triggers: Vec<PendingTrigger> = {
+        let db = state.card_db();
+        let mut found = Vec::new();
+
+        for &obj_id in &state.battlefield {
+            let inst = &state.objects[&obj_id];
+            let controller = inst.controller;
+            let def = match db.get(inst.card_def_id) {
+                Some(d) => d,
+                None => continue,
+            };
+
+            for (i, trigger) in def.triggered_abilities.iter().enumerate() {
+                if trigger.trigger == TriggerCondition::ACreatureYouControlDies
+                    && dying_controllers.contains(&controller)
+                {
+                    found.push(PendingTrigger {
+                        source_id: obj_id,
+                        ability_index: i,
+                        controller,
+                        targets: vec![],
+                    });
+                }
+            }
+        }
+        found
+    };
+
+    state.pending_triggers.extend(triggers);
+}
+
 /// Flush pending triggers onto the stack in APNAP order
 /// (Active Player, Non-Active Player). When a player controls multiple
 /// simultaneous triggers, they must choose the ordering — this is surfaced
@@ -1248,6 +1391,9 @@ fn fire_spell_cast_triggers(state: &mut GameState, caster: PlayerIndex, is_creat
             for (i, trigger) in def.triggered_abilities.iter().enumerate() {
                 let matches = match trigger.trigger {
                     TriggerCondition::YouCastSpell => controller == caster,
+                    TriggerCondition::YouCastCreatureSpell => {
+                        controller == caster && is_creature
+                    }
                     TriggerCondition::OpponentCastsSpell => controller != caster,
                     TriggerCondition::OpponentCastsNoncreatureSpell => {
                         controller != caster && !is_creature
@@ -1560,6 +1706,12 @@ pub fn check_state_based_actions(state: &mut GameState) {
         // Check "whenever a creature dies" watcher triggers on surviving permanents.
         if !died_this_round.is_empty() {
             check_triggers(state, TriggerCondition::ACreatureDies, None);
+            // Check controller-filtered "whenever a creature you control dies" triggers.
+            let dying_controllers: Vec<PlayerIndex> = died_this_round
+                .iter()
+                .filter_map(|&id| state.objects.get(&id).map(|inst| inst.controller))
+                .collect();
+            check_your_creature_dies_triggers(state, &dying_controllers);
         }
         let triggers_queued = state.pending_triggers.len() > triggers_before;
 
@@ -1683,6 +1835,11 @@ fn execute_phase_entry(state: &mut GameState) {
         Phase::BeginningOfCombat => {
             state.priority_player = active;
             state.combat.clear();
+            // Fire "at the beginning of combat on your turn" triggers
+            let flushed = fire_triggers(state, TriggerCondition::BeginningOfCombat, None);
+            if flushed {
+                state.priority_player = active;
+            }
         }
 
         Phase::DeclareAttackers => {
@@ -1878,6 +2035,34 @@ fn token_to_card_def(token_def: &TokenDef, card_id: u64) -> CardDef {
 /// Registers the token's CardDef in the card database (via Arc::make_mut,
 /// which clones only if needed) and creates a CardInstance marked as a token.
 /// Fires ETB triggers for the token.
+/// Build a DynamicContext for the given controller, used when evaluating
+/// DynamicValue variants that need hand/graveyard information.
+fn build_dynamic_context(state: &GameState, controller: PlayerIndex) -> crate::card::DynamicContext {
+    let hand_size = state.players.get(controller)
+        .map(|p| p.hand.len())
+        .unwrap_or(0);
+    let db = state.card_db();
+    let mut graveyard_card_types = Vec::new();
+    let mut creatures_in_graveyard = 0usize;
+    if let Some(player) = state.players.get(controller) {
+        for &gid in &player.graveyard {
+            if let Some(gi) = state.objects.get(&gid) {
+                if let Some(gdef) = db.get(gi.card_def_id) {
+                    graveyard_card_types.push(gdef.card_types.clone());
+                    if gdef.is_creature() {
+                        creatures_in_graveyard += 1;
+                    }
+                }
+            }
+        }
+    }
+    crate::card::DynamicContext {
+        hand_size,
+        graveyard_card_types,
+        creatures_in_graveyard,
+    }
+}
+
 fn create_token(state: &mut GameState, token_def: &TokenDef, controller: PlayerIndex) {
     let card_id = token_card_id(token_def);
 

@@ -76,6 +76,9 @@ pub enum AffectedObjects {
     OtherCreatures,
     /// All creatures controlled by a specific player except the source.
     OtherCreaturesControlledBy(PlayerIndex),
+    /// All non-Human creatures controlled by a specific player except the source
+    /// (e.g., Mikaeus, the Unhallowed: "Other non-Human creatures you control").
+    OtherNonHumanCreaturesControlledBy(PlayerIndex),
     /// All permanents on the battlefield.
     AllPermanents,
     /// All permanents controlled by a specific player.
@@ -432,6 +435,15 @@ fn effect_applies_to(
             obj_id != effect.source_id
                 && inst.controller == *player
                 && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
+        }
+        AffectedObjects::OtherNonHumanCreaturesControlledBy(player) => {
+            obj_id != effect.source_id
+                && inst.controller == *player
+                && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
+                && !card_db
+                    .get(inst.card_def_id)
+                    .map(|def| def.subtypes.iter().any(|s| s.0 == "Human"))
+                    .unwrap_or(false)
         }
         AffectedObjects::AllPermanents => battlefield.contains(&obj_id),
         AffectedObjects::PermanentsControlledBy(player) => {

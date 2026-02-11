@@ -225,6 +225,90 @@ pub mod ids {
     pub const HYDROELECTRIC_SPECIMEN: u64 = 802;
     pub const INVASION_OF_IKORIA: u64 = 803;
     pub const SINK_INTO_STUPOR: u64 = 804;
+
+    // =====================================================================
+    // Ashcoat of the Shadow Swarm Commander Deck
+    // =====================================================================
+
+    // --- Commander ---
+    pub const ASHCOAT_OF_THE_SHADOW_SWARM: u64 = 900;
+
+    // --- Creatures ---
+    pub const ASSASSIN_INITIATE: u64 = 901;
+    pub const AYARA_FIRST_OF_LOCTHWAIN: u64 = 902;
+    pub const BLOOD_ARTIST: u64 = 903;
+    pub const BLOODLINE_PRETENDER: u64 = 904;
+    pub const BURGLAR_RAT: u64 = 905;
+    pub const CHANGELING_OUTCAST: u64 = 906;
+    pub const CHITTERING_RATS: u64 = 907;
+    pub const CHITTERING_WITCH: u64 = 908;
+    pub const CRYPT_GHAST: u64 = 909;
+    pub const FALKENRATH_NOBLE: u64 = 910;
+    pub const GNAT_MISER: u64 = 911;
+    pub const INK_EYES_SERVANT_OF_ONI: u64 = 912;
+    pub const KARUMONIX_THE_RAT_KING: u64 = 913;
+    pub const LORD_SKITTER_SEWER_KING: u64 = 914;
+    pub const MARROW_GNAWER: u64 = 915;
+    pub const MIKAEUS_THE_UNHALLOWED: u64 = 916;
+    pub const NASHI_MOON_SAGES_SCION: u64 = 917;
+    pub const NEZUMI_BONE_READER: u64 = 918;
+    pub const NEZUMI_CUTTHROAT: u64 = 919;
+    pub const NEZUMI_GRAVEROBBER: u64 = 920;
+    pub const NEZUMI_SHORTFANG: u64 = 921;
+    pub const NIRKANA_REVENANT: u64 = 922;
+    pub const OGRE_SLUMLORD: u64 = 923;
+    pub const PACK_RAT: u64 = 924;
+    pub const RATCATCHER: u64 = 925;
+    pub const RAVENOUS_RATS: u64 = 926;
+    pub const REFURBISHED_FAMILIAR: u64 = 927;
+    pub const ROAMING_THRONE: u64 = 928;
+    pub const SKULLSNATCHER: u64 = 929;
+    pub const SPECIES_SPECIALIST: u64 = 930;
+    pub const TYPHOID_RATS: u64 = 931;
+    pub const VALLEY_ROTCALLER: u64 = 932;
+    pub const ZULAPORT_CUTTHROAT: u64 = 933;
+
+    // --- Artifacts ---
+    pub const BONTUS_MONUMENT: u64 = 950;
+    pub const CAGED_SUN: u64 = 951;
+    pub const COAT_OF_ARMS: u64 = 952;
+    pub const CRYPTOLITH_FRAGMENT: u64 = 953;
+    pub const DARKSTEEL_INGOT: u64 = 954;
+    pub const DOOR_OF_DESTINIES: u64 = 955;
+    pub const HERALDS_HORN: u64 = 956;
+    pub const JET_MEDALLION: u64 = 957;
+    pub const NIM_DEATHMANTLE: u64 = 958;
+    pub const SEMBLANCE_ANVIL: u64 = 959;
+    pub const SKULLCLAMP: u64 = 960;
+    pub const STRIONIC_RESONATOR: u64 = 961;
+    pub const THE_IMMORTAL_SUN: u64 = 962;
+    pub const THORNBITE_STAFF: u64 = 963;
+    pub const THRAN_DYNAMO: u64 = 964;
+    pub const THRONE_OF_THE_GOD_PHARAOH: u64 = 965;
+    pub const URZAS_INCUBATOR: u64 = 966;
+    pub const VANQUISHERS_BANNER: u64 = 967;
+
+    // --- Enchantments ---
+    pub const BLACK_MARKET: u64 = 980;
+    pub const BLACK_MARKET_CONNECTIONS: u64 = 981;
+    pub const DICTATE_OF_EREBOS: u64 = 982;
+    pub const GRAVE_PACT: u64 = 983;
+    pub const PHYREXIAN_ARENA: u64 = 984;
+    pub const PHYREXIAN_RECLAMATION: u64 = 985;
+    pub const BOLASS_CITADEL: u64 = 986;
+
+    // --- Lands ---
+    pub const CABAL_COFFERS: u64 = 1000;
+    pub const CASTLE_LOCTHWAIN: u64 = 1001;
+    pub const CRYPT_OF_AGADEEM: u64 = 1002;
+    pub const MIKOKORO_CENTER_OF_THE_SEA: u64 = 1003;
+    pub const NYKTHOS_SHRINE_TO_NYX: u64 = 1004;
+    pub const PATH_OF_ANCESTRY: u64 = 1005;
+    pub const SWARMYARD: u64 = 1006;
+
+    // --- Instants / Sorceries ---
+    pub const CHAIN_ASSASSINATION: u64 = 1010;
+    pub const LIVING_DEATH: u64 = 1011;
 }
 
 pub const ALL_CARDS: &[CardCatalogEntry] = &[
@@ -1258,6 +1342,75 @@ pub const ALL_CARDS: &[CardCatalogEntry] = &[
         key: "SINK_INTO_STUPOR",
         name: "Sink Into Stupor",
     },
+    // --- Ashcoat Commander Deck ---
+    CardCatalogEntry { id: ids::ASHCOAT_OF_THE_SHADOW_SWARM, key: "ASHCOAT_OF_THE_SHADOW_SWARM", name: "Ashcoat of the Shadow Swarm" },
+    CardCatalogEntry { id: ids::ASSASSIN_INITIATE, key: "ASSASSIN_INITIATE", name: "Assassin Initiate" },
+    CardCatalogEntry { id: ids::AYARA_FIRST_OF_LOCTHWAIN, key: "AYARA_FIRST_OF_LOCTHWAIN", name: "Ayara, First of Locthwain" },
+    CardCatalogEntry { id: ids::BLOOD_ARTIST, key: "BLOOD_ARTIST", name: "Blood Artist" },
+    CardCatalogEntry { id: ids::BLOODLINE_PRETENDER, key: "BLOODLINE_PRETENDER", name: "Bloodline Pretender" },
+    CardCatalogEntry { id: ids::BURGLAR_RAT, key: "BURGLAR_RAT", name: "Burglar Rat" },
+    CardCatalogEntry { id: ids::CHANGELING_OUTCAST, key: "CHANGELING_OUTCAST", name: "Changeling Outcast" },
+    CardCatalogEntry { id: ids::CHITTERING_RATS, key: "CHITTERING_RATS", name: "Chittering Rats" },
+    CardCatalogEntry { id: ids::CHITTERING_WITCH, key: "CHITTERING_WITCH", name: "Chittering Witch" },
+    CardCatalogEntry { id: ids::CRYPT_GHAST, key: "CRYPT_GHAST", name: "Crypt Ghast" },
+    CardCatalogEntry { id: ids::FALKENRATH_NOBLE, key: "FALKENRATH_NOBLE", name: "Falkenrath Noble" },
+    CardCatalogEntry { id: ids::GNAT_MISER, key: "GNAT_MISER", name: "Gnat Miser" },
+    CardCatalogEntry { id: ids::INK_EYES_SERVANT_OF_ONI, key: "INK_EYES_SERVANT_OF_ONI", name: "Ink-Eyes, Servant of Oni" },
+    CardCatalogEntry { id: ids::KARUMONIX_THE_RAT_KING, key: "KARUMONIX_THE_RAT_KING", name: "Karumonix, the Rat King" },
+    CardCatalogEntry { id: ids::LORD_SKITTER_SEWER_KING, key: "LORD_SKITTER_SEWER_KING", name: "Lord Skitter, Sewer King" },
+    CardCatalogEntry { id: ids::MARROW_GNAWER, key: "MARROW_GNAWER", name: "Marrow-Gnawer" },
+    CardCatalogEntry { id: ids::MIKAEUS_THE_UNHALLOWED, key: "MIKAEUS_THE_UNHALLOWED", name: "Mikaeus, the Unhallowed" },
+    CardCatalogEntry { id: ids::NASHI_MOON_SAGES_SCION, key: "NASHI_MOON_SAGES_SCION", name: "Nashi, Moon Sage's Scion" },
+    CardCatalogEntry { id: ids::NEZUMI_BONE_READER, key: "NEZUMI_BONE_READER", name: "Nezumi Bone-Reader" },
+    CardCatalogEntry { id: ids::NEZUMI_CUTTHROAT, key: "NEZUMI_CUTTHROAT", name: "Nezumi Cutthroat" },
+    CardCatalogEntry { id: ids::NEZUMI_GRAVEROBBER, key: "NEZUMI_GRAVEROBBER", name: "Nezumi Graverobber" },
+    CardCatalogEntry { id: ids::NEZUMI_SHORTFANG, key: "NEZUMI_SHORTFANG", name: "Nezumi Shortfang" },
+    CardCatalogEntry { id: ids::NIRKANA_REVENANT, key: "NIRKANA_REVENANT", name: "Nirkana Revenant" },
+    CardCatalogEntry { id: ids::OGRE_SLUMLORD, key: "OGRE_SLUMLORD", name: "Ogre Slumlord" },
+    CardCatalogEntry { id: ids::PACK_RAT, key: "PACK_RAT", name: "Pack Rat" },
+    CardCatalogEntry { id: ids::RATCATCHER, key: "RATCATCHER", name: "Ratcatcher" },
+    CardCatalogEntry { id: ids::RAVENOUS_RATS, key: "RAVENOUS_RATS", name: "Ravenous Rats" },
+    CardCatalogEntry { id: ids::REFURBISHED_FAMILIAR, key: "REFURBISHED_FAMILIAR", name: "Refurbished Familiar" },
+    CardCatalogEntry { id: ids::ROAMING_THRONE, key: "ROAMING_THRONE", name: "Roaming Throne" },
+    CardCatalogEntry { id: ids::SKULLSNATCHER, key: "SKULLSNATCHER", name: "Skullsnatcher" },
+    CardCatalogEntry { id: ids::SPECIES_SPECIALIST, key: "SPECIES_SPECIALIST", name: "Species Specialist" },
+    CardCatalogEntry { id: ids::TYPHOID_RATS, key: "TYPHOID_RATS", name: "Typhoid Rats" },
+    CardCatalogEntry { id: ids::VALLEY_ROTCALLER, key: "VALLEY_ROTCALLER", name: "Valley Rotcaller" },
+    CardCatalogEntry { id: ids::ZULAPORT_CUTTHROAT, key: "ZULAPORT_CUTTHROAT", name: "Zulaport Cutthroat" },
+    CardCatalogEntry { id: ids::BONTUS_MONUMENT, key: "BONTUS_MONUMENT", name: "Bontu's Monument" },
+    CardCatalogEntry { id: ids::CAGED_SUN, key: "CAGED_SUN", name: "Caged Sun" },
+    CardCatalogEntry { id: ids::COAT_OF_ARMS, key: "COAT_OF_ARMS", name: "Coat of Arms" },
+    CardCatalogEntry { id: ids::CRYPTOLITH_FRAGMENT, key: "CRYPTOLITH_FRAGMENT", name: "Cryptolith Fragment" },
+    CardCatalogEntry { id: ids::DARKSTEEL_INGOT, key: "DARKSTEEL_INGOT", name: "Darksteel Ingot" },
+    CardCatalogEntry { id: ids::DOOR_OF_DESTINIES, key: "DOOR_OF_DESTINIES", name: "Door of Destinies" },
+    CardCatalogEntry { id: ids::HERALDS_HORN, key: "HERALDS_HORN", name: "Herald's Horn" },
+    CardCatalogEntry { id: ids::JET_MEDALLION, key: "JET_MEDALLION", name: "Jet Medallion" },
+    CardCatalogEntry { id: ids::NIM_DEATHMANTLE, key: "NIM_DEATHMANTLE", name: "Nim Deathmantle" },
+    CardCatalogEntry { id: ids::SEMBLANCE_ANVIL, key: "SEMBLANCE_ANVIL", name: "Semblance Anvil" },
+    CardCatalogEntry { id: ids::SKULLCLAMP, key: "SKULLCLAMP", name: "Skullclamp" },
+    CardCatalogEntry { id: ids::STRIONIC_RESONATOR, key: "STRIONIC_RESONATOR", name: "Strionic Resonator" },
+    CardCatalogEntry { id: ids::THE_IMMORTAL_SUN, key: "THE_IMMORTAL_SUN", name: "The Immortal Sun" },
+    CardCatalogEntry { id: ids::THORNBITE_STAFF, key: "THORNBITE_STAFF", name: "Thornbite Staff" },
+    CardCatalogEntry { id: ids::THRAN_DYNAMO, key: "THRAN_DYNAMO", name: "Thran Dynamo" },
+    CardCatalogEntry { id: ids::THRONE_OF_THE_GOD_PHARAOH, key: "THRONE_OF_THE_GOD_PHARAOH", name: "Throne of the God-Pharaoh" },
+    CardCatalogEntry { id: ids::URZAS_INCUBATOR, key: "URZAS_INCUBATOR", name: "Urza's Incubator" },
+    CardCatalogEntry { id: ids::VANQUISHERS_BANNER, key: "VANQUISHERS_BANNER", name: "Vanquisher's Banner" },
+    CardCatalogEntry { id: ids::BLACK_MARKET, key: "BLACK_MARKET", name: "Black Market" },
+    CardCatalogEntry { id: ids::BLACK_MARKET_CONNECTIONS, key: "BLACK_MARKET_CONNECTIONS", name: "Black Market Connections" },
+    CardCatalogEntry { id: ids::DICTATE_OF_EREBOS, key: "DICTATE_OF_EREBOS", name: "Dictate of Erebos" },
+    CardCatalogEntry { id: ids::GRAVE_PACT, key: "GRAVE_PACT", name: "Grave Pact" },
+    CardCatalogEntry { id: ids::PHYREXIAN_ARENA, key: "PHYREXIAN_ARENA", name: "Phyrexian Arena" },
+    CardCatalogEntry { id: ids::PHYREXIAN_RECLAMATION, key: "PHYREXIAN_RECLAMATION", name: "Phyrexian Reclamation" },
+    CardCatalogEntry { id: ids::BOLASS_CITADEL, key: "BOLASS_CITADEL", name: "Bolas's Citadel" },
+    CardCatalogEntry { id: ids::CABAL_COFFERS, key: "CABAL_COFFERS", name: "Cabal Coffers" },
+    CardCatalogEntry { id: ids::CASTLE_LOCTHWAIN, key: "CASTLE_LOCTHWAIN", name: "Castle Locthwain" },
+    CardCatalogEntry { id: ids::CRYPT_OF_AGADEEM, key: "CRYPT_OF_AGADEEM", name: "Crypt of Agadeem" },
+    CardCatalogEntry { id: ids::MIKOKORO_CENTER_OF_THE_SEA, key: "MIKOKORO_CENTER_OF_THE_SEA", name: "Mikokoro, Center of the Sea" },
+    CardCatalogEntry { id: ids::NYKTHOS_SHRINE_TO_NYX, key: "NYKTHOS_SHRINE_TO_NYX", name: "Nykthos, Shrine to Nyx" },
+    CardCatalogEntry { id: ids::PATH_OF_ANCESTRY, key: "PATH_OF_ANCESTRY", name: "Path of Ancestry" },
+    CardCatalogEntry { id: ids::SWARMYARD, key: "SWARMYARD", name: "Swarmyard" },
+    CardCatalogEntry { id: ids::CHAIN_ASSASSINATION, key: "CHAIN_ASSASSINATION", name: "Chain Assassination" },
+    CardCatalogEntry { id: ids::LIVING_DEATH, key: "LIVING_DEATH", name: "Living Death" },
 ];
 
 /// Returns catalog entries annotated with whether the card currently has
