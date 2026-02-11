@@ -54,9 +54,7 @@ pub enum Action {
     DeclareAttackers { attackers: Vec<ObjectId> },
 
     /// Declare blockers (list of (blocker_id, attacker_id) pairs).
-    DeclareBlockers {
-        blocks: Vec<(ObjectId, ObjectId)>,
-    },
+    DeclareBlockers { blocks: Vec<(ObjectId, ObjectId)> },
 
     /// Order damage assignment for a blocked attacker.
     OrderDamageAssignment {
@@ -68,18 +66,14 @@ pub enum Action {
     /// When a player controls multiple triggers that would go on the stack at once,
     /// they choose the ordering. First element goes on the stack first (resolves last
     /// due to LIFO). Each entry is (source_id, ability_index).
-    OrderTriggers {
-        ordering: Vec<(ObjectId, usize)>,
-    },
+    OrderTriggers { ordering: Vec<(ObjectId, usize)> },
 
     /// Choose the order in which replacement effects apply to an event (CR 614).
     /// When multiple replacement effects could modify the same event, the affected
     /// player chooses the order. Each entry is (source_id, effect_index).
     /// The first element is applied first; subsequent effects apply to the
     /// already-modified event.
-    ChooseReplacementOrder {
-        ordering: Vec<(ObjectId, usize)>,
-    },
+    ChooseReplacementOrder { ordering: Vec<(ObjectId, usize)> },
 
     /// Cast commander from the command zone (Commander format).
     /// Functions like CastSpell but sourced from the command zone with
@@ -293,8 +287,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 .copied()
                 .collect();
 
-            let use_buckets = abstraction == CombatAbstraction::Bucketed
-                && eligible.len() > 5;
+            let use_buckets = abstraction == CombatAbstraction::Bucketed && eligible.len() > 5;
 
             let subsets = if use_buckets {
                 generate_attack_buckets(&eligible, state)
@@ -340,8 +333,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
             if attackers.is_empty() {
                 // No attackers — just pass
             } else if abstraction == CombatAbstraction::Bucketed {
-                let blocking_combos =
-                    generate_block_buckets(&eligible_blockers, attackers, state);
+                let blocking_combos = generate_block_buckets(&eligible_blockers, attackers, state);
                 for combo in blocking_combos {
                     actions.push(Action::DeclareBlockers { blocks: combo });
                 }
@@ -372,10 +364,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 };
 
                 // Play lands (sorcery speed, once per turn)
-                if def.is_land()
-                    && is_main
-                    && state.players[player].land_plays_remaining > 0
-                {
+                if def.is_land() && is_main && state.players[player].land_plays_remaining > 0 {
                     actions.push(Action::PlayLand { object_id: obj_id });
                 }
 
@@ -394,11 +383,16 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             // Simplified: we check the current pool + potential from untapped lands.
                             if can_potentially_pay(state, player, cost) {
                                 let targets = enumerate_targets_for_spell(state, player, def);
+                                let requires_target = spell_requires_target(def);
                                 if targets.is_empty() {
-                                    actions.push(Action::CastSpell {
-                                        object_id: obj_id,
-                                        targets: vec![],
-                                    });
+                                    // If the spell requires choosing a target and none are legal,
+                                    // the spell cannot be cast.
+                                    if !requires_target {
+                                        actions.push(Action::CastSpell {
+                                            object_id: obj_id,
+                                            targets: vec![],
+                                        });
+                                    }
                                 } else {
                                     for target in targets {
                                         actions.push(Action::CastSpell {
@@ -674,6 +668,70 @@ fn enumerate_targets_for_spell(
     }
 }
 
+/// Whether a spell effect requires selecting a target when cast.
+fn spell_requires_target(def: &crate::card::CardDef) -> bool {
+    use crate::card::{Effect, TargetSpec};
+
+    fn spec_requires_choice(spec: &TargetSpec) -> bool {
+        !matches!(
+            spec,
+            TargetSpec::NoTarget | TargetSpec::Controller | TargetSpec::EachCreature
+        )
+    }
+
+    match def.spell_effect.as_ref() {
+        Some(Effect::DealDamage { target, .. }) => spec_requires_choice(target),
+        Some(Effect::DestroyTarget { target }) => spec_requires_choice(target),
+        Some(Effect::ExileTarget { target }) => spec_requires_choice(target),
+        Some(Effect::BounceTo { target, .. }) => spec_requires_choice(target),
+        Some(Effect::Counter { target }) => spec_requires_choice(target),
+        Some(Effect::LoseLife { target, .. }) => spec_requires_choice(target),
+        Some(Effect::DiscardCards { target, .. }) => spec_requires_choice(target),
+        Some(Effect::PutCounters { target, .. }) => spec_requires_choice(target),
+        Some(Effect::MillCards { target, .. }) => spec_requires_choice(target),
+        Some(Effect::SacrificeCreatures { target, .. }) => spec_requires_choice(target),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::card::sample;
+    use crate::card::ZoneType;
+    use crate::game::{GameState, Phase};
+    use std::sync::Arc;
+
+    #[test]
+    fn test_counterspell_not_castable_without_stack_target() {
+        let db = sample::build_sample_db();
+
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::new(db));
+        state.phase = Phase::PreCombatMain;
+        state.active_player = 0;
+        state.priority_player = 0;
+
+        let pact_obj = state.create_card_in_zone(sample::ids::PACT_OF_NEGATION, 0, ZoneType::Hand);
+
+        let actions = legal_actions(&state);
+        let has_illegal_cast = actions.iter().any(|a| {
+            matches!(
+                a,
+                Action::CastSpell {
+                    object_id,
+                    targets
+                } if *object_id == pact_obj && targets.is_empty()
+            )
+        });
+
+        assert!(
+            !has_illegal_cast,
+            "Counterspells should not be castable without a valid spell target"
+        );
+    }
+}
+
 /// Enumerate valid tutor target actions for a player with a pending tutor.
 ///
 /// Returns `ChooseTutorTarget` actions for each distinct card in the player's
@@ -746,7 +804,9 @@ fn generate_attack_buckets(eligible: &[ObjectId], state: &GameState) -> Vec<Vec<
     let mut seen: HashSet<Vec<ObjectId>> = HashSet::new();
     let mut buckets: Vec<Vec<ObjectId>> = Vec::with_capacity(8);
 
-    let add_bucket = |mut bucket: Vec<ObjectId>, seen: &mut HashSet<Vec<ObjectId>>, buckets: &mut Vec<Vec<ObjectId>>| {
+    let add_bucket = |mut bucket: Vec<ObjectId>,
+                      seen: &mut HashSet<Vec<ObjectId>>,
+                      buckets: &mut Vec<Vec<ObjectId>>| {
         bucket.sort();
         if seen.insert(bucket.clone()) {
             buckets.push(bucket);
@@ -825,9 +885,7 @@ fn generate_block_buckets(
     // Pre-compute legality, power, and toughness using layer engine.
     let can_block_matrix: Vec<Vec<bool>> = blockers
         .iter()
-        .map(|&b| {
-            attackers.iter().map(|&a| can_block(state, b, a)).collect()
-        })
+        .map(|&b| attackers.iter().map(|&a| can_block(state, b, a)).collect())
         .collect();
 
     struct CreatureStats {
@@ -866,7 +924,9 @@ fn generate_block_buckets(
     let mut seen: HashSet<Vec<(ObjectId, ObjectId)>> = HashSet::new();
     let mut results: Vec<Vec<(ObjectId, ObjectId)>> = Vec::with_capacity(6);
 
-    let add_assignment = |mut assignment: Vec<(ObjectId, ObjectId)>, seen: &mut HashSet<Vec<(ObjectId, ObjectId)>>, results: &mut Vec<Vec<(ObjectId, ObjectId)>>| {
+    let add_assignment = |mut assignment: Vec<(ObjectId, ObjectId)>,
+                          seen: &mut HashSet<Vec<(ObjectId, ObjectId)>>,
+                          results: &mut Vec<Vec<(ObjectId, ObjectId)>>| {
         assignment.sort();
         if seen.insert(assignment.clone()) {
             results.push(assignment);
@@ -938,7 +998,8 @@ fn generate_block_buckets(
                     None => best_bi = Some(bi),
                     Some(prev) => {
                         let prev_kills = blocker_stats[prev].power >= attacker_stats[ai].toughness;
-                        let prev_survives = attacker_stats[ai].power < blocker_stats[prev].toughness;
+                        let prev_survives =
+                            attacker_stats[ai].power < blocker_stats[prev].toughness;
                         // Prefer: kills+survives > kills > survives > any
                         let score = |k: bool, s: bool| (k as u8) * 2 + (s as u8);
                         if score(kills, survives) > score(prev_kills, prev_survives) {
@@ -983,11 +1044,7 @@ fn generate_block_buckets(
 }
 
 /// Check if a specific blocker can legally block a specific attacker.
-fn can_block(
-    state: &GameState,
-    blocker_id: ObjectId,
-    attacker_id: ObjectId,
-) -> bool {
+fn can_block(state: &GameState, blocker_id: ObjectId, attacker_id: ObjectId) -> bool {
     use crate::card::KeywordAbility;
 
     // Flying: only flying/reach creatures can block flyers
@@ -1006,8 +1063,12 @@ fn can_block(
             Some(d) => d,
             None => return false,
         };
-        let is_artifact = blocker_def.card_types.contains(&crate::card::CardType::Artifact);
-        let is_black = blocker_def.color_identity().contains(&crate::mana::Color::Black);
+        let is_artifact = blocker_def
+            .card_types
+            .contains(&crate::card::CardType::Artifact);
+        let is_black = blocker_def
+            .color_identity()
+            .contains(&crate::mana::Color::Black);
         if !is_artifact && !is_black {
             return false;
         }
@@ -1024,7 +1085,9 @@ fn can_block(
             Some(d) => d,
             None => return false,
         };
-        let is_artifact = blocker_def.card_types.contains(&crate::card::CardType::Artifact);
+        let is_artifact = blocker_def
+            .card_types
+            .contains(&crate::card::CardType::Artifact);
         let attacker_colors = attacker_def.color_identity();
         let blocker_colors = blocker_def.color_identity();
         let shares_color = attacker_colors.iter().any(|c| blocker_colors.contains(c));
@@ -1064,9 +1127,7 @@ fn generate_blocking_assignments(
     // Build a legal-block matrix: which blocker can block which attacker
     let can_block_matrix: Vec<Vec<bool>> = blockers
         .iter()
-        .map(|&b| {
-            attackers.iter().map(|&a| can_block(state, b, a)).collect()
-        })
+        .map(|&b| attackers.iter().map(|&a| can_block(state, b, a)).collect())
         .collect();
 
     // Generate single-blocker assignments (only for non-menace attackers)
