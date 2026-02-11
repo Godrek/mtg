@@ -9,7 +9,7 @@ use mtg_gto::card::{KeywordAbility, ZoneType};
 use mtg_gto::events::{EventBus, GameEvent, Zone};
 use mtg_gto::game::{GameState, Phase, Target};
 use mtg_gto::replacement::{
-    ReplacementAction, ReplacementEffect, ReplacementEventKind, find_applicable_replacements,
+    find_applicable_replacements, ReplacementAction, ReplacementEffect, ReplacementEventKind,
 };
 use mtg_gto::rules;
 use mtg_gto::simulation;
@@ -22,6 +22,45 @@ fn test_sample_db_builds() {
     assert!(db.get(sample::ids::LIGHTNING_BOLT).is_some());
     assert!(db.get(sample::ids::GRIZZLY_BEARS).is_some());
     assert!(db.get(sample::ids::SERRA_ANGEL).is_some());
+}
+
+#[test]
+fn test_catalog_ids_match_sample_ids() {
+    assert_eq!(
+        mtg_gto::card::catalog::ids::LIGHTNING_BOLT,
+        sample::ids::LIGHTNING_BOLT
+    );
+    assert_eq!(
+        mtg_gto::card::catalog::ids::KINNAN_BONDER_PRODIGY,
+        sample::ids::KINNAN_BONDER_PRODIGY
+    );
+}
+
+#[test]
+fn test_catalog_effect_status_marks_effect_cards() {
+    let db = sample::build_sample_db();
+    let statuses = mtg_gto::card::catalog::card_implementation_status(&db);
+
+    let bolt = statuses
+        .iter()
+        .find(|s| s.id == sample::ids::LIGHTNING_BOLT)
+        .expect("Lightning Bolt should be in catalog");
+    assert!(bolt.effects_implemented);
+
+    let bears = statuses
+        .iter()
+        .find(|s| s.id == sample::ids::GRIZZLY_BEARS)
+        .expect("Grizzly Bears should be in catalog");
+    assert!(!bears.effects_implemented);
+}
+
+#[test]
+fn test_shivan_dragon_has_firebreathing_ability() {
+    let db = sample::build_sample_db();
+    let shivan = db
+        .get(sample::ids::SHIVAN_DRAGON)
+        .expect("Shivan Dragon should exist");
+    assert_eq!(shivan.activated_abilities.len(), 1);
 }
 
 #[test]
@@ -174,10 +213,13 @@ fn test_etb_trigger_elvish_visionary() {
     let hand_before = state.players[0].hand.len();
 
     // Cast Elvish Visionary
-    rules::apply_action(&mut state, &Action::CastSpell {
-        object_id: vis_id,
-        targets: vec![],
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: vis_id,
+            targets: vec![],
+        },
+    );
 
     // Visionary should be on the stack
     assert_eq!(state.stack.len(), 1);
@@ -193,10 +235,7 @@ fn test_etb_trigger_elvish_visionary() {
     );
 
     // The ETB trigger should be on the stack now
-    assert_eq!(
-        state.stack.len(), 1,
-        "ETB trigger should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 1, "ETB trigger should be on the stack");
 
     // Resolve the ETB trigger (both players pass)
     rules::apply_action(&mut state, &Action::PassPriority);
@@ -302,11 +341,7 @@ fn test_order_triggers_surfaced_for_multiple_simultaneous_triggers() {
         state.pending_triggers.is_empty(),
         "pending_triggers should be empty after ordering"
     );
-    assert_eq!(
-        state.stack.len(),
-        2,
-        "Both triggers should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 2, "Both triggers should be on the stack");
 
     // Now legal_actions should return normal priority actions (PassPriority, etc.)
     let actions_after = legal_actions(&state);
@@ -381,7 +416,9 @@ fn test_cleanup_requires_discard_action() {
 
     let actions = mtg_gto::action::legal_actions(&state);
     assert_eq!(actions.len(), 8);
-    assert!(actions.iter().all(|action| matches!(action, Action::Discard { .. })));
+    assert!(actions
+        .iter()
+        .all(|action| matches!(action, Action::Discard { .. })));
 
     let discard_action = actions[0].clone();
     rules::apply_action(&mut state, &discard_action);
@@ -407,8 +444,12 @@ fn test_cleanup_allows_pass_at_seven() {
     state.phase = mtg_gto::game::Phase::Cleanup;
 
     let actions = mtg_gto::action::legal_actions(&state);
-    assert!(actions.iter().any(|action| matches!(action, Action::PassPriority)));
-    assert!(actions.iter().all(|action| !matches!(action, Action::Discard { .. })));
+    assert!(actions
+        .iter()
+        .any(|action| matches!(action, Action::PassPriority)));
+    assert!(actions
+        .iter()
+        .all(|action| !matches!(action, Action::Discard { .. })));
 }
 
 #[test]
@@ -428,7 +469,12 @@ fn test_cleanup_multiple_discards() {
     state.turn_number = 1;
 
     let first_discard = hand_ids[3];
-    rules::apply_action(&mut state, &Action::Discard { object_id: first_discard });
+    rules::apply_action(
+        &mut state,
+        &Action::Discard {
+            object_id: first_discard,
+        },
+    );
     assert!(!state.players[0].hand.contains(&first_discard));
     assert!(state.players[0].graveyard.contains(&first_discard));
     assert_eq!(state.players[0].hand.len(), 9);
@@ -466,10 +512,14 @@ fn test_apnap_both_players_multiple_triggers() {
         state.create_card_in_zone(sample::ids::MOUNTAIN, 1, ZoneType::Library);
     }
 
-    let vis_p0_a = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
-    let vis_p0_b = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
-    let vis_p1_a = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
-    let vis_p1_b = state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
+    let vis_p0_a =
+        state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+    let vis_p0_b =
+        state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
+    let vis_p1_a =
+        state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
+    let vis_p1_b =
+        state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 1, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -478,45 +528,83 @@ fn test_apnap_both_players_multiple_triggers() {
 
     // Queue 2 triggers for AP (player 0) and 2 for NAP (player 1)
     state.pending_triggers.push(mtg_gto::game::PendingTrigger {
-        source_id: vis_p0_a, ability_index: 0, controller: 0, targets: vec![],
+        source_id: vis_p0_a,
+        ability_index: 0,
+        controller: 0,
+        targets: vec![],
     });
     state.pending_triggers.push(mtg_gto::game::PendingTrigger {
-        source_id: vis_p0_b, ability_index: 0, controller: 0, targets: vec![],
+        source_id: vis_p0_b,
+        ability_index: 0,
+        controller: 0,
+        targets: vec![],
     });
     state.pending_triggers.push(mtg_gto::game::PendingTrigger {
-        source_id: vis_p1_a, ability_index: 0, controller: 1, targets: vec![],
+        source_id: vis_p1_a,
+        ability_index: 0,
+        controller: 1,
+        targets: vec![],
     });
     state.pending_triggers.push(mtg_gto::game::PendingTrigger {
-        source_id: vis_p1_b, ability_index: 0, controller: 1, targets: vec![],
+        source_id: vis_p1_b,
+        ability_index: 0,
+        controller: 1,
+        targets: vec![],
     });
 
     // AP (player 0) should order first
     let actions = legal_actions(&state);
-    assert_eq!(state.priority_player, 0, "AP should have priority to order first");
-    let order_actions: Vec<&Action> = actions.iter()
+    assert_eq!(
+        state.priority_player, 0,
+        "AP should have priority to order first"
+    );
+    let order_actions: Vec<&Action> = actions
+        .iter()
         .filter(|a| matches!(a, Action::OrderTriggers { .. }))
         .collect();
-    assert_eq!(order_actions.len(), 2, "AP should see 2! = 2 orderings for their 2 triggers");
+    assert_eq!(
+        order_actions.len(),
+        2,
+        "AP should see 2! = 2 orderings for their 2 triggers"
+    );
 
     // AP orders their triggers
     rules::apply_action(&mut state, order_actions[0]);
 
     // Now NAP (player 1) should have priority to order their triggers
-    assert_eq!(state.priority_player, 1, "NAP should now have priority to order");
-    assert!(!state.pending_triggers.is_empty(), "NAP triggers should still be pending");
+    assert_eq!(
+        state.priority_player, 1,
+        "NAP should now have priority to order"
+    );
+    assert!(
+        !state.pending_triggers.is_empty(),
+        "NAP triggers should still be pending"
+    );
 
     let actions2 = legal_actions(&state);
-    let order_actions2: Vec<&Action> = actions2.iter()
+    let order_actions2: Vec<&Action> = actions2
+        .iter()
         .filter(|a| matches!(a, Action::OrderTriggers { .. }))
         .collect();
-    assert_eq!(order_actions2.len(), 2, "NAP should see 2! = 2 orderings for their 2 triggers");
+    assert_eq!(
+        order_actions2.len(),
+        2,
+        "NAP should see 2! = 2 orderings for their 2 triggers"
+    );
 
     // NAP orders their triggers
     rules::apply_action(&mut state, order_actions2[0]);
 
     // All 4 triggers should now be on the stack
-    assert!(state.pending_triggers.is_empty(), "All triggers should be flushed");
-    assert_eq!(state.stack.len(), 4, "All 4 triggers should be on the stack");
+    assert!(
+        state.pending_triggers.is_empty(),
+        "All triggers should be flushed"
+    );
+    assert_eq!(
+        state.stack.len(),
+        4,
+        "All 4 triggers should be on the stack"
+    );
 
     // Verify APNAP stack order: AP's triggers were placed first (resolve last),
     // NAP's triggers placed second (resolve first since stack is LIFO)
@@ -542,9 +630,11 @@ fn test_more_than_six_triggers_fifo_fallback() {
     // Create 7 permanents with triggers for player 0
     let mut vis_ids = Vec::new();
     for _ in 0..7 {
-        vis_ids.push(
-            state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield),
-        );
+        vis_ids.push(state.create_card_in_zone(
+            sample::ids::ELVISH_VISIONARY,
+            0,
+            ZoneType::Battlefield,
+        ));
     }
 
     state.active_player = 0;
@@ -555,18 +645,23 @@ fn test_more_than_six_triggers_fifo_fallback() {
     // Queue 7 triggers for player 0
     for &vis_id in &vis_ids {
         state.pending_triggers.push(mtg_gto::game::PendingTrigger {
-            source_id: vis_id, ability_index: 0, controller: 0, targets: vec![],
+            source_id: vis_id,
+            ability_index: 0,
+            controller: 0,
+            targets: vec![],
         });
     }
 
     let actions = legal_actions(&state);
-    let order_actions: Vec<&Action> = actions.iter()
+    let order_actions: Vec<&Action> = actions
+        .iter()
         .filter(|a| matches!(a, Action::OrderTriggers { .. }))
         .collect();
 
     // 7! = 5040 would be too many; should fall back to exactly 1 FIFO ordering
     assert_eq!(
-        order_actions.len(), 1,
+        order_actions.len(),
+        1,
         "Should have exactly 1 ordering (FIFO fallback) for >6 triggers, got {}",
         order_actions.len()
     );
@@ -574,7 +669,11 @@ fn test_more_than_six_triggers_fifo_fallback() {
     // Apply the single ordering — all triggers should end up on the stack
     rules::apply_action(&mut state, order_actions[0]);
     assert!(state.pending_triggers.is_empty());
-    assert_eq!(state.stack.len(), 7, "All 7 triggers should be on the stack");
+    assert_eq!(
+        state.stack.len(),
+        7,
+        "All 7 triggers should be on the stack"
+    );
 }
 
 #[test]
@@ -609,9 +708,8 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
     }
 
     // Put a second Elvish Visionary already on the battlefield
-    let _vis_existing = state.create_card_in_zone(
-        sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield,
-    );
+    let _vis_existing =
+        state.create_card_in_zone(sample::ids::ELVISH_VISIONARY, 0, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -619,10 +717,13 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
     state.turn_number = 2;
 
     // Cast the Elvish Visionary
-    rules::apply_action(&mut state, &Action::CastSpell {
-        object_id: vis_id,
-        targets: vec![],
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::CastSpell {
+            object_id: vis_id,
+            targets: vec![],
+        },
+    );
     assert_eq!(state.stack.len(), 1, "Spell should be on stack");
 
     // Resolve: both players pass
@@ -636,17 +737,18 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
         state.pending_triggers.is_empty(),
         "Single ETB trigger should be auto-flushed"
     );
-    assert_eq!(
-        state.stack.len(), 1,
-        "ETB trigger should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 1, "ETB trigger should be on the stack");
 
     // Verify normal flow continues: resolve the ETB trigger
     rules::apply_action(&mut state, &Action::PassPriority);
     rules::apply_action(&mut state, &Action::PassPriority);
 
     // Trigger resolved — player drew a card
-    assert_eq!(state.stack.len(), 0, "Stack should be empty after ETB resolution");
+    assert_eq!(
+        state.stack.len(),
+        0,
+        "Stack should be empty after ETB resolution"
+    );
 }
 
 // ======================================================================
@@ -655,10 +757,7 @@ fn test_etb_multiple_triggers_through_natural_game_flow() {
 
 /// Helper: set up a game state with specific creatures on the battlefield,
 /// in the DeclareAttackers phase, ready for player 0 to declare attackers.
-fn setup_combat_state(
-    attacker_card_ids: &[u64],
-    blocker_card_ids: &[u64],
-) -> GameState {
+fn setup_combat_state(attacker_card_ids: &[u64], blocker_card_ids: &[u64]) -> GameState {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -737,13 +836,13 @@ fn test_attack_abstraction_large_board_reduces_actions() {
     // Bucketed should give at most 6.
     let state = setup_combat_state(
         &[
-            sample::ids::SERRA_ANGEL,       // 4/4 flying vigilance
-            sample::ids::SHIVAN_DRAGON,     // 5/5 flying
-            sample::ids::GRIZZLY_BEARS,     // 2/2
-            sample::ids::GREY_OGRE,         // 2/2
-            sample::ids::GOBLIN_GUIDE,      // 2/2
-            sample::ids::SAVANNAH_LIONS,    // 2/1
-            sample::ids::KALONIAN_TUSKER,   // 3/3
+            sample::ids::SERRA_ANGEL,        // 4/4 flying vigilance
+            sample::ids::SHIVAN_DRAGON,      // 5/5 flying
+            sample::ids::GRIZZLY_BEARS,      // 2/2
+            sample::ids::GREY_OGRE,          // 2/2
+            sample::ids::GOBLIN_GUIDE,       // 2/2
+            sample::ids::SAVANNAH_LIONS,     // 2/1
+            sample::ids::KALONIAN_TUSKER,    // 3/3
             sample::ids::LEATHERBACK_BALOTH, // 4/5
         ],
         &[],
@@ -761,7 +860,11 @@ fn test_attack_abstraction_large_board_reduces_actions() {
         .filter(|a| matches!(a, Action::DeclareAttackers { .. }))
         .collect();
 
-    assert_eq!(full_attacks.len(), 256, "Full should have 2^8 = 256 subsets");
+    assert_eq!(
+        full_attacks.len(),
+        256,
+        "Full should have 2^8 = 256 subsets"
+    );
     assert!(
         abstracted_attacks.len() <= 7,
         "Bucketed should have at most 7 buckets, got {}",
@@ -820,12 +923,12 @@ fn test_attack_abstraction_evasion_bucket() {
     // contain exactly the 2 flyers.
     let state = setup_combat_state(
         &[
-            sample::ids::SERRA_ANGEL,       // flying
-            sample::ids::SHIVAN_DRAGON,     // flying
-            sample::ids::GRIZZLY_BEARS,     // ground
-            sample::ids::GREY_OGRE,         // ground
-            sample::ids::GOBLIN_GUIDE,      // ground
-            sample::ids::SAVANNAH_LIONS,    // ground
+            sample::ids::SERRA_ANGEL,    // flying
+            sample::ids::SHIVAN_DRAGON,  // flying
+            sample::ids::GRIZZLY_BEARS,  // ground
+            sample::ids::GREY_OGRE,      // ground
+            sample::ids::GOBLIN_GUIDE,   // ground
+            sample::ids::SAVANNAH_LIONS, // ground
         ],
         &[],
     );
@@ -879,12 +982,14 @@ fn test_attack_abstraction_no_evasion_dedup() {
         .collect();
 
     // No duplicates
-    let mut sorted: Vec<Vec<mtg_gto::card::ObjectId>> =
-        attacks.iter().map(|a| {
+    let mut sorted: Vec<Vec<mtg_gto::card::ObjectId>> = attacks
+        .iter()
+        .map(|a| {
             let mut v = (*a).clone();
             v.sort();
             v
-        }).collect();
+        })
+        .collect();
     let before_dedup = sorted.len();
     sorted.sort();
     sorted.dedup();
@@ -1303,13 +1408,22 @@ fn test_canonical_hand_duplicate_disambiguation() {
     let c2 = canonicalize(&action2, &state);
 
     // Canonical forms must differ (different hand_index)
-    assert_ne!(c1, c2, "Two duplicate cards in hand should produce different canonical actions");
+    assert_ne!(
+        c1, c2,
+        "Two duplicate cards in hand should produce different canonical actions"
+    );
 
     // Round-trip must recover the exact ObjectId
     let r1 = resolve(&c1, &state, 0).unwrap();
     let r2 = resolve(&c2, &state, 0).unwrap();
-    assert_eq!(r1, action1, "Round-trip must return exact ObjectId for first Mountain");
-    assert_eq!(r2, action2, "Round-trip must return exact ObjectId for second Mountain");
+    assert_eq!(
+        r1, action1,
+        "Round-trip must return exact ObjectId for first Mountain"
+    );
+    assert_eq!(
+        r2, action2,
+        "Round-trip must return exact ObjectId for second Mountain"
+    );
 }
 
 #[test]
@@ -1429,9 +1543,18 @@ fn test_player_view_objects_excludes_libraries() {
 
     let view0 = state.visible_state(0);
 
-    assert!(view0.objects.contains_key(&bf_card), "Battlefield should be visible");
-    assert!(!view0.objects.contains_key(&lib0_card), "Own library contents must be hidden");
-    assert!(!view0.objects.contains_key(&lib1_card), "Opponent library contents must be hidden");
+    assert!(
+        view0.objects.contains_key(&bf_card),
+        "Battlefield should be visible"
+    );
+    assert!(
+        !view0.objects.contains_key(&lib0_card),
+        "Own library contents must be hidden"
+    );
+    assert!(
+        !view0.objects.contains_key(&lib1_card),
+        "Opponent library contents must be hidden"
+    );
 }
 
 // ======================================================================
@@ -1486,11 +1609,7 @@ fn test_sba_recurrence_dies_trigger_deals_damage_to_players() {
     );
 
     // Dies trigger should be on the stack
-    assert_eq!(
-        state.stack.len(),
-        1,
-        "Dies trigger should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 1, "Dies trigger should be on the stack");
 
     // Life shouldn't have changed yet — trigger hasn't resolved
     assert_eq!(state.players[0].life, p0_life_before);
@@ -1527,11 +1646,7 @@ fn test_sba_loop_stable_without_triggers() {
     }
 
     // Put a Grizzly Bears on the battlefield with lethal damage
-    let bear_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        0,
-        ZoneType::Battlefield,
-    );
+    let bear_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&bear_id) {
         inst.summoning_sick = false;
         inst.damage_marked = 2; // 2 damage on 2 toughness = lethal
@@ -1573,7 +1688,10 @@ fn test_sba_player_life_zero_ends_game() {
 
     rules::check_state_based_actions(&mut state);
 
-    assert!(state.game_over, "Game should be over when a player has 0 life");
+    assert!(
+        state.game_over,
+        "Game should be over when a player has 0 life"
+    );
     assert_eq!(state.winner, Some(0), "Player 0 should win");
 }
 
@@ -1622,11 +1740,7 @@ fn test_events_fire_for_spell_cast() {
         .iter()
         .filter(|e| matches!(e, GameEvent::SpellCast { .. }))
         .collect();
-    assert_eq!(
-        spell_cast_events.len(),
-        1,
-        "Should emit 1 SpellCast event"
-    );
+    assert_eq!(spell_cast_events.len(), 1, "Should emit 1 SpellCast event");
 
     let zone_changes: Vec<&GameEvent> = events
         .iter()
@@ -1693,7 +1807,10 @@ fn test_events_fire_for_damage_and_life_change() {
         .collect();
     assert!(
         damage_events.iter().any(|e| {
-            if let GameEvent::DamageDealt { amount, is_combat, .. } = e {
+            if let GameEvent::DamageDealt {
+                amount, is_combat, ..
+            } = e
+            {
                 *amount == 3 && !is_combat
             } else {
                 false
@@ -1747,7 +1864,16 @@ fn test_events_fire_for_card_draw() {
 
     let zone_events: Vec<&GameEvent> = events
         .iter()
-        .filter(|e| matches!(e, GameEvent::ZoneChange { from: Zone::Library, to: Zone::Hand, .. }))
+        .filter(|e| {
+            matches!(
+                e,
+                GameEvent::ZoneChange {
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                    ..
+                }
+            )
+        })
         .collect();
     assert_eq!(zone_events.len(), 1, "Should emit Library→Hand ZoneChange");
 }
@@ -1965,11 +2091,8 @@ fn test_sba_recurrence_in_full_game_context() {
 
     // Player 0 has Fiery Conclusion Elemental and lands.
     // Cost is {2}{W}, so we need 1 Plains (for W) and 2 Mountains (for generic).
-    let elem_hand = state.create_card_in_zone(
-        sample::ids::FIERY_CONCLUSION_ELEMENTAL,
-        0,
-        ZoneType::Hand,
-    );
+    let elem_hand =
+        state.create_card_in_zone(sample::ids::FIERY_CONCLUSION_ELEMENTAL, 0, ZoneType::Hand);
     let m1 = state.create_card_in_zone(sample::ids::PLAINS, 0, ZoneType::Battlefield);
     let m2 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
     let m3 = state.create_card_in_zone(sample::ids::MOUNTAIN, 0, ZoneType::Battlefield);
@@ -2034,11 +2157,7 @@ fn test_sba_recurrence_in_full_game_context() {
         !state.battlefield.contains(&elem_hand),
         "Elemental should be dead after Lightning Bolt"
     );
-    assert_eq!(
-        state.stack.len(),
-        1,
-        "Dies trigger should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 1, "Dies trigger should be on the stack");
 
     // Resolve the dies trigger
     rules::apply_action(&mut state, &Action::PassPriority);
@@ -2120,22 +2239,15 @@ fn test_cascading_sba_dies_trigger_kills_another_creature() {
     }
 
     // Pyroclasm Elemental: 3/1 with "when ~ dies, deal 2 damage to each creature"
-    let pyro_id = state.create_card_in_zone(
-        sample::ids::PYROCLASM_ELEMENTAL,
-        0,
-        ZoneType::Battlefield,
-    );
+    let pyro_id =
+        state.create_card_in_zone(sample::ids::PYROCLASM_ELEMENTAL, 0, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&pyro_id) {
         inst.summoning_sick = false;
         inst.damage_marked = 1; // 1 damage on 1 toughness = lethal
     }
 
     // Grizzly Bears: 2/2, healthy, controlled by player 1
-    let bear_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        1,
-        ZoneType::Battlefield,
-    );
+    let bear_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&bear_id) {
         inst.summoning_sick = false;
         inst.damage_marked = 0; // healthy
@@ -2157,11 +2269,7 @@ fn test_cascading_sba_dies_trigger_kills_another_creature() {
         state.battlefield.contains(&bear_id),
         "Grizzly Bears should still be alive (trigger hasn't resolved yet)"
     );
-    assert_eq!(
-        state.stack.len(),
-        1,
-        "Dies trigger should be on the stack"
-    );
+    assert_eq!(state.stack.len(), 1, "Dies trigger should be on the stack");
 
     // Step 2: Resolve the dies trigger — both players pass priority
     rules::apply_action(&mut state, &Action::PassPriority);
@@ -2198,33 +2306,23 @@ fn test_cascading_sba_chain_of_three() {
     }
 
     // Pyroclasm Elemental A: 3/1, lethal damage
-    let pyro_a = state.create_card_in_zone(
-        sample::ids::PYROCLASM_ELEMENTAL,
-        0,
-        ZoneType::Battlefield,
-    );
+    let pyro_a =
+        state.create_card_in_zone(sample::ids::PYROCLASM_ELEMENTAL, 0, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&pyro_a) {
         inst.summoning_sick = false;
         inst.damage_marked = 1; // lethal
     }
 
     // Pyroclasm Elemental B: 3/1, healthy
-    let pyro_b = state.create_card_in_zone(
-        sample::ids::PYROCLASM_ELEMENTAL,
-        1,
-        ZoneType::Battlefield,
-    );
+    let pyro_b =
+        state.create_card_in_zone(sample::ids::PYROCLASM_ELEMENTAL, 1, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&pyro_b) {
         inst.summoning_sick = false;
         inst.damage_marked = 0; // healthy
     }
 
     // Grizzly Bears: 2/2, healthy
-    let bear_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        1,
-        ZoneType::Battlefield,
-    );
+    let bear_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&bear_id) {
         inst.summoning_sick = false;
         inst.damage_marked = 0;
@@ -2427,23 +2525,37 @@ fn test_glorious_anthem_buffs_creatures_on_battlefield() {
     // Player 0 has Glorious Anthem + Savannah Lions on the battlefield
     let _anthem_id =
         state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
-    let lions_id =
-        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+    let lions_id = state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
 
     // Player 1 has Grizzly Bears (opponent — should NOT be buffed by Glorious Anthem)
-    let bears_id =
-        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+    let bears_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
 
     // Refresh continuous effects to generate anthem effects
     state.refresh_continuous_effects();
 
     // Savannah Lions base 2/1, anthem +1/+1 = 3/2
-    assert_eq!(state.effective_power(lions_id), 3, "Lions should be 3 power with anthem");
-    assert_eq!(state.effective_toughness(lions_id), 2, "Lions should be 2 toughness with anthem");
+    assert_eq!(
+        state.effective_power(lions_id),
+        3,
+        "Lions should be 3 power with anthem"
+    );
+    assert_eq!(
+        state.effective_toughness(lions_id),
+        2,
+        "Lions should be 2 toughness with anthem"
+    );
 
     // Opponent's Grizzly Bears should be unaffected (2/2)
-    assert_eq!(state.effective_power(bears_id), 2, "Opponent bears should be unaffected");
-    assert_eq!(state.effective_toughness(bears_id), 2, "Opponent bears should be unaffected");
+    assert_eq!(
+        state.effective_power(bears_id),
+        2,
+        "Opponent bears should be unaffected"
+    );
+    assert_eq!(
+        state.effective_toughness(bears_id),
+        2,
+        "Opponent bears should be unaffected"
+    );
 }
 
 #[test]
@@ -2458,12 +2570,9 @@ fn test_crusade_buffs_all_creatures() {
         state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
     }
 
-    let _crusade_id =
-        state.create_card_in_zone(sample::ids::CRUSADE, 0, ZoneType::Battlefield);
-    let lions_id =
-        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
-    let bears_id =
-        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+    let _crusade_id = state.create_card_in_zone(sample::ids::CRUSADE, 0, ZoneType::Battlefield);
+    let lions_id = state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+    let bears_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
 
     state.refresh_continuous_effects();
 
@@ -2489,13 +2598,16 @@ fn test_humility_makes_all_creatures_1_1_and_removes_abilities() {
     // Baneslayer Angel: 5/5 Flying, First strike, Lifelink
     let angel_id =
         state.create_card_in_zone(sample::ids::BANESLAYER_ANGEL, 0, ZoneType::Battlefield);
-    let _humility_id =
-        state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
+    let _humility_id = state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
 
     state.refresh_continuous_effects();
 
     // Baneslayer should be 1/1 under Humility
-    assert_eq!(state.effective_power(angel_id), 1, "Angel should be 1/1 under Humility");
+    assert_eq!(
+        state.effective_power(angel_id),
+        1,
+        "Angel should be 1/1 under Humility"
+    );
     assert_eq!(state.effective_toughness(angel_id), 1);
 
     // Angel should lose flying
@@ -2523,8 +2635,7 @@ fn test_multiple_anthems_stack() {
         state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
     let _anthem2 =
         state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
-    let lions_id =
-        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+    let lions_id = state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
 
     state.refresh_continuous_effects();
 
@@ -2549,18 +2660,19 @@ fn test_anthem_plus_humility_timestamp_ordering() {
         state.create_card_in_zone(sample::ids::PLAINS, 1, ZoneType::Library);
     }
 
-    let _anthem =
-        state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
-    let _humility =
-        state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
-    let lions_id =
-        state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
+    let _anthem = state.create_card_in_zone(sample::ids::GLORIOUS_ANTHEM, 0, ZoneType::Battlefield);
+    let _humility = state.create_card_in_zone(sample::ids::HUMILITY, 0, ZoneType::Battlefield);
+    let lions_id = state.create_card_in_zone(sample::ids::SAVANNAH_LIONS, 0, ZoneType::Battlefield);
 
     state.refresh_continuous_effects();
 
     // Layer 7b (SetPT 1/1) applies before Layer 7c (ModifyPT +1/+1)
     // So: base -> set to 1/1 -> +1/+1 = 2/2
-    assert_eq!(state.effective_power(lions_id), 2, "Anthem + Humility = 2/2");
+    assert_eq!(
+        state.effective_power(lions_id),
+        2,
+        "Anthem + Humility = 2/2"
+    );
     assert_eq!(state.effective_toughness(lions_id), 2);
 
     // Abilities should still be removed by Layer 6
@@ -2573,18 +2685,12 @@ fn test_wrath_of_god_card_in_db() {
     let db = sample::build_sample_db();
     let wrath = db.get(sample::ids::WRATH_OF_GOD).unwrap();
     assert!(wrath.is_sorcery());
-    assert_eq!(
-        wrath.spell_effect,
-        Some(mtg_gto::card::Effect::DestroyAll)
-    );
+    assert_eq!(wrath.spell_effect, Some(mtg_gto::card::Effect::DestroyAll));
 
     // Day of Judgment is also DestroyAll
     let doj = db.get(sample::ids::DAY_OF_JUDGMENT).unwrap();
     assert!(doj.is_sorcery());
-    assert_eq!(
-        doj.spell_effect,
-        Some(mtg_gto::card::Effect::DestroyAll)
-    );
+    assert_eq!(doj.spell_effect, Some(mtg_gto::card::Effect::DestroyAll));
 }
 
 #[test]
@@ -2736,13 +2842,7 @@ fn test_game_with_anthem_completes() {
     assert_eq!(deck_a.len(), 30);
     assert_eq!(deck_b.len(), 30);
 
-    let result = simulation::run_game(
-        &db,
-        &deck_a,
-        &deck_b,
-        &RandomStrategy,
-        &RandomStrategy,
-    );
+    let result = simulation::run_game(&db, &deck_a, &deck_b, &RandomStrategy, &RandomStrategy);
     // Just verify it completes without panicking
     assert!(
         result.winner.is_some() || result.turns >= 100,
@@ -2786,13 +2886,7 @@ fn test_game_with_wrath_completes() {
     assert_eq!(deck_a.len(), 30);
     assert_eq!(deck_b.len(), 30);
 
-    let result = simulation::run_game(
-        &db,
-        &deck_a,
-        &deck_b,
-        &GreedyStrategy,
-        &GreedyStrategy,
-    );
+    let result = simulation::run_game(&db, &deck_a, &deck_b, &GreedyStrategy, &GreedyStrategy);
     assert!(
         result.winner.is_some() || result.turns >= 100,
         "Game should complete"
@@ -2832,8 +2926,7 @@ fn test_artifact_creatures_in_db() {
     let pest = db.get(sample::ids::SIGNAL_PEST).unwrap();
     assert!(pest.is_creature());
     assert!(
-        pest.card_types
-            .contains(&mtg_gto::card::CardType::Artifact),
+        pest.card_types.contains(&mtg_gto::card::CardType::Artifact),
         "Signal Pest should be an artifact"
     );
 
@@ -2863,11 +2956,7 @@ fn test_token_creation() {
     state.card_db = Some(Arc::new(db));
 
     // Set up Blade Splicer (creates a 3/3 Golem token on ETB)
-    let blade_splicer_id = state.create_card_in_zone(
-        sample::ids::BLADE_SPLICER,
-        0,
-        ZoneType::Hand,
-    );
+    let blade_splicer_id = state.create_card_in_zone(sample::ids::BLADE_SPLICER, 0, ZoneType::Hand);
 
     // Give player 0 lands to cast it (costs 2W)
     for _ in 0..3 {
@@ -2909,7 +2998,8 @@ fn test_token_creation() {
         assert!(
             creatures_after > creatures_before,
             "Token should have been created. Before: {}, After: {}",
-            creatures_before, creatures_after
+            creatures_before,
+            creatures_after
         );
     }
 }
@@ -2982,7 +3072,8 @@ fn test_dark_ritual_adds_mana() {
         assert!(
             black_after >= black_before + 3,
             "Dark Ritual should add 3 black mana. Before: {}, After: {}",
-            black_before, black_after
+            black_before,
+            black_after
         );
     }
 }
@@ -2994,11 +3085,7 @@ fn test_counter_cancellation_sba() {
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
 
-    let bear_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        0,
-        ZoneType::Battlefield,
-    );
+    let bear_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
 
     // Add counters
     if let Some(inst) = state.objects.get_mut(&bear_id) {
@@ -3015,8 +3102,14 @@ fn test_counter_cancellation_sba() {
 
     // After cancellation, should have 1 +1/+1 counter and 0 -1/-1 counters
     let inst = &state.objects[&bear_id];
-    assert_eq!(inst.plus_counters, 1, "Should have 1 +1/+1 counter remaining");
-    assert_eq!(inst.minus_counters, 0, "All -1/-1 counters should be cancelled");
+    assert_eq!(
+        inst.plus_counters, 1,
+        "Should have 1 +1/+1 counter remaining"
+    );
+    assert_eq!(
+        inst.minus_counters, 0,
+        "All -1/-1 counters should be cancelled"
+    );
 }
 
 #[test]
@@ -3026,11 +3119,7 @@ fn test_zone_change_counter_increments() {
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
 
-    let bear_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        0,
-        ZoneType::Battlefield,
-    );
+    let bear_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
 
     let initial_count = state.objects[&bear_id].zone_change_count;
 
@@ -3057,7 +3146,11 @@ fn test_extra_turn() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
-    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+    rules::setup_game(
+        &mut state,
+        &sample::mini_red_burn(),
+        &sample::mini_red_creatures(),
+    );
 
     // Remember who the active player is
     // Grant player 0 an extra turn
@@ -3077,7 +3170,10 @@ fn test_extra_turn() {
         // After the turn ends, the extra turn should have been consumed
         // and player 0 should be the active player
         assert_eq!(state.active_player, 0, "Player 0 should get the extra turn");
-        assert!(state.extra_turns.is_empty(), "Extra turn queue should be empty");
+        assert!(
+            state.extra_turns.is_empty(),
+            "Extra turn queue should be empty"
+        );
     }
 }
 
@@ -3087,7 +3183,11 @@ fn test_game_state_snapshot_restore() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
-    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+    rules::setup_game(
+        &mut state,
+        &sample::mini_red_burn(),
+        &sample::mini_red_creatures(),
+    );
 
     // Take a snapshot
     let snap = state.snapshot();
@@ -3105,7 +3205,10 @@ fn test_game_state_snapshot_restore() {
     state.restore(snap);
 
     // Verify restoration
-    assert_eq!(state.players[0].life, original_life, "Life should be restored");
+    assert_eq!(
+        state.players[0].life, original_life,
+        "Life should be restored"
+    );
     assert_eq!(state.turn_number, 1, "Turn number should be restored");
 }
 
@@ -3117,21 +3220,15 @@ fn test_cant_block_keyword() {
     state.card_db = Some(Arc::new(db));
 
     // Create an attacker for player 0
-    let attacker_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        0,
-        ZoneType::Battlefield,
-    );
+    let attacker_id =
+        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&attacker_id) {
         inst.summoning_sick = false;
     }
 
     // Create a blocker for player 1 — give it CantBlock
-    let blocker_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        1,
-        ZoneType::Battlefield,
-    );
+    let blocker_id =
+        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&blocker_id) {
         inst.summoning_sick = false;
         inst.temp_keywords.push(KeywordAbility::CantBlock);
@@ -3164,11 +3261,7 @@ fn test_a_creature_dies_watcher_trigger() {
     state.card_db = Some(Arc::new(db));
 
     // Create a creature that will die
-    let victim_id = state.create_card_in_zone(
-        sample::ids::GRIZZLY_BEARS,
-        0,
-        ZoneType::Battlefield,
-    );
+    let victim_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 0, ZoneType::Battlefield);
 
     // Deal lethal damage to the creature
     if let Some(inst) = state.objects.get_mut(&victim_id) {
@@ -3195,8 +3288,10 @@ fn test_a_creature_dies_watcher_trigger() {
 
 #[test]
 fn test_replacement_effect_ordering_api() {
-    use mtg_gto::replacement::{apply_replacement_effects, ReplacementEffect, ReplacementEventKind, ReplacementAction};
     use mtg_gto::card::ZoneType;
+    use mtg_gto::replacement::{
+        apply_replacement_effects, ReplacementAction, ReplacementEffect, ReplacementEventKind,
+    };
 
     let effects = vec![
         ReplacementEffect {
@@ -3225,18 +3320,22 @@ fn test_replacement_effect_ordering_api() {
         },
     ];
 
-    let (auto_applied, choice) = apply_replacement_effects(
-        &effects,
-        &ReplacementEventKind::WouldDie,
-        0,
-    );
+    let (auto_applied, choice) =
+        apply_replacement_effects(&effects, &ReplacementEventKind::WouldDie, 0);
 
     // Self-replacement should be auto-applied
-    assert_eq!(auto_applied.len(), 1, "One self-replacement should be auto-applied");
+    assert_eq!(
+        auto_applied.len(),
+        1,
+        "One self-replacement should be auto-applied"
+    );
     assert_eq!(auto_applied[0].description, "Self-exile");
 
     // Two player-choice effects should require ordering
-    assert!(choice.is_some(), "Multiple non-self replacements should require player choice");
+    assert!(
+        choice.is_some(),
+        "Multiple non-self replacements should require player choice"
+    );
     let choice = choice.unwrap();
     assert_eq!(choice.applicable_effects.len(), 2);
 }
@@ -3262,7 +3361,7 @@ fn test_dynamic_value_trait_exists() {
 
 #[test]
 fn test_opponent_model_bayesian_update() {
-    use mtg_gto::solver::mccfr::{OpponentModel, DeckArchetype};
+    use mtg_gto::solver::mccfr::{DeckArchetype, OpponentModel};
 
     let archetypes = vec![
         DeckArchetype {
@@ -3306,11 +3405,10 @@ fn test_opponent_model_bayesian_update() {
 
 #[test]
 fn test_policy_snapshot_collection() {
-    use mtg_gto::solver::mccfr::{
-        collect_policy_snapshots, McfrConfig, TrainConfig, RolloutMode,
-        train_extended,
-    };
     use mtg_gto::info_set::BucketedAbstraction;
+    use mtg_gto::solver::mccfr::{
+        collect_policy_snapshots, train_extended, McfrConfig, RolloutMode, TrainConfig,
+    };
 
     let db = sample::build_sample_db();
     let deck0 = sample::mini_red_burn();
@@ -3322,7 +3420,11 @@ fn test_policy_snapshot_collection() {
 
     let abstraction = BucketedAbstraction;
     let train_cfg = TrainConfig {
-        mccfr: McfrConfig { max_depth: 6, max_actions: 100, max_nodes_per_iteration: 0 },
+        mccfr: McfrConfig {
+            max_depth: 6,
+            max_actions: 100,
+            max_nodes_per_iteration: 0,
+        },
         abstraction: &abstraction,
         rollout_mode: RolloutMode::Heuristic,
         rollout_strategies: None,
@@ -3337,7 +3439,10 @@ fn test_policy_snapshot_collection() {
     let snapshots = collect_policy_snapshots(&state, &tables, &abstraction, 10);
 
     // Should have at least some snapshots from the game
-    assert!(!snapshots.is_empty(), "Should collect some policy snapshots");
+    assert!(
+        !snapshots.is_empty(),
+        "Should collect some policy snapshots"
+    );
 
     // Each snapshot should have non-empty action distributions
     for snap in &snapshots {
@@ -3354,8 +3459,10 @@ fn test_policy_snapshot_collection() {
 
 #[test]
 fn test_multi_phase_abstraction() {
+    use mtg_gto::info_set::{
+        BucketedAbstraction, IdentityAbstraction, InfoSetAbstraction, InformationSet,
+    };
     use mtg_gto::solver::mccfr::MultiPhaseAbstraction;
-    use mtg_gto::info_set::{BucketedAbstraction, IdentityAbstraction, InfoSetAbstraction, InformationSet};
 
     let fine = IdentityAbstraction;
     let coarse = BucketedAbstraction;
@@ -3399,18 +3506,24 @@ fn test_multi_phase_abstraction() {
     // Main phase should use fine abstraction (same hash as IdentityAbstraction)
     let main_hash = multi.abstract_info_set(&info_set_main);
     let fine_hash = fine.abstract_info_set(&info_set_main);
-    assert_eq!(main_hash, fine_hash, "Main phase should use fine abstraction");
+    assert_eq!(
+        main_hash, fine_hash,
+        "Main phase should use fine abstraction"
+    );
 
     // Upkeep should use coarse abstraction
     let upkeep_hash = multi.abstract_info_set(&info_set_upkeep);
     let coarse_hash = coarse.abstract_info_set(&info_set_upkeep);
-    assert_eq!(upkeep_hash, coarse_hash, "Upkeep should use coarse abstraction");
+    assert_eq!(
+        upkeep_hash, coarse_hash,
+        "Upkeep should use coarse abstraction"
+    );
 }
 
 #[test]
 fn test_warm_start_produces_nonempty_tables() {
-    use mtg_gto::solver::mccfr::warm_start_from_greedy;
     use mtg_gto::info_set::BucketedAbstraction;
+    use mtg_gto::solver::mccfr::warm_start_from_greedy;
 
     let db = sample::build_sample_db();
     let deck0 = sample::mini_red_burn();
@@ -3437,7 +3550,11 @@ fn test_skip_phases() {
     let db = sample::build_sample_db();
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
-    rules::setup_game(&mut state, &sample::mini_red_burn(), &sample::mini_red_creatures());
+    rules::setup_game(
+        &mut state,
+        &sample::mini_red_burn(),
+        &sample::mini_red_creatures(),
+    );
 
     // Skip the draw phase
     state.skip_phases.insert(Phase::Draw);
@@ -3490,7 +3607,7 @@ fn test_games_complete_with_all_phase3_features() {
 /// same name under the same controller should be reduced to one (newest kept).
 #[test]
 fn test_legendary_rule_sba() {
-    use mtg_gto::card::{CardDef, CardInstance, CardType, Supertype, Subtype};
+    use mtg_gto::card::{CardDef, CardInstance, CardType, Subtype, Supertype};
     use mtg_gto::game::CardDatabase;
     use mtg_gto::mana::ManaCost;
 
@@ -3530,9 +3647,19 @@ fn test_legendary_rule_sba() {
     // Run SBAs — should remove the older one (id1) and keep the newer one (id2)
     rules::check_state_based_actions(&mut state);
 
-    assert_eq!(state.battlefield.len(), 1, "Legendary rule should remove duplicate");
-    assert!(state.battlefield.contains(&id2), "Newest legendary should survive");
-    assert!(!state.battlefield.contains(&id1), "Oldest legendary should be removed");
+    assert_eq!(
+        state.battlefield.len(),
+        1,
+        "Legendary rule should remove duplicate"
+    );
+    assert!(
+        state.battlefield.contains(&id2),
+        "Newest legendary should survive"
+    );
+    assert!(
+        !state.battlefield.contains(&id1),
+        "Oldest legendary should be removed"
+    );
 }
 
 /// Test CR 704.5i: Planeswalker uniqueness rule — duplicate planeswalkers with
@@ -3570,7 +3697,11 @@ fn test_planeswalker_uniqueness_sba() {
 
     rules::check_state_based_actions(&mut state);
 
-    assert_eq!(state.battlefield.len(), 1, "PW uniqueness should remove duplicate");
+    assert_eq!(
+        state.battlefield.len(),
+        1,
+        "PW uniqueness should remove duplicate"
+    );
     assert!(state.battlefield.contains(&id2), "Newest PW should survive");
 }
 
@@ -3628,16 +3759,22 @@ fn test_must_attack_enforcement() {
         .collect();
 
     // There should be no empty attacker action
-    let has_empty = attacker_actions.iter().any(|a| {
-        matches!(a, Action::DeclareAttackers { attackers } if attackers.is_empty())
-    });
-    assert!(!has_empty, "Empty attacker set should not be legal with MustAttack creature");
+    let has_empty = attacker_actions
+        .iter()
+        .any(|a| matches!(a, Action::DeclareAttackers { attackers } if attackers.is_empty()));
+    assert!(
+        !has_empty,
+        "Empty attacker set should not be legal with MustAttack creature"
+    );
 
     // There should be an attack action that includes the must-attack creature
-    let has_must_attack = attacker_actions.iter().any(|a| {
-        matches!(a, Action::DeclareAttackers { attackers } if attackers.contains(&id1))
-    });
-    assert!(has_must_attack, "Must-attack creature should appear in legal attacker sets");
+    let has_must_attack = attacker_actions
+        .iter()
+        .any(|a| matches!(a, Action::DeclareAttackers { attackers } if attackers.contains(&id1)));
+    assert!(
+        has_must_attack,
+        "Must-attack creature should appear in legal attacker sets"
+    );
 }
 
 /// Test DynamicValue evaluation in the layer engine — a creature with
@@ -3679,7 +3816,9 @@ fn test_dynamic_value_in_layer_engine() {
     // Place the dynamic creature on the battlefield
     let dyn_id = state.next_object_id;
     state.next_object_id += 1;
-    state.objects.insert(dyn_id, CardInstance::new(dyn_id, 9300, 0));
+    state
+        .objects
+        .insert(dyn_id, CardInstance::new(dyn_id, 9300, 0));
     state.battlefield.push(dyn_id);
 
     // With just itself, power should be 1 (one creature controlled)
@@ -3689,12 +3828,17 @@ fn test_dynamic_value_in_layer_engine() {
     // Add a second creature
     let bear_id = state.next_object_id;
     state.next_object_id += 1;
-    state.objects.insert(bear_id, CardInstance::new(bear_id, 9301, 0));
+    state
+        .objects
+        .insert(bear_id, CardInstance::new(bear_id, 9301, 0));
     state.battlefield.push(bear_id);
     state.invalidate_characteristics_cache();
 
     let power_with_bear = state.effective_power(dyn_id);
-    assert_eq!(power_with_bear, 2, "Dynamic power with 2 creatures should be 2");
+    assert_eq!(
+        power_with_bear, 2,
+        "Dynamic power with 2 creatures should be 2"
+    );
 
     // Toughness should remain static
     let toughness = state.effective_toughness(dyn_id);
@@ -3737,14 +3881,20 @@ fn test_extra_turn_through_spell_resolution() {
     state.turn_number = 2;
     state.players[0].land_plays_remaining = 0;
 
-    assert!(state.extra_turns.is_empty(), "No extra turns queued initially");
+    assert!(
+        state.extra_turns.is_empty(),
+        "No extra turns queued initially"
+    );
 
     // Cast Time Walk
     let actions = legal_actions(&state);
-    let cast_action = actions.iter().find(|a| {
-        matches!(a, Action::CastSpell { object_id, .. } if *object_id == tw_id)
-    });
-    assert!(cast_action.is_some(), "Time Walk should be castable with 1U mana available");
+    let cast_action = actions
+        .iter()
+        .find(|a| matches!(a, Action::CastSpell { object_id, .. } if *object_id == tw_id));
+    assert!(
+        cast_action.is_some(),
+        "Time Walk should be castable with 1U mana available"
+    );
 
     rules::apply_action(&mut state, cast_action.unwrap());
     assert_eq!(state.stack.len(), 1, "Time Walk should be on the stack");
@@ -3754,8 +3904,14 @@ fn test_extra_turn_through_spell_resolution() {
     rules::apply_action(&mut state, &Action::PassPriority);
 
     // After resolution, extra_turns should have player 0 queued
-    assert!(!state.extra_turns.is_empty(), "Extra turn should be queued after resolution");
-    assert_eq!(state.extra_turns[0], 0, "Player 0 should get the extra turn");
+    assert!(
+        !state.extra_turns.is_empty(),
+        "Extra turn should be queued after resolution"
+    );
+    assert_eq!(
+        state.extra_turns[0], 0,
+        "Player 0 should get the extra turn"
+    );
 
     // Now play through the rest of the turn to verify the extra turn fires
     let greedy = GreedyStrategy;
@@ -3768,8 +3924,14 @@ fn test_extra_turn_through_spell_resolution() {
     }
 
     if !state.game_over {
-        assert_eq!(state.active_player, 0, "Player 0 should be active during their extra turn");
-        assert!(state.extra_turns.is_empty(), "Extra turn queue should be drained");
+        assert_eq!(
+            state.active_player, 0,
+            "Player 0 should be active during their extra turn"
+        );
+        assert!(
+            state.extra_turns.is_empty(),
+            "Extra turn queue should be drained"
+        );
     }
 }
 
@@ -3809,7 +3971,9 @@ fn test_dynamic_value_cards_in_hand() {
     // Place Maro on the battlefield under player 0
     let maro_id = state.next_object_id;
     state.next_object_id += 1;
-    state.objects.insert(maro_id, CardInstance::new(maro_id, 9500, 0));
+    state
+        .objects
+        .insert(maro_id, CardInstance::new(maro_id, 9500, 0));
     state.battlefield.push(maro_id);
 
     // Player 0 has 0 cards in hand → P/T = 0/0
@@ -3826,8 +3990,16 @@ fn test_dynamic_value_cards_in_hand() {
     state.invalidate_characteristics_cache();
 
     // Now Maro should be 3/3
-    assert_eq!(state.effective_power(maro_id), 3, "Maro power should equal hand size (3)");
-    assert_eq!(state.effective_toughness(maro_id), 3, "Maro toughness should equal hand size (3)");
+    assert_eq!(
+        state.effective_power(maro_id),
+        3,
+        "Maro power should equal hand size (3)"
+    );
+    assert_eq!(
+        state.effective_toughness(maro_id),
+        3,
+        "Maro toughness should equal hand size (3)"
+    );
 
     // Add 2 more cards
     for _ in 0..2 {
@@ -3838,7 +4010,11 @@ fn test_dynamic_value_cards_in_hand() {
     }
     state.invalidate_characteristics_cache();
 
-    assert_eq!(state.effective_power(maro_id), 5, "Maro power should equal hand size (5)");
+    assert_eq!(
+        state.effective_power(maro_id),
+        5,
+        "Maro power should equal hand size (5)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3859,7 +4035,11 @@ fn test_goldfish_strategy_passes_priority() {
     state.phase = Phase::PreCombatMain;
     let goldfish = GoldfishStrategy;
     let action = goldfish.choose_action(&state, 1);
-    assert_eq!(action, Action::PassPriority, "Goldfish should pass priority");
+    assert_eq!(
+        action,
+        Action::PassPriority,
+        "Goldfish should pass priority"
+    );
 }
 
 #[test]
@@ -3917,7 +4097,8 @@ fn test_goldfish_strategy_never_blocks() {
     state.combat.attackers.push(attacker_id);
 
     // Give player 1 a potential blocker
-    let blocker_id = state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
+    let blocker_id =
+        state.create_card_in_zone(sample::ids::GRIZZLY_BEARS, 1, ZoneType::Battlefield);
     if let Some(inst) = state.objects.get_mut(&blocker_id) {
         inst.summoning_sick = false;
         inst.controller = 1;
@@ -3975,7 +4156,10 @@ fn test_goldfish_single_game_completes() {
     let result = simulation::run_goldfish_game(&db, &red, &greedy);
 
     // Game should complete with a winner (pilot should kill the goldfish)
-    assert!(result.winner.is_some(), "Goldfish game should have a winner");
+    assert!(
+        result.winner.is_some(),
+        "Goldfish game should have a winner"
+    );
     assert!(result.turns > 0, "Game should last at least 1 turn");
     assert!(result.actions_taken > 0, "Game should have actions");
 }
@@ -4087,7 +4271,10 @@ fn test_kinnan_commander_deck_builder() {
     assert_eq!(commander, sample::ids::KINNAN_BONDER_PRODIGY);
 
     // Tutor targets should be non-empty and all present in the deck
-    assert!(!tutor_targets.is_empty(), "Kinnan deck should have tutor targets");
+    assert!(
+        !tutor_targets.is_empty(),
+        "Kinnan deck should have tutor targets"
+    );
     assert!(
         tutor_targets.contains(&sample::ids::BASALT_MONOLITH),
         "Basalt Monolith should be a tutor target"
@@ -4253,18 +4440,22 @@ fn test_kinnan_card_definition() {
     let db = sample::build_sample_db();
     let kinnan = db.get(sample::ids::KINNAN_BONDER_PRODIGY).unwrap();
 
-    assert!(kinnan.supertypes.contains(&mtg_gto::card::Supertype::Legendary));
-    assert!(kinnan.card_types.contains(&mtg_gto::card::CardType::Creature));
+    assert!(kinnan
+        .supertypes
+        .contains(&mtg_gto::card::Supertype::Legendary));
+    assert!(kinnan
+        .card_types
+        .contains(&mtg_gto::card::CardType::Creature));
     assert_eq!(kinnan.power, Some(2));
     assert_eq!(kinnan.toughness, Some(2));
     // Should have an activated ability (5GU: look at top 5)
     assert!(!kinnan.activated_abilities.is_empty());
     // Should have the mana bonus static ability
     assert!(
-        kinnan.static_abilities.iter().any(|sa| matches!(
-            sa,
-            mtg_gto::layers::StaticAbility::ManaFromNonlandBonus
-        )),
+        kinnan
+            .static_abilities
+            .iter()
+            .any(|sa| matches!(sa, mtg_gto::layers::StaticAbility::ManaFromNonlandBonus)),
         "Kinnan should have ManaFromNonlandBonus static ability"
     );
 }
@@ -4294,10 +4485,13 @@ fn test_kinnan_mana_bonus_with_basalt_monolith() {
     state.turn_number = 2;
 
     // Tap Basalt Monolith for mana
-    rules::apply_action(&mut state, &Action::ActivateManaAbility {
-        object_id: basalt,
-        ability_index: 0,
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateManaAbility {
+            object_id: basalt,
+            ability_index: 0,
+        },
+    );
 
     // Should produce 3 (base) + 1 (Kinnan bonus) = 4 colorless mana
     assert_eq!(
@@ -4310,11 +4504,14 @@ fn test_kinnan_mana_bonus_with_basalt_monolith() {
 
     // Pay 3 to untap Basalt Monolith
     state.players[0].mana_pool.colorless = 3; // simulate having exactly 3
-    rules::apply_action(&mut state, &Action::ActivateAbility {
-        object_id: basalt,
-        ability_index: 0,
-        targets: vec![Target::Object(basalt)],
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateAbility {
+            object_id: basalt,
+            ability_index: 0,
+            targets: vec![Target::Object(basalt)],
+        },
+    );
 
     // Basalt should be untapped now (activation resolves immediately since
     // activated abilities go on the stack, but UntapTarget is resolved as effect)
@@ -4329,10 +4526,13 @@ fn test_kinnan_mana_bonus_with_basalt_monolith() {
     }
     state.players[0].mana_pool.colorless = 0;
 
-    rules::apply_action(&mut state, &Action::ActivateManaAbility {
-        object_id: basalt,
-        ability_index: 0,
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateManaAbility {
+            object_id: basalt,
+            ability_index: 0,
+        },
+    );
 
     assert_eq!(
         state.players[0].mana_pool.colorless, 4,
@@ -4362,10 +4562,13 @@ fn test_kinnan_mana_bonus_not_on_lands() {
     state.turn_number = 2;
 
     // Tap Island for mana
-    rules::apply_action(&mut state, &Action::ActivateManaAbility {
-        object_id: island,
-        ability_index: 0,
-    });
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateManaAbility {
+            object_id: island,
+            ability_index: 0,
+        },
+    );
 
     // Island is a land — Kinnan bonus should NOT apply.
     // Island produces 1 blue mana, no bonus.
@@ -4385,24 +4588,34 @@ fn test_new_kinnan_deck_cards_in_db() {
 
     // Spot-check key cards from the Kinnan deck exist and have correct types
     let consecrated = db.get(sample::ids::CONSECRATED_SPHINX).unwrap();
-    assert!(consecrated.card_types.contains(&mtg_gto::card::CardType::Creature));
+    assert!(consecrated
+        .card_types
+        .contains(&mtg_gto::card::CardType::Creature));
 
     let cyclonic = db.get(sample::ids::CYCLONIC_RIFT).unwrap();
-    assert!(cyclonic.card_types.contains(&mtg_gto::card::CardType::Instant));
+    assert!(cyclonic
+        .card_types
+        .contains(&mtg_gto::card::CardType::Instant));
 
     let force = db.get(sample::ids::FORCE_OF_WILL).unwrap();
     assert!(force.card_types.contains(&mtg_gto::card::CardType::Instant));
 
     let hullbreaker = db.get(sample::ids::HULLBREAKER_HORROR).unwrap();
-    assert!(hullbreaker.card_types.contains(&mtg_gto::card::CardType::Creature));
+    assert!(hullbreaker
+        .card_types
+        .contains(&mtg_gto::card::CardType::Creature));
     assert!(hullbreaker.keywords.contains(&KeywordAbility::Flash));
 
     let mystic_remora = db.get(sample::ids::MYSTIC_REMORA).unwrap();
-    assert!(mystic_remora.card_types.contains(&mtg_gto::card::CardType::Enchantment));
+    assert!(mystic_remora
+        .card_types
+        .contains(&mtg_gto::card::CardType::Enchantment));
     assert!(!mystic_remora.triggered_abilities.is_empty());
 
     let tezzeret = db.get(sample::ids::TEZZERET_THE_SEEKER).unwrap();
-    assert!(tezzeret.card_types.contains(&mtg_gto::card::CardType::Planeswalker));
+    assert!(tezzeret
+        .card_types
+        .contains(&mtg_gto::card::CardType::Planeswalker));
     assert_eq!(tezzeret.starting_loyalty, Some(4));
 }
 
@@ -4420,10 +4633,24 @@ fn test_commander_snapshot_restore() {
     rules::setup_commander_game(&mut state, &deck0, &deck1, cmd0_card, cmd1_card);
 
     // Verify commander setup: 40 life, command zones populated
-    assert_eq!(state.players[0].life, 40, "Commander starting life should be 40");
-    assert_eq!(state.players[1].life, 40, "Commander starting life should be 40");
-    assert_eq!(state.players[0].command_zone.len(), 1, "Player 0 should have a commander");
-    assert_eq!(state.players[1].command_zone.len(), 1, "Player 1 should have a commander");
+    assert_eq!(
+        state.players[0].life, 40,
+        "Commander starting life should be 40"
+    );
+    assert_eq!(
+        state.players[1].life, 40,
+        "Commander starting life should be 40"
+    );
+    assert_eq!(
+        state.players[0].command_zone.len(),
+        1,
+        "Player 0 should have a commander"
+    );
+    assert_eq!(
+        state.players[1].command_zone.len(),
+        1,
+        "Player 1 should have a commander"
+    );
     assert!(state.players[0].commander_object_id.is_some());
     assert!(state.players[1].commander_object_id.is_some());
 
@@ -4456,21 +4683,40 @@ fn test_commander_snapshot_restore() {
     // Verify all commander state was restored
     assert_eq!(state.players[0].life, 40, "Life should be restored to 40");
     assert_eq!(state.players[1].life, 40, "Life should be restored to 40");
-    assert_eq!(state.players[0].command_zone.len(), 1, "Command zone should be restored");
-    assert_eq!(state.players[0].command_zone[0], cmd0_obj, "Commander ID should match");
-    assert_eq!(state.players[1].command_zone.len(), 1, "Command zone should be restored");
-    assert_eq!(state.players[1].command_zone[0], cmd1_obj, "Commander ID should match");
-    assert_eq!(state.players[0].commander_tax, 2, "Commander tax should be restored");
+    assert_eq!(
+        state.players[0].command_zone.len(),
+        1,
+        "Command zone should be restored"
+    );
+    assert_eq!(
+        state.players[0].command_zone[0], cmd0_obj,
+        "Commander ID should match"
+    );
+    assert_eq!(
+        state.players[1].command_zone.len(),
+        1,
+        "Command zone should be restored"
+    );
+    assert_eq!(
+        state.players[1].command_zone[0], cmd1_obj,
+        "Commander ID should match"
+    );
+    assert_eq!(
+        state.players[0].commander_tax, 2,
+        "Commander tax should be restored"
+    );
     assert_eq!(
         state.players[1].commander_damage_received[0], 7,
         "Commander damage should be restored to pre-snapshot value"
     );
     assert_eq!(
-        state.players[0].commander_card_id, Some(cmd0_card),
+        state.players[0].commander_card_id,
+        Some(cmd0_card),
         "Commander card ID should be restored"
     );
     assert_eq!(
-        state.players[1].commander_card_id, Some(cmd1_card),
+        state.players[1].commander_card_id,
+        Some(cmd1_card),
         "Commander card ID should be restored"
     );
 }
@@ -4498,11 +4744,7 @@ fn test_macro_action_appears_in_legal_actions() {
 
     // Put Basalt Monolith + Kinnan on battlefield for player 0
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -4510,7 +4752,9 @@ fn test_macro_action_appears_in_legal_actions() {
     state.turn_number = 2;
 
     let actions = legal_actions(&state);
-    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
+    let has_macro = actions
+        .iter()
+        .any(|a| matches!(a, Action::ActivateMacro { .. }));
     assert!(
         has_macro,
         "Legal actions should include ActivateMacro when combo pieces are present"
@@ -4530,11 +4774,7 @@ fn test_macro_action_not_available_without_registry() {
     }
 
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -4542,11 +4782,10 @@ fn test_macro_action_not_available_without_registry() {
     state.turn_number = 2;
 
     let actions = legal_actions(&state);
-    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
-    assert!(
-        !has_macro,
-        "No macro actions without a combo registry"
-    );
+    let has_macro = actions
+        .iter()
+        .any(|a| matches!(a, Action::ActivateMacro { .. }));
+    assert!(!has_macro, "No macro actions without a combo registry");
 }
 
 #[test]
@@ -4566,11 +4805,7 @@ fn test_macro_action_not_during_combat() {
     }
 
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
     // During combat, not main phase — macro should not appear
     state.active_player = 0;
@@ -4578,7 +4813,9 @@ fn test_macro_action_not_during_combat() {
     state.phase = Phase::DeclareAttackers;
 
     let actions = legal_actions(&state);
-    let has_macro = actions.iter().any(|a| matches!(a, Action::ActivateMacro { .. }));
+    let has_macro = actions
+        .iter()
+        .any(|a| matches!(a, Action::ActivateMacro { .. }));
     assert!(
         !has_macro,
         "Macro actions should only appear during main phases"
@@ -4601,12 +4838,9 @@ fn test_apply_macro_action_adds_mana() {
         state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
     }
 
-    let monolith = state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
+    let monolith =
+        state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -4646,11 +4880,7 @@ fn test_macro_action_canonical_roundtrip() {
     }
 
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
 
     state.active_player = 0;
     state.priority_player = 0;
@@ -4659,7 +4889,11 @@ fn test_macro_action_canonical_roundtrip() {
     let action = Action::ActivateMacro { combo_id: 0 };
     let canonical = canonicalize(&action, &state);
     let resolved = resolve(&canonical, &state, 0);
-    assert_eq!(resolved, Some(action), "ActivateMacro should round-trip through canonical form");
+    assert_eq!(
+        resolved,
+        Some(action),
+        "ActivateMacro should round-trip through canonical form"
+    );
 }
 
 #[test]
@@ -4679,19 +4913,17 @@ fn test_combo_proximity_reward_in_heuristic() {
     }
 
     // Equal life, no creatures — baseline
-    let base_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    let base_proximity =
+        combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
     assert!(
         base_proximity.abs() < 1e-10,
         "No combo pieces = zero proximity bonus"
     );
 
     // Add Kinnan for player 0 — partial combo
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Battlefield,
-    );
-    let partial_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Battlefield);
+    let partial_proximity =
+        combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
     assert!(
         partial_proximity > 0.0,
         "Partial combo pieces should give positive proximity bonus, got {}",
@@ -4700,7 +4932,8 @@ fn test_combo_proximity_reward_in_heuristic() {
 
     // Add Basalt Monolith — full combo
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Battlefield);
-    let full_proximity = combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
+    let full_proximity =
+        combo::combo_proximity_bonus(&state, 0, state.combo_registry.as_ref().unwrap());
     assert!(
         full_proximity > partial_proximity,
         "Full combo should give more bonus than partial: {} > {}",
@@ -4723,11 +4956,7 @@ fn test_macro_action_in_goldfish_game() {
 
     // Give player 0 combo pieces in hand and lands on battlefield
     state.create_card_in_zone(sample::ids::BASALT_MONOLITH, 0, ZoneType::Hand);
-    state.create_card_in_zone(
-        sample::ids::KINNAN_BONDER_PRODIGY,
-        0,
-        ZoneType::Hand,
-    );
+    state.create_card_in_zone(sample::ids::KINNAN_BONDER_PRODIGY, 0, ZoneType::Hand);
 
     // Provide mana sources
     for _ in 0..6 {

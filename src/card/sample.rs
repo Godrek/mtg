@@ -7,267 +7,7 @@ use crate::mana::{Color, ManaCost};
 
 /// Card IDs for sample cards.
 pub mod ids {
-    pub const MOUNTAIN: u64 = 1;
-    pub const FOREST: u64 = 2;
-    pub const PLAINS: u64 = 3;
-    pub const ISLAND: u64 = 4;
-    pub const SWAMP: u64 = 5;
-
-    pub const LIGHTNING_BOLT: u64 = 100;
-    pub const GIANT_GROWTH: u64 = 101;
-    pub const GRIZZLY_BEARS: u64 = 102;
-    pub const GREY_OGRE: u64 = 103;
-    pub const SERRA_ANGEL: u64 = 104;
-    pub const SHIVAN_DRAGON: u64 = 105;
-    pub const LLANOWAR_ELVES: u64 = 106;
-    pub const SWORDS_TO_PLOWSHARES: u64 = 107;
-    pub const COUNTERSPELL: u64 = 108;
-    pub const DARK_RITUAL: u64 = 109;
-    pub const SAVANNAH_LIONS: u64 = 110;
-    pub const SHOCK: u64 = 111;
-    pub const GOBLIN_GUIDE: u64 = 112;
-    pub const ELVISH_MYSTIC: u64 = 113;
-    pub const KALONIAN_TUSKER: u64 = 114;
-    pub const LEATHERBACK_BALOTH: u64 = 115;
-    pub const MONASTERY_SWIFTSPEAR: u64 = 116;
-    pub const LAVA_SPIKE: u64 = 117;
-    pub const RIFT_BOLT: u64 = 118;
-    pub const STOMPING_GROUND: u64 = 119; // dual land placeholder
-    pub const ELVISH_VISIONARY: u64 = 120;
-    pub const BLADE_SPLICER: u64 = 121;
-    pub const SIEGE_GANG_COMMANDER: u64 = 122;
-
-    // Phase 1A test cards
-    pub const FIERY_CONCLUSION_ELEMENTAL: u64 = 200;
-    pub const PYROCLASM_ELEMENTAL: u64 = 201;
-
-    // =====================================================================
-    // Phase 2A: Layered effects, anthems, lords, and expanded card pool
-    // =====================================================================
-
-    // --- White creatures ---
-    pub const MOTHER_OF_RUNES: u64 = 300;
-    pub const ELITE_VANGUARD: u64 = 301;
-    pub const WHITE_KNIGHT: u64 = 302;
-    pub const LEONIN_SKYHUNTER: u64 = 303;
-    pub const BANESLAYER_ANGEL: u64 = 304;
-    pub const THALIA_GUARDIAN: u64 = 305;
-    pub const BRIMAZ_KING: u64 = 306;
-    pub const SOLDIER_OF_THE_PANTHEON: u64 = 307;
-    pub const HERO_OF_BLADEHOLD: u64 = 308;
-    pub const PRECINCT_CAPTAIN: u64 = 309;
-
-    // --- White spells ---
-    pub const PATH_TO_EXILE: u64 = 310;
-    pub const WRATH_OF_GOD: u64 = 311;
-    pub const DAY_OF_JUDGMENT: u64 = 312;
-    pub const OBLIVION_RING: u64 = 313;
-    pub const DISENCHANT: u64 = 314;
-
-    // --- White enchantments (anthem/layered effects) ---
-    pub const GLORIOUS_ANTHEM: u64 = 315;
-    pub const HONOR_OF_THE_PURE: u64 = 316;
-    pub const CRUSADE: u64 = 317;
-    pub const HUMILITY: u64 = 318;
-
-    // --- Blue creatures ---
-    pub const DELVER_OF_SECRETS: u64 = 320;
-    pub const SNAPCASTER_MAGE: u64 = 321;
-    pub const VENDILION_CLIQUE: u64 = 322;
-    pub const MAN_O_WAR: u64 = 323;
-    pub const SERENDIB_EFREET: u64 = 324;
-    pub const PHANTASMAL_BEAR: u64 = 325;
-
-    // --- Blue spells ---
-    pub const MANA_LEAK: u64 = 326;
-    pub const REMAND: u64 = 327;
-    pub const BRAINSTORM: u64 = 328;
-    pub const PONDER: u64 = 329;
-    pub const UNSUMMON: u64 = 330;
-
-    // --- Black creatures ---
-    pub const DARK_CONFIDANT: u64 = 340;
-    pub const HYPNOTIC_SPECTER: u64 = 341;
-    pub const NANTUKO_SHADE: u64 = 342;
-    pub const VAMPIRE_NIGHTHAWK: u64 = 343;
-    pub const GATEKEEPER_OF_MALAKIR: u64 = 344;
-    pub const BLOODGHAST: u64 = 345;
-    pub const GERALF_MESSENGER: u64 = 346;
-    pub const PHYREXIAN_OBLITERATOR: u64 = 347;
-    pub const KNIGHT_OF_THE_EBON_LEGION: u64 = 348;
-
-    // --- Black spells ---
-    pub const DOOM_BLADE: u64 = 350;
-    pub const GO_FOR_THE_THROAT: u64 = 351;
-    pub const THOUGHTSEIZE: u64 = 352;
-    pub const HYMN_TO_TOURACH: u64 = 353;
-    pub const DIABOLIC_EDICT: u64 = 354;
-    pub const TRAGIC_SLIP: u64 = 355;
-
-    // --- Red creatures ---
-    pub const ASH_ZEALOT: u64 = 360;
-    pub const EMBER_HAULER: u64 = 361;
-    pub const HELLRIDER: u64 = 362;
-    pub const JACKAL_PUP: u64 = 363;
-    pub const KELDON_MARAUDERS: u64 = 364;
-    pub const VEXING_DEVIL: u64 = 365;
-    pub const EIDOLON_OF_GREAT_REVEL: u64 = 366;
-    pub const YOUNG_PYROMANCER: u64 = 367;
-    pub const GOBLIN_CHAINWHIRLER: u64 = 368;
-
-    // --- Red spells ---
-    pub const CHAIN_LIGHTNING: u64 = 370;
-    pub const SEARING_BLAZE: u64 = 371;
-    pub const SKULLCRACK: u64 = 372;
-    pub const FLAMES_OF_THE_BLOOD_HAND: u64 = 373;
-    pub const SEARING_BLOOD: u64 = 374;
-
-    // --- Green creatures ---
-    pub const TARMOGOYF: u64 = 380;
-    pub const SCAVENGING_OOZE: u64 = 381;
-    pub const STRANGLEROOT_GEIST: u64 = 382;
-    pub const WILD_NACATL: u64 = 383;
-    pub const EXPERIMENT_ONE: u64 = 384;
-    pub const DRYAD_MILITANT: u64 = 385;
-    pub const THRUN_LAST_TROLL: u64 = 386;
-    pub const RANCOR_BEAST: u64 = 387;
-
-    // --- Green spells ---
-    pub const RANCOR: u64 = 390;
-    pub const VINES_OF_VASTWOOD: u64 = 391;
-    pub const COLLECTED_COMPANY: u64 = 392;
-
-    // --- Green enchantments (layered effects) ---
-    pub const GAEA_ANTHEM: u64 = 393;
-
-    // --- Artifacts ---
-    pub const SOL_RING: u64 = 400;
-    pub const SIGNAL_PEST: u64 = 401;
-    pub const VAULT_SKIRGE: u64 = 402;
-    pub const CRANIAL_PLATING: u64 = 403;
-    pub const STEEL_OVERSEER: u64 = 404;
-
-    // --- Multicolor ---
-    pub const LIGHTNING_HELIX: u64 = 410;
-    pub const TERMINATE: u64 = 411;
-    pub const GEIST_OF_SAINT_TRAFT: u64 = 412;
-    pub const FLEECEMANE_LION: u64 = 413;
-    pub const TIDEHOLLOW_SCULLER: u64 = 414;
-
-    // =====================================================================
-    // Kinnan, Bonder Prodigy Commander Deck
-    // =====================================================================
-
-    // --- Lands ---
-    pub const ANCIENT_TOMB: u64 = 500;
-    pub const BOSEIJU_WHO_ENDURES: u64 = 501;
-    pub const BREEDING_POOL: u64 = 502;
-    pub const COMMAND_TOWER: u64 = 503;
-    pub const FLOODED_STRAND: u64 = 504;
-    pub const GAEAS_CRADLE: u64 = 505;
-    pub const GEMSTONE_CAVERNS: u64 = 506;
-    pub const INVENTORS_FAIR: u64 = 507;
-    pub const MINAMO_SCHOOL: u64 = 508;
-    pub const MISTY_RAINFOREST: u64 = 509;
-    pub const MISTRISE_VILLAGE: u64 = 510;
-    pub const OTAWARA_SOARING_CITY: u64 = 511;
-    pub const SEAT_OF_THE_SYNOD: u64 = 512;
-    pub const SHIFTING_WOODLAND: u64 = 513;
-    pub const SNOW_COVERED_FOREST: u64 = 514;
-    pub const SNOW_COVERED_ISLAND: u64 = 515;
-    pub const TREASURE_VAULT: u64 = 516;
-    pub const TREE_OF_TALES: u64 = 517;
-    pub const TROPICAL_ISLAND: u64 = 518;
-    pub const WATERLOGGED_GROVE: u64 = 519;
-    pub const WINDSWEPT_HEATH: u64 = 520;
-    pub const YAVIMAYA_COAST: u64 = 521;
-
-    // --- Artifacts ---
-    pub const ARCANE_SIGNET: u64 = 550;
-    pub const BASALT_MONOLITH: u64 = 551;
-    pub const CHROME_MOX: u64 = 552;
-    pub const FELLWAR_STONE: u64 = 553;
-    pub const GRIM_MONOLITH: u64 = 554;
-    pub const LOTUS_PETAL: u64 = 555;
-    pub const MANA_VAULT: u64 = 556;
-    pub const MOX_AMBER: u64 = 557;
-    pub const MOX_DIAMOND: u64 = 558;
-    pub const MOX_OPAL: u64 = 559;
-    pub const MOONSILVER_KEY: u64 = 560;
-    pub const SIMIC_SIGNET: u64 = 561;
-    pub const SPRINGLEAF_DRUM: u64 = 562;
-    pub const TALISMAN_OF_CURIOSITY: u64 = 563;
-    pub const AGATHAS_SOUL_CAULDRON: u64 = 580;
-    pub const THE_ONE_RING: u64 = 581;
-    pub const MIRAGE_MIRROR: u64 = 582;
-
-    // --- Creatures ---
-    pub const KINNAN_BONDER_PRODIGY: u64 = 600;
-    pub const BIRDS_OF_PARADISE: u64 = 601;
-    pub const FYNDHORN_ELVES: u64 = 602;
-    pub const DELIGHTED_HALFLING: u64 = 603;
-    pub const BADGERMOLE_CUB: u64 = 604;
-    pub const CLEVER_IMPERSONATOR: u64 = 605;
-    pub const COLOSSAL_SKYTURTLE: u64 = 606;
-    pub const CONSECRATED_SPHINX: u64 = 607;
-    pub const DRIFT_OF_PHANTASMS: u64 = 608;
-    pub const ELVISH_SPIRIT_GUIDE: u64 = 609;
-    pub const ENDURANCE: u64 = 610;
-    pub const ENDURING_VITALITY: u64 = 611;
-    pub const FAERIE_MASTERMIND: u64 = 612;
-    pub const FLESH_DUPLICATE: u64 = 613;
-    pub const HIGH_FAE_TRICKSTER: u64 = 614;
-    pub const HULLBREAKER_HORROR: u64 = 615;
-    pub const MOCKINGBIRD: u64 = 616;
-    pub const NEZAHAL_PRIMAL_TIDE: u64 = 617;
-    pub const NYXBLOOM_ANCIENT: u64 = 618;
-    pub const PHYREXIAN_METAMORPH: u64 = 619;
-    pub const SEEDBORN_MUSE: u64 = 620;
-    pub const THRASIOS_TRITON_HERO: u64 = 621;
-    pub const TIDESPOUT_TYRANT: u64 = 622;
-    pub const TROPHY_MAGE: u64 = 623;
-    pub const WAN_SHI_TONG: u64 = 624;
-    pub const WANDERING_ARCHAIC: u64 = 625;
-
-    // --- Instants ---
-    pub const AN_OFFER_YOU_CANT_REFUSE: u64 = 700;
-    pub const CHORD_OF_CALLING: u64 = 701;
-    pub const CROP_ROTATION: u64 = 702;
-    pub const CYCLONIC_RIFT: u64 = 703;
-    pub const FIERCE_GUARDIANSHIP: u64 = 704;
-    pub const FLUSTERSTORM: u64 = 705;
-    pub const FORCE_OF_NEGATION: u64 = 706;
-    pub const FORCE_OF_WILL: u64 = 707;
-    pub const INTO_THE_FLOOD_MAW: u64 = 708;
-    pub const MENTAL_MISSTEP: u64 = 709;
-    pub const MINDBREAK_TRAP: u64 = 710;
-    pub const MYSTICAL_TUTOR: u64 = 711;
-    pub const NOXIOUS_REVIVAL: u64 = 712;
-    pub const PACT_OF_NEGATION: u64 = 713;
-    pub const SWAN_SONG: u64 = 714;
-    pub const VEIL_OF_SUMMER: u64 = 715;
-    pub const WHIR_OF_INVENTION: u64 = 716;
-    pub const WORLDLY_TUTOR: u64 = 717;
-    pub const MUDDLE_THE_MIXTURE: u64 = 718;
-
-    // --- Sorceries ---
-    pub const FINALE_OF_DEVASTATION: u64 = 750;
-    pub const GREEN_SUNS_ZENITH: u64 = 751;
-    pub const NATURES_RHYTHM: u64 = 752;
-
-    // --- Enchantments ---
-    pub const MYSTIC_REMORA: u64 = 770;
-    pub const RHYSTIC_STUDY: u64 = 771;
-
-    // --- Planeswalkers ---
-    pub const TEZZERET_THE_SEEKER: u64 = 790;
-
-    // --- DFC / Battle cards ---
-    pub const BRIDGEWORKS_BATTLE: u64 = 800;
-    pub const DISCIPLE_OF_FREYALISE: u64 = 801;
-    pub const HYDROELECTRIC_SPECIMEN: u64 = 802;
-    pub const INVASION_OF_IKORIA: u64 = 803;
-    pub const SINK_INTO_STUPOR: u64 = 804;
+    pub use crate::card::catalog::ids::*;
 }
 
 pub fn build_sample_db() -> CardDatabase {
@@ -455,7 +195,16 @@ pub fn build_sample_db() -> CardDatabase {
         toughness: Some(5),
         mana_abilities: vec![],
         spell_effect: None,
-        activated_abilities: vec![], // simplified — no firebreathing
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(0, 0, 0, 0, 1, 0),
+            requires_tap: false,
+            effect: Effect::Buff {
+                power: 1,
+                toughness: 0,
+                until_eot: true,
+            },
+            description: "{R}: Shivan Dragon gets +1/+0 until end of turn.".into(),
+        }],
         triggered_abilities: vec![],
         starting_loyalty: None,
         static_abilities: vec![],
@@ -920,12 +669,14 @@ pub fn build_sample_db() -> CardDatabase {
                 amount: 2,
                 target: TargetSpec::NoTarget,
             },
-            description: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
+            description: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player."
+                .into(),
         }],
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player.".into(),
+        oracle_text: "When Fiery Conclusion Elemental dies, it deals 2 damage to each player."
+            .into(),
         ..Default::default()
     });
 
@@ -952,7 +703,8 @@ pub fn build_sample_db() -> CardDatabase {
                 amount: 2,
                 target: TargetSpec::EachCreature,
             },
-            description: "When Pyroclasm Elemental dies, it deals 2 damage to each creature.".into(),
+            description: "When Pyroclasm Elemental dies, it deals 2 damage to each creature."
+                .into(),
         }],
         starting_loyalty: None,
         static_abilities: vec![],
@@ -1063,7 +815,11 @@ pub fn build_sample_db() -> CardDatabase {
         card_types: vec![CardType::Creature],
         supertypes: vec![],
         subtypes: vec![Subtype("Angel".into())],
-        keywords: vec![KeywordAbility::Flying, KeywordAbility::FirstStrike, KeywordAbility::Lifelink],
+        keywords: vec![
+            KeywordAbility::Flying,
+            KeywordAbility::FirstStrike,
+            KeywordAbility::Lifelink,
+        ],
         power: Some(5),
         toughness: Some(5),
         mana_abilities: vec![],
@@ -1276,12 +1032,16 @@ pub fn build_sample_db() -> CardDatabase {
             effect: Effect::ExileTarget {
                 target: TargetSpec::AnyNonlandPermanent,
             },
-            description: "When Oblivion Ring enters the battlefield, exile another target nonland permanent.".into(),
+            description:
+                "When Oblivion Ring enters the battlefield, exile another target nonland permanent."
+                    .into(),
         }],
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "When Oblivion Ring enters the battlefield, exile another target nonland permanent.".into(),
+        oracle_text:
+            "When Oblivion Ring enters the battlefield, exile another target nonland permanent."
+                .into(),
         ..Default::default()
     });
 
@@ -1416,7 +1176,8 @@ pub fn build_sample_db() -> CardDatabase {
             },
         ],
         enters_tapped: false,
-        oracle_text: "All creatures lose all abilities and have base power and toughness 1/1.".into(),
+        oracle_text: "All creatures lose all abilities and have base power and toughness 1/1."
+            .into(),
         ..Default::default()
     });
 
@@ -1557,7 +1318,8 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "When Phantasmal Bear becomes the target of a spell or ability, sacrifice it.".into(),
+        oracle_text: "When Phantasmal Bear becomes the target of a spell or ability, sacrifice it."
+            .into(),
         ..Default::default()
     });
 
@@ -1612,7 +1374,7 @@ pub fn build_sample_db() -> CardDatabase {
         ..Default::default()
     });
 
-    // Brainstorm: U — Draw 3, put 2 back (simplified as draw 1)
+    // Brainstorm: U — Draw 3, then put 2 cards from hand on top (partially simplified: draw 3)
     db.insert(CardDef {
         id: ids::BRAINSTORM,
         name: "Brainstorm".into(),
@@ -1624,7 +1386,7 @@ pub fn build_sample_db() -> CardDatabase {
         power: None,
         toughness: None,
         mana_abilities: vec![],
-        spell_effect: Some(Effect::DrawCards { count: 1 }),
+        spell_effect: Some(Effect::DrawCards { count: 3 }),
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
@@ -1757,7 +1519,11 @@ pub fn build_sample_db() -> CardDatabase {
         card_types: vec![CardType::Creature],
         supertypes: vec![],
         subtypes: vec![Subtype("Vampire".into()), Subtype("Shaman".into())],
-        keywords: vec![KeywordAbility::Flying, KeywordAbility::Deathtouch, KeywordAbility::Lifelink],
+        keywords: vec![
+            KeywordAbility::Flying,
+            KeywordAbility::Deathtouch,
+            KeywordAbility::Lifelink,
+        ],
         power: Some(2),
         toughness: Some(3),
         mana_abilities: vec![],
@@ -1884,7 +1650,9 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "{2}{B}: Knight of the Ebon Legion gets +3/+3 and gains deathtouch until end of turn.".into(),
+        oracle_text:
+            "{2}{B}: Knight of the Ebon Legion gets +3/+3 and gains deathtouch until end of turn."
+                .into(),
         ..Default::default()
     });
 
@@ -2081,7 +1849,8 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "{1}, Sacrifice Ember Hauler: Ember Hauler deals 2 damage to any target.".into(),
+        oracle_text: "{1}, Sacrifice Ember Hauler: Ember Hauler deals 2 damage to any target."
+            .into(),
         ..Default::default()
     });
 
@@ -2125,7 +1894,8 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "Whenever Jackal Pup is dealt damage, it deals that much damage to you.".into(),
+        oracle_text: "Whenever Jackal Pup is dealt damage, it deals that much damage to you."
+            .into(),
         ..Default::default()
     });
 
@@ -2488,7 +2258,9 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "Evolve. Remove two +1/+1 counters from Experiment One: Regenerate Experiment One.".into(),
+        oracle_text:
+            "Evolve. Remove two +1/+1 counters from Experiment One: Regenerate Experiment One."
+                .into(),
         ..Default::default()
     });
 
@@ -2532,7 +2304,9 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "This spell can't be countered. Hexproof. {1}{G}: Regenerate Thrun, the Last Troll.".into(),
+        oracle_text:
+            "This spell can't be countered. Hexproof. {1}{G}: Regenerate Thrun, the Last Troll."
+                .into(),
         ..Default::default()
     });
 
@@ -2702,7 +2476,9 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
-        oracle_text: "Battle cry. Signal Pest can't be blocked except by creatures with flying or reach.".into(),
+        oracle_text:
+            "Battle cry. Signal Pest can't be blocked except by creatures with flying or reach."
+                .into(),
         ..Default::default()
     });
 
@@ -2787,7 +2563,10 @@ pub fn build_sample_db() -> CardDatabase {
         toughness: None,
         mana_abilities: vec![],
         spell_effect: Some(Effect::Multiple(vec![
-            Effect::DealDamage { amount: 3, target: TargetSpec::CreatureOrPlayer },
+            Effect::DealDamage {
+                amount: 3,
+                target: TargetSpec::CreatureOrPlayer,
+            },
             Effect::GainLife { amount: 3 },
         ])),
         activated_abilities: vec![],
@@ -2908,7 +2687,10 @@ pub fn build_sample_db() -> CardDatabase {
         power: None,
         toughness: None,
         mana_abilities: vec![],
-        spell_effect: Some(Effect::AddMana { color: Some(Color::Black), amount: 3 }),
+        spell_effect: Some(Effect::AddMana {
+            color: Some(Color::Black),
+            amount: 3,
+        }),
         activated_abilities: vec![],
         triggered_abilities: vec![],
         starting_loyalty: None,
@@ -3116,7 +2898,8 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Treasure Vault".into(),
         card_types: vec![CardType::Artifact, CardType::Land],
         mana_abilities: vec![ManaAbility::TapForColorless],
-        oracle_text: "{T}: Add {C}. {X}{X}, {T}, Sacrifice Treasure Vault: Create X Treasure tokens.".into(),
+        oracle_text:
+            "{T}: Add {C}. {X}{X}, {T}, Sacrifice Treasure Vault: Create X Treasure tokens.".into(),
         ..Default::default()
     });
 
@@ -3144,7 +2927,9 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Waterlogged Grove".into(),
         card_types: vec![CardType::Land],
         mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
-        oracle_text: "{T}, Pay 1 life: Add {G} or {U}. {1}, {T}, Sacrifice Waterlogged Grove: Draw a card.".into(),
+        oracle_text:
+            "{T}, Pay 1 life: Add {G} or {U}. {1}, {T}, Sacrifice Waterlogged Grove: Draw a card."
+                .into(),
         ..Default::default()
     });
 
@@ -3167,7 +2952,8 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Yavimaya Coast".into(),
         card_types: vec![CardType::Land],
         mana_abilities: vec![ManaAbility::TapForChoice(vec![Color::Green, Color::Blue])],
-        oracle_text: "{T}: Add {C}. {T}: Add {G} or {U}. Yavimaya Coast deals 1 damage to you.".into(),
+        oracle_text: "{T}: Add {C}. {T}: Add {G} or {U}. Yavimaya Coast deals 1 damage to you."
+            .into(),
         ..Default::default()
     });
 
@@ -3215,7 +3001,8 @@ pub fn build_sample_db() -> CardDatabase {
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
         mana_abilities: vec![ManaAbility::TapForAny],
-        oracle_text: "{T}: Add one mana of any color that a land an opponent controls could produce.".into(),
+        oracle_text:
+            "{T}: Add one mana of any color that a land an opponent controls could produce.".into(),
         ..Default::default()
     });
 
@@ -3668,7 +3455,8 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Spirit".into())],
         power: Some(2),
         toughness: Some(4),
-        oracle_text: "Untap all permanents you control during each other player's untap step.".into(),
+        oracle_text: "Untap all permanents you control during each other player's untap step."
+            .into(),
         ..Default::default()
     });
 
@@ -3764,8 +3552,11 @@ pub fn build_sample_db() -> CardDatabase {
         name: "An Offer You Can't Refuse".into(),
         mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
-        oracle_text: "Counter target noncreature spell. Its controller creates two Treasure tokens.".into(),
+        spell_effect: Some(Effect::Counter {
+            target: TargetSpec::AnySpell,
+        }),
+        oracle_text:
+            "Counter target noncreature spell. Its controller creates two Treasure tokens.".into(),
         ..Default::default()
     });
 
@@ -3814,8 +3605,11 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Flusterstorm".into(),
         mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
-        oracle_text: "Counter target instant or sorcery spell unless its controller pays {1}. Storm.".into(),
+        spell_effect: Some(Effect::Counter {
+            target: TargetSpec::AnySpell,
+        }),
+        oracle_text:
+            "Counter target instant or sorcery spell unless its controller pays {1}. Storm.".into(),
         ..Default::default()
     });
 
@@ -3854,8 +3648,12 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Mental Misstep".into(),
         mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
-        oracle_text: "({U/P} can be paid with either {U} or 2 life.) Counter target spell with mana value 1.".into(),
+        spell_effect: Some(Effect::Counter {
+            target: TargetSpec::AnySpell,
+        }),
+        oracle_text:
+            "({U/P} can be paid with either {U} or 2 life.) Counter target spell with mana value 1."
+                .into(),
         ..Default::default()
     });
 
@@ -3944,7 +3742,9 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Muddle the Mixture".into(),
         mana_cost: Some(ManaCost::new(0, 0, 2, 0, 0, 0)),
         card_types: vec![CardType::Instant],
-        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        spell_effect: Some(Effect::Counter {
+            target: TargetSpec::AnySpell,
+        }),
         oracle_text: "Counter target instant or sorcery spell. Transmute {1}{U}{U}.".into(),
         ..Default::default()
     });

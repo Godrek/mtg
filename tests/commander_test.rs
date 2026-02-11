@@ -137,7 +137,9 @@ fn test_cast_commander_action_available() {
     state.phase = Phase::PreCombatMain;
 
     let actions = legal_actions(&state);
-    let cast_commander = actions.iter().find(|a| matches!(a, Action::CastCommander { .. }));
+    let cast_commander = actions
+        .iter()
+        .find(|a| matches!(a, Action::CastCommander { .. }));
     assert!(
         cast_commander.is_some(),
         "Should have CastCommander action when commander is in command zone and mana available"
@@ -154,7 +156,9 @@ fn test_cast_commander_not_available_without_mana() {
     state.phase = Phase::PreCombatMain;
 
     let actions = legal_actions(&state);
-    let cast_commander = actions.iter().find(|a| matches!(a, Action::CastCommander { .. }));
+    let cast_commander = actions
+        .iter()
+        .find(|a| matches!(a, Action::CastCommander { .. }));
     assert!(
         cast_commander.is_none(),
         "Should not have CastCommander action without enough mana"
@@ -195,10 +199,14 @@ fn test_cast_commander_resolves_to_battlefield() {
     rules::apply_action(&mut state, &Action::PassPriority);
 
     // Brimaz should be on the battlefield now
-    let on_battlefield = state.battlefield.iter().any(|&id| {
-        state.objects[&id].card_def_id == ids::BRIMAZ_KING
-    });
-    assert!(on_battlefield, "Commander should be on the battlefield after resolution");
+    let on_battlefield = state
+        .battlefield
+        .iter()
+        .any(|&id| state.objects[&id].card_def_id == ids::BRIMAZ_KING);
+    assert!(
+        on_battlefield,
+        "Commander should be on the battlefield after resolution"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +239,10 @@ fn test_commander_tax_increments() {
     };
     rules::apply_action(&mut state, &action);
 
-    assert_eq!(state.players[0].commander_tax, 1, "Tax should increment after first cast");
+    assert_eq!(
+        state.players[0].commander_tax, 1,
+        "Tax should increment after first cast"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +326,10 @@ fn test_commander_damage_21_loses_game() {
 
     rules::check_state_based_actions(&mut state);
 
-    assert!(state.players[1].has_lost, "Player should lose at 21 commander damage");
+    assert!(
+        state.players[1].has_lost,
+        "Player should lose at 21 commander damage"
+    );
     assert!(state.game_over, "Game should be over");
 }
 
@@ -327,7 +341,10 @@ fn test_commander_damage_20_does_not_lose() {
 
     rules::check_state_based_actions(&mut state);
 
-    assert!(!state.players[1].has_lost, "Player should NOT lose at 20 commander damage");
+    assert!(
+        !state.players[1].has_lost,
+        "Player should NOT lose at 20 commander damage"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +389,11 @@ fn test_validate_commander_deck_singleton_violation() {
     deck.push(ids::SAVANNAH_LIONS); // duplicate non-basic!
     assert_eq!(deck.len(), 100);
     let result = rules::validate_commander_deck(&db, &deck, ids::BRIMAZ_KING);
-    assert!(result.is_err(), "Should reject duplicate non-basic: {:?}", result);
+    assert!(
+        result.is_err(),
+        "Should reject duplicate non-basic: {:?}",
+        result
+    );
     assert!(
         result.unwrap_err().contains("only 1 copy"),
         "Error should mention singleton violation"
@@ -438,9 +459,7 @@ fn test_commander_game_completes() {
     let (deck1, cmd1) = sample::thrun_commander_deck();
 
     let greedy = GreedyStrategy;
-    let result = simulation::run_commander_game(
-        &db, &deck0, &deck1, cmd0, cmd1, &greedy, &greedy,
-    );
+    let result = simulation::run_commander_game(&db, &deck0, &deck1, cmd0, cmd1, &greedy, &greedy);
 
     assert!(
         result.winner.is_some() || result.turns >= 200,
@@ -456,9 +475,8 @@ fn test_commander_simulation_produces_results() {
 
     let greedy = GreedyStrategy;
     let random = RandomStrategy;
-    let results = simulation::simulate_commander(
-        &db, &deck0, &deck1, cmd0, cmd1, &greedy, &random, 10,
-    );
+    let results =
+        simulation::simulate_commander(&db, &deck0, &deck1, cmd0, cmd1, &greedy, &random, 10);
 
     assert_eq!(results.total_games, 10);
     assert!(
@@ -475,9 +493,8 @@ fn test_commander_greedy_vs_random() {
 
     let greedy = GreedyStrategy;
     let random = RandomStrategy;
-    let results = simulation::simulate_commander(
-        &db, &deck0, &deck1, cmd0, cmd1, &greedy, &random, 50,
-    );
+    let results =
+        simulation::simulate_commander(&db, &deck0, &deck1, cmd0, cmd1, &greedy, &random, 50);
 
     // Greedy should beat random most of the time
     assert!(
@@ -557,7 +574,6 @@ fn test_mulligan_once_then_keep_requires_bottom_one() {
     rules::setup_commander_game(&mut state, &deck, &deck, cmd, cmd);
 
     // P0 mulligans once
-    let old_hand: Vec<_> = state.players[0].hand.clone();
     rules::apply_action(&mut state, &Action::MulliganMulligan);
     assert_eq!(state.players[0].mulligan_count, 1);
     assert_eq!(state.players[0].hand.len(), 7); // drew 7 new cards
@@ -574,7 +590,9 @@ fn test_mulligan_once_then_keep_requires_bottom_one() {
     // Legal actions should be MulliganBottomCard for each card in hand
     let actions = legal_actions(&state);
     assert_eq!(actions.len(), 7);
-    assert!(actions.iter().all(|a| matches!(a, Action::MulliganBottomCard { .. })));
+    assert!(actions
+        .iter()
+        .all(|a| matches!(a, Action::MulliganBottomCard { .. })));
 
     // Bottom a card
     let bottom_action = actions[0].clone();
@@ -638,9 +656,7 @@ fn test_mulligan_full_game_with_greedy() {
     let (deck1, cmd1) = sample::thrun_commander_deck();
 
     let greedy = GreedyStrategy;
-    let result = simulation::run_commander_game(
-        &db, &deck0, &deck1, cmd0, cmd1, &greedy, &greedy,
-    );
+    let result = simulation::run_commander_game(&db, &deck0, &deck1, cmd0, cmd1, &greedy, &greedy);
 
     assert!(
         result.winner.is_some() || result.turns >= 200,
