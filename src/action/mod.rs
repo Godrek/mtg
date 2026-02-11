@@ -364,11 +364,13 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                     };
 
                     if can_cast_timing {
-                        // Check if player can pay the mana cost
+                        // Check if player can pay the mana cost (with cost reduction)
                         if let Some(ref cost) = def.mana_cost {
-                            // Check if total available mana (from untapped lands) can cover it.
-                            // Simplified: we check the current pool + potential from untapped lands.
-                            if can_potentially_pay(state, player, cost) {
+                            let reduction = crate::rules::total_cost_reduction(
+                                state, player, def.is_creature(),
+                            );
+                            let reduced = crate::rules::apply_cost_reduction(cost, reduction);
+                            if can_potentially_pay(state, player, &reduced) {
                                 let targets = enumerate_targets_for_spell(state, player, def);
                                 if targets.is_empty() {
                                     actions.push(Action::CastSpell {
@@ -403,11 +405,15 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                         continue;
                     }
                     if let Some(ref cost) = def.mana_cost {
-                        // Commander tax: add {2} per previous cast
+                        // Commander tax: add {2} per previous cast (then cost reduction)
                         let tax = state.players[player].commander_tax;
                         let mut taxed_cost = cost.clone();
                         taxed_cost.generic += tax * 2;
-                        if can_potentially_pay(state, player, &taxed_cost) {
+                        let reduction = crate::rules::total_cost_reduction(
+                            state, player, def.is_creature(),
+                        );
+                        let final_cost = crate::rules::apply_cost_reduction(&taxed_cost, reduction);
+                        if can_potentially_pay(state, player, &final_cost) {
                             let targets = enumerate_targets_for_spell(state, player, def);
                             if targets.is_empty() {
                                 actions.push(Action::CastCommander {

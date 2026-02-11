@@ -479,6 +479,7 @@ pub fn scryfall_to_card_def(card: &ScryfallCard, id: CardId) -> CardDef {
         oracle_text: oracle_text.to_string(),
         dynamic_power: None,
         dynamic_toughness: None,
+        cost_reduction: None,
     }
 }
 

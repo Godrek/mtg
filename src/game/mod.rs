@@ -1154,7 +1154,10 @@ impl GameState {
                     }
                 }
             }
-            crate::card::DynamicContext { hand_size, graveyard_card_types }
+            let creatures_in_graveyard = graveyard_card_types.iter()
+                .filter(|types| types.contains(&crate::card::CardType::Creature))
+                .count();
+            crate::card::DynamicContext { hand_size, graveyard_card_types, creatures_in_graveyard }
         });
 
         // Compute characteristics with the cached battlefield set

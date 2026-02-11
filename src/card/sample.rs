@@ -4203,7 +4203,7 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "Whenever Ashcoat of the Shadow Swarm attacks, other Rats you control get +2/+2 until end of turn.".into(),
             },
             TriggeredAbility {
-                trigger: TriggerCondition::ACreatureDies,
+                trigger: TriggerCondition::ACreatureYouControlDies,
                 effect: Effect::Multiple(vec![
                     Effect::DrawCards { count: 1 },
                     Effect::DiscardCards { count: 1, target: TargetSpec::Controller },
@@ -4570,7 +4570,7 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "When Lord Skitter, Sewer King enters the battlefield, exile target card from each opponent's graveyard.".into(),
             },
             TriggeredAbility {
-                trigger: TriggerCondition::BeginningOfUpkeep,
+                trigger: TriggerCondition::BeginningOfCombat,
                 effect: Effect::CreateToken(TokenDef {
                     name: "Rat".into(),
                     power: 1,
@@ -4646,7 +4646,7 @@ pub fn build_sample_db() -> CardDatabase {
             StaticAbility::Anthem {
                 power: 1,
                 toughness: 1,
-                affected: AffectedObjects::OtherCreaturesControlledBy(0),
+                affected: AffectedObjects::OtherNonHumanCreaturesControlledBy(0),
             },
         ],
         oracle_text: "Intimidate. Whenever a Human deals damage to you, destroy it. Other non-Human creatures you control get +1/+1 and have undying.".into(),
@@ -5021,7 +5021,7 @@ pub fn build_sample_db() -> CardDatabase {
         toughness: Some(2),
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::BeginningOfUpkeep,
+                trigger: TriggerCondition::BeginningOfCombat,
                 effect: Effect::Unimplemented("Each Rat you control gets +1/+0 and gains menace until end of turn.".into()),
                 description: "At the beginning of combat on your turn, each Rat you control gets +1/+0 and gains menace until end of turn.".into(),
             },
@@ -5070,7 +5070,7 @@ pub fn build_sample_db() -> CardDatabase {
         supertypes: vec![Supertype::Legendary],
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::YouCastSpell,
+                trigger: TriggerCondition::YouCastCreatureSpell,
                 effect: Effect::Multiple(vec![
                     Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
                     Effect::GainLife { amount: 1 },
@@ -5078,6 +5078,10 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.".into(),
             },
         ],
+        cost_reduction: Some(CostReduction {
+            generic_reduction: 1,
+            applies_to: CostReductionTarget::CreatureSpells,
+        }),
         oracle_text: "Black creature spells you cast cost {1} less to cast. Whenever you cast a creature spell, each opponent loses 1 life and you gain 1 life.".into(),
         ..Default::default()
     });
@@ -5185,6 +5189,10 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Herald's Horn".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
+        cost_reduction: Some(CostReduction {
+            generic_reduction: 1,
+            applies_to: CostReductionTarget::CreatureSpells,
+        }),
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::BeginningOfUpkeep,
@@ -5204,6 +5212,10 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Jet Medallion".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
+        cost_reduction: Some(CostReduction {
+            generic_reduction: 1,
+            applies_to: CostReductionTarget::AllSpells,
+        }),
         oracle_text: "Black spells you cast cost {1} less to cast.".into(),
         ..Default::default()
     });
@@ -5265,7 +5277,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Equipment".into())],
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::ACreatureDies,
+                trigger: TriggerCondition::ACreatureYouControlDies,
                 effect: Effect::DrawCards { count: 2 },
                 description: "Whenever equipped creature dies, draw two cards.".into(),
             },
@@ -5389,6 +5401,10 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Urza's Incubator".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
+        cost_reduction: Some(CostReduction {
+            generic_reduction: 2,
+            applies_to: CostReductionTarget::CreatureSpells,
+        }),
         oracle_text: "As Urza's Incubator enters the battlefield, choose a creature type. Creature spells of the chosen type cost {2} less to cast.".into(),
         ..Default::default()
     });
@@ -5412,7 +5428,7 @@ pub fn build_sample_db() -> CardDatabase {
         ],
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::YouCastSpell,
+                trigger: TriggerCondition::YouCastCreatureSpell,
                 effect: Effect::DrawCards { count: 1 },
                 description: "Whenever you cast a creature spell of the chosen type, draw a card.".into(),
             },
@@ -5486,7 +5502,7 @@ pub fn build_sample_db() -> CardDatabase {
         keywords: vec![KeywordAbility::Flash],
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::ACreatureDies,
+                trigger: TriggerCondition::ACreatureYouControlDies,
                 effect: Effect::SacrificeCreatures { count: 1, target: TargetSpec::Opponent },
                 description: "Whenever a creature you control dies, each opponent sacrifices a creature.".into(),
             },
@@ -5505,7 +5521,7 @@ pub fn build_sample_db() -> CardDatabase {
         card_types: vec![CardType::Enchantment],
         triggered_abilities: vec![
             TriggeredAbility {
-                trigger: TriggerCondition::ACreatureDies,
+                trigger: TriggerCondition::ACreatureYouControlDies,
                 effect: Effect::SacrificeCreatures { count: 1, target: TargetSpec::Opponent },
                 description: "Whenever a creature you control dies, each other player sacrifices a creature.".into(),
             },
@@ -5594,7 +5610,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
-                effect: Effect::AddMana { color: Some(Color::Black), amount: 4 },
+                effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::SwampsControlled },
                 description: "{2}, {T}: Add {B} for each Swamp you control.".into(),
             },
         ],
@@ -5619,7 +5635,7 @@ pub fn build_sample_db() -> CardDatabase {
                 requires_tap: true,
                 effect: Effect::Multiple(vec![
                     Effect::DrawCards { count: 1 },
-                    Effect::LoseLife { amount: 3, target: TargetSpec::Controller },
+                    Effect::LoseDynamicLife { amount: DynamicValue::CardsInHand, target: TargetSpec::Controller },
                 ]),
                 description: "{1}{B}{B}, {T}: Draw a card, then you lose life equal to the number of cards in your hand.".into(),
             },
@@ -5643,7 +5659,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
-                effect: Effect::AddMana { color: Some(Color::Black), amount: 2 },
+                effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::CreaturesInGraveyard },
                 description: "{2}, {T}: Add {B} for each black creature card in your graveyard.".into(),
             },
         ],
@@ -5688,7 +5704,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
-                effect: Effect::AddMana { color: Some(Color::Black), amount: 3 },
+                effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::DevotionTo(Color::Black) },
                 description: "{2}, {T}: Choose a color. Add an amount of mana of that color equal to your devotion to that color.".into(),
             },
         ],
