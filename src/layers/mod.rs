@@ -495,6 +495,10 @@ pub enum StaticAbility {
         card_type: CardType,
         affected: AffectedObjects,
     },
+    /// Whenever the controller taps a nonland permanent for mana, add one
+    /// additional mana of any type that permanent produced.
+    /// (e.g., Kinnan, Bonder Prodigy)
+    ManaFromNonlandBonus,
 }
 
 impl StaticAbility {
@@ -566,6 +570,10 @@ impl StaticAbility {
                 affected: affected.clone(),
                 modification: LayerModification::AddType(*card_type),
             }],
+            // ManaFromNonlandBonus doesn't generate a continuous effect —
+            // it's checked directly during mana ability activation in
+            // rules::apply_action (ActivateManaAbility handler).
+            StaticAbility::ManaFromNonlandBonus => vec![],
         }
     }
 }

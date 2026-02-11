@@ -150,6 +150,24 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                         state.players[player].mana_pool.colorless += n;
                     }
                 }
+
+                // Check for ManaFromNonlandBonus (e.g., Kinnan, Bonder Prodigy):
+                // "Whenever you tap a nonland permanent for mana, add one mana
+                // of any type that permanent produced."
+                // Simplified: add +1 colorless if the source is a nonland permanent
+                // and the controller has a permanent with ManaFromNonlandBonus.
+                let source_is_nonland = {
+                    let db = state.card_db();
+                    let inst = &state.objects[&obj_id];
+                    let def = db.get(inst.card_def_id).unwrap();
+                    !def.card_types.contains(&CardType::Land)
+                };
+                if source_is_nonland {
+                    let bonus = mana_from_nonland_bonus_count(state, player);
+                    if bonus > 0 {
+                        state.players[player].mana_pool.colorless += bonus;
+                    }
+                }
             }
 
             // Tap the permanent
@@ -1182,6 +1200,33 @@ fn push_trigger_to_stack(state: &mut GameState, trigger: &PendingTrigger) {
 pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_hint: Option<ObjectId>) -> bool {
     check_triggers(state, condition, source_hint);
     flush_triggers(state)
+}
+
+/// Count how many permanents a player controls that have the
+/// `ManaFromNonlandBonus` static ability (e.g., Kinnan, Bonder Prodigy).
+/// Returns the total bonus amount (typically 1 per source).
+fn mana_from_nonland_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
+    let db = state.card_db();
+    let mut count = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = match state.objects.get(&obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+        if inst.controller != player {
+            continue;
+        }
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        for sa in &def.static_abilities {
+            if matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus) {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 /// Fire spell-cast triggers for a spell that was just cast.

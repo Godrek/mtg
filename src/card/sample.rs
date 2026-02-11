@@ -3380,6 +3380,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Human".into()), Subtype("Druid".into())],
         power: Some(2),
         toughness: Some(2),
+        static_abilities: vec![StaticAbility::ManaFromNonlandBonus],
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(5, 0, 1, 0, 0, 1),
             requires_tap: false,
