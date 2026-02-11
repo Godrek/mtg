@@ -11,6 +11,7 @@
 //!   TURNS=20           Maximum turn horizon for exhaustive search (default: 20)
 //!   STATES=1           Number of independently initialized opening states (default: 1)
 //!   ACTION_LIMIT=50000 Max actions per line before treated as draw (default: 50000)
+//!   CYCLE_CUT=0       Enable expensive per-path cycle detection (default: 0)
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -40,6 +41,8 @@ struct ExhaustiveStats {
     losses: u64,
     draws: u64,
     loops_cut: u64,
+    decision_nodes: u64,
+    pilot_actions_listed: u64,
     best_win: Option<WinLine>,
 }
 
@@ -57,6 +60,10 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(50_000);
+    let cycle_cut_enabled = std::env::var("CYCLE_CUT")
+        .ok()
+        .map(|v| v != "0")
+        .unwrap_or(false);
 
     let db = sample::build_sample_db();
     let (deck, commander, tutor_targets) = match deck_name.as_str() {
@@ -75,6 +82,10 @@ fn main() {
     println!("Turn horizon: {}", max_turns);
     println!("States:       {}", num_states);
     println!("Action limit: {}", action_limit);
+    println!(
+        "Cycle cut:   {}",
+        if cycle_cut_enabled { "on" } else { "off" }
+    );
     println!();
 
     let mut total = ExhaustiveStats::default();
@@ -131,6 +142,7 @@ fn main() {
                 &mut local,
                 state_idx,
                 &progress_nodes,
+                cycle_cut_enabled,
             );
 
             progress_states_done.fetch_add(1, Ordering::Relaxed);
@@ -141,9 +153,11 @@ fn main() {
     per_state_results.sort_by_key(|(state_idx, _)| *state_idx);
     for (state_idx, local) in per_state_results {
         println!(
-            "State #{}: nodes={} terminals={} W/L/D={}/{}/{} loops_cut={}",
+            "State #{}: nodes={} decision_nodes={} pilot_actions={} terminals={} W/L/D={}/{}/{} loops_cut={}",
             state_idx,
             local.nodes_explored,
+            local.decision_nodes,
+            local.pilot_actions_listed,
             local.terminal_lines,
             local.wins,
             local.losses,
@@ -167,6 +181,8 @@ fn main() {
     println!();
     println!("=== Aggregate ===");
     println!("Nodes explored: {}", total.nodes_explored);
+    println!("Pilot decision nodes: {}", total.decision_nodes);
+    println!("Pilot legal actions listed: {}", total.pilot_actions_listed);
     println!("Terminal lines: {}", total.terminal_lines);
     println!(
         "Wins/Losses/Draws: {}/{}/{}",
@@ -202,6 +218,7 @@ fn explore_all_branches(
     stats: &mut ExhaustiveStats,
     state_index: u32,
     progress_nodes: &AtomicU64,
+    cycle_cut_enabled: bool,
 ) {
     stats.nodes_explored += 1;
     progress_nodes.fetch_add(1, Ordering::Relaxed);
@@ -231,16 +248,23 @@ fn explore_all_branches(
         return;
     }
 
-    // Cycle cut: if identical state is revisited in this DFS path, this line loops.
-    let state_hash = hash_state(&state);
-    if !seen_hashes.insert(state_hash) {
-        stats.terminal_lines += 1;
-        stats.draws += 1;
-        stats.loops_cut += 1;
-        return;
-    }
+    // Optional cycle cut: expensive due state serialization+hashing per node.
+    let state_hash = if cycle_cut_enabled {
+        let h = hash_state(&state);
+        if !seen_hashes.insert(h) {
+            stats.terminal_lines += 1;
+            stats.draws += 1;
+            stats.loops_cut += 1;
+            return;
+        }
+        Some(h)
+    } else {
+        None
+    };
 
     let actions = legal_actions(&state);
+    stats.decision_nodes += 1;
+    stats.pilot_actions_listed += actions.len() as u64;
     if actions.is_empty() {
         let mut next = state;
         let action = Action::PassPriority;
@@ -257,9 +281,12 @@ fn explore_all_branches(
             stats,
             state_index,
             progress_nodes,
+            cycle_cut_enabled,
         );
         path.pop();
-        seen_hashes.remove(&state_hash);
+        if let Some(h) = state_hash {
+            seen_hashes.remove(&h);
+        }
         return;
     }
 
@@ -278,11 +305,14 @@ fn explore_all_branches(
             stats,
             state_index,
             progress_nodes,
+            cycle_cut_enabled,
         );
         path.pop();
     }
 
-    seen_hashes.remove(&state_hash);
+    if let Some(h) = state_hash {
+        seen_hashes.remove(&h);
+    }
 }
 
 fn choose_non_pilot_action(state: &GameState) -> Action {
@@ -378,6 +408,8 @@ fn merge_stats(total: &mut ExhaustiveStats, local: ExhaustiveStats) {
     total.losses += local.losses;
     total.draws += local.draws;
     total.loops_cut += local.loops_cut;
+    total.decision_nodes += local.decision_nodes;
+    total.pilot_actions_listed += local.pilot_actions_listed;
 
     if let Some(candidate) = local.best_win {
         let replace = match &total.best_win {
