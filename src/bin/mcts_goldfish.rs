@@ -396,6 +396,9 @@ fn run_standard_goldfish(
     if !result.decision_stats.is_empty() {
         println!("\nKey decisions ({} total):", result.decision_stats.len());
         for (i, stat) in result.decision_stats.iter().enumerate().take(30) {
+            if !stat.pilot_hand.is_empty() {
+                println!("        Hand: [{}]", stat.pilot_hand.join(", "));
+            }
             println!(
                 "  #{:<3} T{} {:?}: {} (of {} options, {}/{} visits, Q={:.3})",
                 i + 1,
@@ -498,6 +501,9 @@ fn run_commander_goldfish(
     if !result.decision_stats.is_empty() {
         println!("\nKey decisions ({} total):", result.decision_stats.len());
         for (i, stat) in result.decision_stats.iter().enumerate().take(30) {
+            if !stat.pilot_hand.is_empty() {
+                println!("        Hand: [{}]", stat.pilot_hand.join(", "));
+            }
             println!(
                 "  #{:<3} T{} {:?}: {} (of {} options, {}/{} visits, Q={:.3})",
                 i + 1,
@@ -523,6 +529,9 @@ fn print_fastest_sequence(
     println!("Fastest Win Sequence (T{} kill)", r.fastest_kill);
     println!("─────────────────────────────────");
     for (i, stat) in r.fastest_sequence.iter().enumerate() {
+        if !stat.pilot_hand.is_empty() {
+            println!("        Hand: [{}]", stat.pilot_hand.join(", "));
+        }
         println!(
             "  #{:<3} T{} {:?}: {} (of {} options, {}/{} visits, Q={:.3})",
             i + 1,

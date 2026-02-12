@@ -872,6 +872,16 @@ pub fn format_action_name(state: &GameState, action: &crate::action::Action) -> 
     }
 }
 
+/// Return the card names in a player's hand.
+pub fn format_hand(state: &GameState, player: PlayerIndex) -> Vec<String> {
+    let db = state.card_db();
+    state.players[player].hand.iter().filter_map(|oid| {
+        state.objects.get(oid).and_then(|inst| {
+            db.get(inst.card_def_id).map(|d| d.name.clone())
+        })
+    }).collect()
+}
+
 /// Log a game action to stderr for verbose tracing.
 fn log_action(state: &GameState, action: &crate::action::Action, player: PlayerIndex) {
     let action_name = format_action_name(state, action);

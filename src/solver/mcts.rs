@@ -39,7 +39,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::{legal_actions, Action};
 use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
 use crate::rules;
-use crate::simulation::format_action_name;
+use crate::simulation::{format_action_name, format_hand};
 use crate::strategy::{GoldfishStrategy, GreedyStrategy, Strategy};
 
 /// Maximum turns for goldfish MCTS games (matches simulation module).
@@ -689,6 +689,9 @@ pub struct DecisionStat {
     pub best_action_visits: u32,
     pub best_action_avg_reward: f64,
     pub action_description: String,
+    /// Pilot's hand (card names) at the time of this decision.
+    #[serde(default)]
+    pub pilot_hand: Vec<String>,
 }
 
 /// Run a single goldfish game using MCTS for player 0's decisions.
@@ -738,6 +741,8 @@ pub fn run_mcts_goldfish_game(
             let greedy = GreedyStrategy;
             let action = greedy.choose_action(state, player);
             if verbose {
+                let hand = format_hand(state, 0);
+                trace_lines.push(format!("  Hand: [{}]", hand.join(", ")));
                 trace_lines.push(format!(
                     "T{} {:?} P0: {} (greedy mulligan)",
                     state.turn_number,
@@ -749,6 +754,9 @@ pub fn run_mcts_goldfish_game(
             actions_taken += 1;
             continue;
         }
+
+        // Capture pilot hand before the decision
+        let pilot_hand = format_hand(state, 0);
 
         // Player 0 decision — run MCTS
         let action = if actions.len() == 1 {
@@ -769,12 +777,14 @@ pub fn run_mcts_goldfish_game(
                         best_action_visits: bc.node.visits,
                         best_action_avg_reward: bc.node.avg_reward(),
                         action_description: format_action(&best, state),
+                        pilot_hand: pilot_hand.clone(),
                     };
                     decision_stats.push(stat);
                 }
             }
 
             if verbose {
+                trace_lines.push(format!("  Hand: [{}]", pilot_hand.join(", ")));
                 trace_lines.push(format!(
                     "T{} {:?} P0: {} (of {} actions, {}/{} iters)",
                     state.turn_number,
@@ -874,6 +884,9 @@ impl MctsGoldfishResults {
             if !self.fastest_sequence.is_empty() {
                 println!("\nFastest win (T{}) sequence:", self.fastest_kill);
                 for (i, stat) in self.fastest_sequence.iter().enumerate() {
+                    if !stat.pilot_hand.is_empty() {
+                        println!("        Hand: [{}]", stat.pilot_hand.join(", "));
+                    }
                     println!(
                         "  #{:<3} T{} {:?}: {} (of {} options, Q={:.3})",
                         i + 1,
@@ -1415,6 +1428,7 @@ mod tests {
             best_action_visits: 100,
             best_action_avg_reward: 0.8,
             action_description: "Cast Bolt".to_string(),
+            pilot_hand: vec![],
         }];
         let seq_b = vec![DecisionStat {
             turn: 2,
@@ -1423,6 +1437,7 @@ mod tests {
             best_action_visits: 80,
             best_action_avg_reward: 0.9,
             action_description: "Cast Elf".to_string(),
+            pilot_hand: vec![],
         }];
 
         let a = make_results(100, 80, 10, 10, 5.0, 3, 8, vec![], seq_a);
@@ -1455,6 +1470,7 @@ mod tests {
             best_action_visits: 90,
             best_action_avg_reward: 0.75,
             action_description: "Cast Llanowar Elves".to_string(),
+            pilot_hand: vec![],
         }];
         let a = make_results(10, 0, 0, 10, 0.0, 0, 0, vec![], vec![]);
         let b = make_results(20, 15, 0, 5, 5.0, 3, 7, vec![0, 0, 0, 5, 5, 5], seq_b);
@@ -1494,6 +1510,7 @@ mod tests {
                 best_action_visits: 400,
                 best_action_avg_reward: 0.85,
                 action_description: "Cast Lightning Bolt".to_string(),
+                pilot_hand: vec![],
             }],
         );
 
