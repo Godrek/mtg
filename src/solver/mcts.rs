@@ -826,6 +826,8 @@ pub struct MctsGoldfishResults {
     pub avg_best_reward: f64,
     /// Kill-turn distribution: index = turn number, value = number of wins.
     pub kill_turn_distribution: Vec<u64>,
+    /// Decision sequence from the fastest winning game.
+    pub fastest_sequence: Vec<DecisionStat>,
 }
 
 impl MctsGoldfishResults {
@@ -853,6 +855,20 @@ impl MctsGoldfishResults {
                 if count > 0 {
                     let pct = count as f64 / self.wins as f64 * 100.0;
                     println!("  T{}: {} ({:.1}%)", turn, count, pct);
+                }
+            }
+            if !self.fastest_sequence.is_empty() {
+                println!("\nFastest win (T{}) sequence:", self.fastest_kill);
+                for (i, stat) in self.fastest_sequence.iter().enumerate() {
+                    println!(
+                        "  #{:<3} T{} {:?}: {} (of {} options, Q={:.3})",
+                        i + 1,
+                        stat.turn,
+                        stat.phase,
+                        stat.action_description,
+                        stat.num_legal_actions,
+                        stat.best_action_avg_reward,
+                    );
                 }
             }
         }
