@@ -182,7 +182,7 @@ fn run_standard_checkpoint(
             let mut state = GameState::new(2);
             state.card_db = Some(db_arc);
             rules::setup_game(&mut state, &deck, &deck);
-            mcts::run_mcts_goldfish_game(&mut state, config, false)
+            mcts::run_mcts_goldfish_game(&mut state, config, false, None)
         },
     );
 
@@ -259,7 +259,7 @@ fn run_commander_checkpoint(
             let mut state = GameState::new_commander(2);
             state.card_db = Some(db_arc);
             rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
-            mcts::run_mcts_goldfish_game(&mut state, config, false)
+            mcts::run_mcts_goldfish_game(&mut state, config, false, None)
         },
     );
 
@@ -342,14 +342,15 @@ fn run_standard_goldfish(
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
     let progress = Arc::new(AtomicU64::new(0));
+    let decisions = Arc::new(AtomicU64::new(0));
     let done = Arc::new(AtomicBool::new(false));
-    let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
-    let mcts_results = simulate_mcts_goldfish_with_progress(db, &deck, config, num_games, &progress);
+    let printer = spawn_progress_thread(progress.clone(), decisions.clone(), done.clone(), num_games, t0);
+    let mcts_results = simulate_mcts_goldfish_with_progress(db, &deck, config, num_games, &progress, &decisions);
     done.store(true, Ordering::Relaxed);
     let mcts_time = t0.elapsed();
     eprintln!(
-        "  game {}/{} | {:.1}s elapsed",
-        num_games, num_games, mcts_time.as_secs_f64(),
+        "  game {}/{} | {} decisions | {:.1}s elapsed",
+        num_games, num_games, decisions.load(Ordering::Relaxed), mcts_time.as_secs_f64(),
     );
     let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
@@ -445,14 +446,15 @@ fn run_commander_goldfish(
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
     let progress = Arc::new(AtomicU64::new(0));
+    let decisions = Arc::new(AtomicU64::new(0));
     let done = Arc::new(AtomicBool::new(false));
-    let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
-    let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress);
+    let printer = spawn_progress_thread(progress.clone(), decisions.clone(), done.clone(), num_games, t0);
+    let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress, &decisions);
     done.store(true, Ordering::Relaxed);
     let mcts_time = t0.elapsed();
     eprintln!(
-        "  game {}/{} | {:.1}s elapsed",
-        num_games, num_games, mcts_time.as_secs_f64(),
+        "  game {}/{} | {} decisions | {:.1}s elapsed",
+        num_games, num_games, decisions.load(Ordering::Relaxed), mcts_time.as_secs_f64(),
     );
     let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
@@ -653,6 +655,7 @@ fn merge_and_save_checkpoint(
 /// Returns the thread handle so the caller can join after the simulation completes.
 fn spawn_progress_thread(
     progress: Arc<AtomicU64>,
+    decisions: Arc<AtomicU64>,
     done: Arc<AtomicBool>,
     total: u64,
     start: Instant,
@@ -664,15 +667,17 @@ fn spawn_progress_thread(
                 break;
             }
             let completed = progress.load(Ordering::Relaxed);
+            let total_decisions = decisions.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
-            let eta = if completed > 0 {
-                elapsed / completed as f64 * (total - completed) as f64
+            let eta_str = if completed > 0 {
+                let eta = elapsed / completed as f64 * (total - completed) as f64;
+                format!("{:.0}s", eta)
             } else {
-                0.0
+                "?".to_string()
             };
             eprintln!(
-                "  game {}/{} | {:.1}s elapsed | ETA {:.0}s",
-                completed, total, elapsed, eta,
+                "  game {}/{} | {} decisions | {:.1}s elapsed | ETA {}",
+                completed, total, total_decisions, elapsed, eta_str,
             );
         }
     })
