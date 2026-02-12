@@ -26,12 +26,13 @@
 //!
 //! - Win on turn T: `reward = (MAX_TURN + 1 - T) / MAX_TURN`
 //!   Faster kills get higher rewards (range: ~0.05 to 1.0).
-//! - Draw/loss (game not won by turn limit): `reward = 0.0`
+//! - Draw/loss: partial credit for life reduction, scaled to `[0, 0.04]`
+//!   so any actual kill always beats any non-kill.
 
 use rand::seq::SliceRandom;
 
 use crate::action::{legal_actions, Action};
-use crate::game::{GameState, Phase, PlayerIndex};
+use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
 use crate::rules;
 use crate::simulation::format_action_name;
 use crate::strategy::{GoldfishStrategy, GreedyStrategy, Strategy};
@@ -200,14 +201,35 @@ fn ucb1_select(children: &[MctsChild], parent_visits: u32, c: f64) -> usize {
 /// Returns a value in [0, 1] where:
 /// - Win on turn T: `(MAX_TURN + 1 - T) / MAX_TURN` — faster kills get
 ///   higher reward. Turn 1 kill = 1.0, turn 20 kill = 0.05.
-/// - Loss/draw: 0.0
-fn goldfish_reward(winner: Option<PlayerIndex>, turn: u32) -> f64 {
+/// - No kill: partial credit for life reduction, scaled to `[0, 0.04]` so
+///   any actual kill (min 0.05) always outranks any non-kill. This gives
+///   MCTS gradient signal even when rollouts can't close the game.
+fn goldfish_reward(
+    winner: Option<PlayerIndex>,
+    turn: u32,
+    opponent_life: i32,
+    starting_life: i32,
+) -> f64 {
     match winner {
         Some(0) => {
             let t = turn.min(GOLDFISH_MAX_TURNS);
             (GOLDFISH_MAX_TURNS + 1 - t) as f64 / GOLDFISH_MAX_TURNS as f64
         }
-        _ => 0.0,
+        _ => {
+            // Reward shaping: partial credit for damage dealt.
+            // Scale to [0, 0.04] — strictly below worst win (T20 = 0.05).
+            let damage = (starting_life - opponent_life).max(0) as f64;
+            let fraction = (damage / starting_life as f64).min(1.0);
+            fraction * 0.04
+        }
+    }
+}
+
+/// Starting life total for a game format.
+fn format_starting_life(format: GameFormat) -> i32 {
+    match format {
+        GameFormat::Commander => 40,
+        GameFormat::Standard => 20,
     }
 }
 
@@ -275,7 +297,8 @@ fn tree_walk(
     loop {
         // Terminal check
         if state.game_over || state.turn_number > GOLDFISH_MAX_TURNS {
-            return goldfish_reward(state.winner, state.turn_number);
+            let sl = format_starting_life(state.format);
+            return goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl);
         }
 
         // Depth limit — switch to rollout
@@ -297,6 +320,18 @@ fn tree_walk(
         // Goldfish (player 1) — deterministic, no branching
         if player != 0 {
             let action = goldfish_strategy.choose_action(state, player);
+            rules::apply_action(state, &action);
+            continue;
+        }
+
+        // Mulligan phase — handle with rollout strategy, no tree branching.
+        // MulliganMulligan introduces stochasticity (random shuffle/draw) that
+        // breaks MCTS tree reuse: the same tree node would be visited with
+        // different hands across iterations, causing action mismatches that
+        // corrupt the mulligan state machine. The GreedyStrategy heuristic
+        // handles mulligans well, so we skip tree search for this phase.
+        if state.phase == Phase::Mulligan {
+            let action = rollout_strategy.choose_action(state, player);
             rules::apply_action(state, &action);
             continue;
         }
@@ -400,7 +435,8 @@ fn rollout(
         }
     }
 
-    goldfish_reward(state.winner, state.turn_number)
+    let sl = format_starting_life(state.format);
+    goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl)
 }
 
 /// Select the action with the highest visit count (most robust child selection).
@@ -442,6 +478,13 @@ impl Strategy for MctsStrategy {
         // MCTS only makes sense for the pilot (player 0)
         if player != 0 {
             return GoldfishStrategy.choose_action(state, player);
+        }
+
+        // Mulligan phase — delegate to GreedyStrategy. MCTS tree search is
+        // unsound for mulligans because MulliganMulligan introduces stochastic
+        // shuffle/draw that breaks tree node reuse across iterations.
+        if state.phase == Phase::Mulligan {
+            return GreedyStrategy.choose_action(state, player);
         }
 
         let actions = legal_actions(state);
@@ -523,6 +566,26 @@ pub fn run_mcts_goldfish_game(
         if player != 0 {
             // Goldfish — deterministic, no search needed
             let action = goldfish.choose_action(state, player);
+            rules::apply_action(state, &action);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Mulligan phase — use GreedyStrategy heuristic directly.
+        // MCTS tree search over mulligan decisions is unsound because
+        // MulliganMulligan involves stochastic shuffle/draw, causing
+        // tree nodes to be visited with different hands across iterations.
+        if state.phase == Phase::Mulligan {
+            let greedy = GreedyStrategy;
+            let action = greedy.choose_action(state, player);
+            if verbose {
+                eprintln!(
+                    "T{} {:?} P0: {} (greedy mulligan)",
+                    state.turn_number,
+                    state.phase,
+                    format_action(&action, state),
+                );
+            }
             rules::apply_action(state, &action);
             actions_taken += 1;
             continue;
@@ -652,16 +715,32 @@ mod tests {
 
     #[test]
     fn test_goldfish_reward() {
-        // Win on turn 1 → highest reward
-        assert!((goldfish_reward(Some(0), 1) - 1.0).abs() < 1e-10);
+        // Win on turn 1 → highest reward (opponent life irrelevant for wins)
+        assert!((goldfish_reward(Some(0), 1, 0, 20) - 1.0).abs() < 1e-10);
         // Win on turn 20 → lowest positive reward
-        assert!((goldfish_reward(Some(0), 20) - 1.0 / 20.0).abs() < 1e-10);
+        assert!((goldfish_reward(Some(0), 20, 0, 20) - 1.0 / 20.0).abs() < 1e-10);
         // Win on turn 5
-        assert!((goldfish_reward(Some(0), 5) - 16.0 / 20.0).abs() < 1e-10);
-        // Loss
-        assert!((goldfish_reward(Some(1), 5)).abs() < 1e-10);
-        // Draw
-        assert!((goldfish_reward(None, 20)).abs() < 1e-10);
+        assert!((goldfish_reward(Some(0), 5, 0, 20) - 16.0 / 20.0).abs() < 1e-10);
+        // Loss with no damage → 0.0
+        assert!((goldfish_reward(Some(1), 5, 20, 20)).abs() < 1e-10);
+        // Draw with no damage → 0.0
+        assert!((goldfish_reward(None, 20, 20, 20)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_goldfish_reward_shaping() {
+        // No kill, no damage → 0.0
+        assert!((goldfish_reward(None, 20, 40, 40)).abs() < 1e-10);
+        // No kill, half damage (40 → 20) → 0.02
+        assert!((goldfish_reward(None, 20, 20, 40) - 0.02).abs() < 1e-10);
+        // No kill, most damage (40 → 1) → 39/40 * 0.04 = 0.039
+        assert!((goldfish_reward(None, 20, 1, 40) - 39.0 / 40.0 * 0.04).abs() < 1e-10);
+        // Shaping reward is always less than worst win (T20 = 0.05)
+        let worst_win = goldfish_reward(Some(0), 20, 0, 40);
+        let best_shaping = goldfish_reward(None, 20, 0, 40);
+        assert!(best_shaping < worst_win);
+        // Standard format: no kill, half damage (20 → 10) → 0.02
+        assert!((goldfish_reward(None, 20, 10, 20) - 0.02).abs() < 1e-10);
     }
 
     #[test]
