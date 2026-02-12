@@ -31,6 +31,7 @@
 
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::action::{legal_actions, Action};
 use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
@@ -659,7 +660,7 @@ impl Strategy for MctsStrategy {
 // ---------------------------------------------------------------------------
 
 /// Result of a single MCTS goldfish game.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MctsGameResult {
     /// Whether player 0 won.
     pub won: bool,
@@ -674,7 +675,7 @@ pub struct MctsGameResult {
 }
 
 /// Statistics for a single MCTS decision point.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionStat {
     pub turn: u32,
     pub phase: Phase,
@@ -812,7 +813,7 @@ fn format_action(action: &Action, state: &GameState) -> String {
 // ---------------------------------------------------------------------------
 
 /// Aggregate results from many MCTS goldfish games.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MctsGoldfishResults {
     pub total_games: u64,
     pub wins: u64,
@@ -872,6 +873,109 @@ impl MctsGoldfishResults {
                 }
             }
         }
+    }
+
+    /// Merge another set of results into this one, combining statistics
+    /// from multiple runs so that iterative progress accumulates.
+    ///
+    /// Counts are summed, averages are recomputed from weighted totals,
+    /// and the fastest win sequence is kept from whichever run had the
+    /// faster kill.
+    pub fn merge(&self, other: &MctsGoldfishResults) -> MctsGoldfishResults {
+        let total_games = self.total_games + other.total_games;
+        let wins = self.wins + other.wins;
+        let losses = self.losses + other.losses;
+        let draws = self.draws + other.draws;
+
+        // Reconstruct totals from averages, then recompute combined averages.
+        let total_kill_turns =
+            self.avg_kill_turn * self.wins as f64 + other.avg_kill_turn * other.wins as f64;
+        let avg_kill_turn = if wins > 0 {
+            total_kill_turns / wins as f64
+        } else {
+            0.0
+        };
+
+        let total_actions =
+            self.avg_actions * self.total_games as f64 + other.avg_actions * other.total_games as f64;
+        let avg_actions = if total_games > 0 {
+            total_actions / total_games as f64
+        } else {
+            0.0
+        };
+
+        let total_decisions = self.avg_decisions_per_game * self.total_games as f64
+            + other.avg_decisions_per_game * other.total_games as f64;
+        let avg_decisions_per_game = if total_games > 0 {
+            total_decisions / total_games as f64
+        } else {
+            0.0
+        };
+
+        let total_reward = self.avg_best_reward * self.total_games as f64
+            + other.avg_best_reward * other.total_games as f64;
+        let avg_best_reward = if total_games > 0 {
+            total_reward / total_games as f64
+        } else {
+            0.0
+        };
+
+        // Min/max across both runs (handle 0 = no wins).
+        let fastest_kill = match (self.wins > 0, other.wins > 0) {
+            (true, true) => self.fastest_kill.min(other.fastest_kill),
+            (true, false) => self.fastest_kill,
+            (false, true) => other.fastest_kill,
+            (false, false) => 0,
+        };
+        let slowest_kill = self.slowest_kill.max(other.slowest_kill);
+
+        // Merge kill-turn distributions (element-wise sum).
+        let max_len = self
+            .kill_turn_distribution
+            .len()
+            .max(other.kill_turn_distribution.len());
+        let mut kill_turn_distribution = vec![0u64; max_len];
+        for (i, v) in self.kill_turn_distribution.iter().enumerate() {
+            kill_turn_distribution[i] += v;
+        }
+        for (i, v) in other.kill_turn_distribution.iter().enumerate() {
+            kill_turn_distribution[i] += v;
+        }
+
+        // Keep the fastest sequence from whichever run achieved it.
+        let fastest_sequence = if other.wins > 0 && other.fastest_kill < self.fastest_kill {
+            other.fastest_sequence.clone()
+        } else {
+            self.fastest_sequence.clone()
+        };
+
+        MctsGoldfishResults {
+            total_games,
+            wins,
+            losses,
+            draws,
+            avg_kill_turn,
+            fastest_kill,
+            slowest_kill,
+            avg_actions,
+            avg_decisions_per_game,
+            avg_best_reward,
+            kill_turn_distribution,
+            fastest_sequence,
+        }
+    }
+
+    /// Save results to a JSON checkpoint file.
+    pub fn save_checkpoint(&self, path: &str) -> Result<(), String> {
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| format!("serialize: {}", e))?;
+        std::fs::write(path, json).map_err(|e| format!("write {}: {}", path, e))
+    }
+
+    /// Load results from a JSON checkpoint file.
+    pub fn load_checkpoint(path: &str) -> Result<MctsGoldfishResults, String> {
+        let data = std::fs::read_to_string(path).map_err(|e| format!("read {}: {}", path, e))?;
+        serde_json::from_str(&data).map_err(|e| format!("deserialize {}: {}", path, e))
     }
 }
 
@@ -1059,5 +1163,170 @@ mod tests {
         // First 3 threads get 26, last gets 25
         assert_eq!(assigned, vec![26, 26, 26, 25]);
         assert_eq!(assigned.iter().sum::<u32>(), total_iters);
+    }
+
+    /// Helper to create a test MctsGoldfishResults with given parameters.
+    fn make_results(
+        total_games: u64,
+        wins: u64,
+        losses: u64,
+        draws: u64,
+        avg_kill_turn: f64,
+        fastest_kill: u32,
+        slowest_kill: u32,
+        kill_turn_distribution: Vec<u64>,
+        fastest_sequence: Vec<DecisionStat>,
+    ) -> MctsGoldfishResults {
+        MctsGoldfishResults {
+            total_games,
+            wins,
+            losses,
+            draws,
+            avg_kill_turn,
+            fastest_kill,
+            slowest_kill,
+            avg_actions: 50.0,
+            avg_decisions_per_game: 10.0,
+            avg_best_reward: 0.7,
+            kill_turn_distribution,
+            fastest_sequence,
+        }
+    }
+
+    #[test]
+    fn test_merge_sums_counts() {
+        let a = make_results(100, 80, 5, 15, 5.0, 3, 8, vec![0, 0, 0, 10, 30, 40], vec![]);
+        let b = make_results(50, 45, 2, 3, 4.5, 2, 7, vec![0, 0, 5, 15, 15, 10], vec![]);
+
+        let merged = a.merge(&b);
+
+        assert_eq!(merged.total_games, 150);
+        assert_eq!(merged.wins, 125);
+        assert_eq!(merged.losses, 7);
+        assert_eq!(merged.draws, 18);
+    }
+
+    #[test]
+    fn test_merge_recomputes_averages() {
+        // a: 100 games, 80 wins, avg_kill=5.0  → total_kill_turns = 400
+        // b: 50 games, 40 wins, avg_kill=4.0  → total_kill_turns = 160
+        // merged: 120 wins, total_kill_turns = 560, avg = 560/120 ≈ 4.667
+        let a = make_results(100, 80, 10, 10, 5.0, 3, 8, vec![], vec![]);
+        let b = make_results(50, 40, 5, 5, 4.0, 2, 6, vec![], vec![]);
+
+        let merged = a.merge(&b);
+
+        let expected_avg = (5.0 * 80.0 + 4.0 * 40.0) / 120.0;
+        assert!((merged.avg_kill_turn - expected_avg).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_merge_fastest_slowest() {
+        let a = make_results(100, 80, 10, 10, 5.0, 3, 8, vec![], vec![]);
+        let b = make_results(50, 40, 5, 5, 4.0, 2, 9, vec![], vec![]);
+
+        let merged = a.merge(&b);
+
+        assert_eq!(merged.fastest_kill, 2);
+        assert_eq!(merged.slowest_kill, 9);
+    }
+
+    #[test]
+    fn test_merge_keeps_faster_sequence() {
+        let seq_a = vec![DecisionStat {
+            turn: 3,
+            phase: Phase::PreCombatMain,
+            num_legal_actions: 5,
+            best_action_visits: 100,
+            best_action_avg_reward: 0.8,
+            action_description: "Cast Bolt".to_string(),
+        }];
+        let seq_b = vec![DecisionStat {
+            turn: 2,
+            phase: Phase::PreCombatMain,
+            num_legal_actions: 3,
+            best_action_visits: 80,
+            best_action_avg_reward: 0.9,
+            action_description: "Cast Elf".to_string(),
+        }];
+
+        let a = make_results(100, 80, 10, 10, 5.0, 3, 8, vec![], seq_a);
+        let b = make_results(50, 40, 5, 5, 4.0, 2, 6, vec![], seq_b);
+
+        let merged = a.merge(&b);
+        // b has faster kill (T2 < T3), so its sequence should be kept
+        assert_eq!(merged.fastest_sequence.len(), 1);
+        assert_eq!(merged.fastest_sequence[0].action_description, "Cast Elf");
+    }
+
+    #[test]
+    fn test_merge_distribution() {
+        // a: [0, 0, 0, 10, 20]
+        // b: [0, 0, 5, 15, 10, 3]  (longer)
+        let a = make_results(30, 30, 0, 0, 4.0, 3, 4, vec![0, 0, 0, 10, 20], vec![]);
+        let b = make_results(33, 33, 0, 0, 4.0, 2, 5, vec![0, 0, 5, 15, 10, 3], vec![]);
+
+        let merged = a.merge(&b);
+
+        assert_eq!(merged.kill_turn_distribution, vec![0, 0, 5, 25, 30, 3]);
+    }
+
+    #[test]
+    fn test_merge_with_no_wins() {
+        let a = make_results(10, 0, 0, 10, 0.0, 0, 0, vec![], vec![]);
+        let b = make_results(20, 15, 0, 5, 5.0, 3, 7, vec![0, 0, 0, 5, 5, 5], vec![]);
+
+        let merged = a.merge(&b);
+
+        assert_eq!(merged.wins, 15);
+        assert_eq!(merged.fastest_kill, 3);
+        assert_eq!(merged.slowest_kill, 7);
+        assert!((merged.avg_kill_turn - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_checkpoint_round_trip() {
+        let results = make_results(
+            100, 80, 10, 10, 5.0, 3, 8,
+            vec![0, 0, 0, 10, 30, 40],
+            vec![DecisionStat {
+                turn: 3,
+                phase: Phase::PreCombatMain,
+                num_legal_actions: 5,
+                best_action_visits: 400,
+                best_action_avg_reward: 0.85,
+                action_description: "Cast Lightning Bolt".to_string(),
+            }],
+        );
+
+        let dir = std::env::temp_dir();
+        let path = dir.join("mcts_test_checkpoint.json");
+        let path_str = path.to_str().unwrap();
+
+        results.save_checkpoint(path_str).unwrap();
+        let loaded = MctsGoldfishResults::load_checkpoint(path_str).unwrap();
+
+        assert_eq!(loaded.total_games, results.total_games);
+        assert_eq!(loaded.wins, results.wins);
+        assert_eq!(loaded.losses, results.losses);
+        assert_eq!(loaded.draws, results.draws);
+        assert!((loaded.avg_kill_turn - results.avg_kill_turn).abs() < 1e-10);
+        assert_eq!(loaded.fastest_kill, results.fastest_kill);
+        assert_eq!(loaded.slowest_kill, results.slowest_kill);
+        assert_eq!(loaded.kill_turn_distribution, results.kill_turn_distribution);
+        assert_eq!(loaded.fastest_sequence.len(), 1);
+        assert_eq!(
+            loaded.fastest_sequence[0].action_description,
+            "Cast Lightning Bolt"
+        );
+
+        // Clean up
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_checkpoint_load_missing_file() {
+        let result = MctsGoldfishResults::load_checkpoint("/tmp/nonexistent_mcts_ckpt_12345.json");
+        assert!(result.is_err());
     }
 }

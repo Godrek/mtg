@@ -32,7 +32,7 @@ use mtg_gto::simulation::{
     simulate_mcts_goldfish_with_progress, simulate_mcts_commander_goldfish_with_progress,
     run_mcts_goldfish_game, run_mcts_commander_goldfish_game,
 };
-use mtg_gto::solver::mcts::MctsConfig;
+use mtg_gto::solver::mcts::{MctsConfig, MctsGoldfishResults};
 use mtg_gto::strategy::GreedyStrategy;
 
 fn main() {
@@ -63,6 +63,7 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "red".to_string());
+    let checkpoint_path = std::env::var("CHECKPOINT").ok();
 
     let db = sample::build_sample_db();
 
@@ -86,12 +87,15 @@ fn main() {
     println!("Tree depth: {}", if max_depth == 0 { "unlimited".to_string() } else { format!("{}", max_depth) });
     println!("Threads:    {}{}", num_threads.max(1), if num_threads <= 1 { " (single-threaded)" } else { " (root parallelization)" });
     println!("Games:      {}", num_games);
+    if let Some(ref cp) = checkpoint_path {
+        println!("Checkpoint: {}", cp);
+    }
     println!();
 
     if is_commander {
-        run_commander_goldfish(&db, &deck_name, &config, num_games);
+        run_commander_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
     } else {
-        run_standard_goldfish(&db, &deck_name, &config, num_games);
+        run_standard_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
     }
 }
 
@@ -100,6 +104,7 @@ fn run_standard_goldfish(
     deck_name: &str,
     config: &MctsConfig,
     num_games: u64,
+    checkpoint_path: Option<&str>,
 ) {
     let deck = match deck_name {
         "green" => sample::green_stompy_deck(),
@@ -128,6 +133,9 @@ fn run_standard_goldfish(
     );
     let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
+
+    // ── 2b. Checkpoint: load previous + merge + save ──────────────────
+    let mcts_results = merge_and_save_checkpoint(mcts_results, checkpoint_path);
 
     // ── 3. Comparison ──────────────────────────────────────────────────
     println!("Strategy Comparison");
@@ -189,6 +197,7 @@ fn run_commander_goldfish(
     deck_name: &str,
     config: &MctsConfig,
     num_games: u64,
+    checkpoint_path: Option<&str>,
 ) {
     let (deck, commander, _tutor_targets) = match deck_name {
         "brimaz" => {
@@ -227,6 +236,9 @@ fn run_commander_goldfish(
     );
     let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
+
+    // ── 2b. Checkpoint: load previous + merge + save ──────────────────
+    let mcts_results = merge_and_save_checkpoint(mcts_results, checkpoint_path);
 
     // ── 3. Comparison ──────────────────────────────────────────────────
     println!("Strategy Comparison");
@@ -368,6 +380,51 @@ fn print_distribution_comparison(
             turn, pg, pm,
         );
     }
+}
+
+/// Load a previous checkpoint (if it exists), merge new results into it,
+/// save the combined results back, and return them. If no checkpoint path
+/// is given, the new results are returned as-is.
+fn merge_and_save_checkpoint(
+    new_results: MctsGoldfishResults,
+    checkpoint_path: Option<&str>,
+) -> MctsGoldfishResults {
+    let Some(path) = checkpoint_path else {
+        return new_results;
+    };
+
+    // Try to load a previous checkpoint.
+    let merged = if std::path::Path::new(path).exists() {
+        match MctsGoldfishResults::load_checkpoint(path) {
+            Ok(previous) => {
+                let merged = previous.merge(&new_results);
+                println!(
+                    "Checkpoint: merged {} new games with {} previous → {} total",
+                    new_results.total_games, previous.total_games, merged.total_games,
+                );
+                merged
+            }
+            Err(e) => {
+                eprintln!("Warning: failed to load checkpoint {}: {}", path, e);
+                eprintln!("Starting fresh checkpoint with current results.");
+                new_results
+            }
+        }
+    } else {
+        println!(
+            "Checkpoint: saving {} games (new checkpoint)",
+            new_results.total_games,
+        );
+        new_results
+    };
+
+    // Save the (possibly merged) results.
+    if let Err(e) = merged.save_checkpoint(path) {
+        eprintln!("Warning: failed to save checkpoint {}: {}", path, e);
+    }
+    println!();
+
+    merged
 }
 
 /// Spawn a background thread that prints MCTS game-level progress every 2 seconds.
