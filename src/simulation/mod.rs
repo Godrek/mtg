@@ -597,7 +597,7 @@ pub fn run_mcts_goldfish_game(
     let mut state = GameState::new(2);
     state.card_db = Some(db);
     rules::setup_game(&mut state, deck, deck);
-    mcts::run_mcts_goldfish_game(&mut state, config, verbose)
+    mcts::run_mcts_goldfish_game(&mut state, config, verbose, None)
 }
 
 /// Run a single Commander goldfish game using MCTS.
@@ -612,7 +612,7 @@ pub fn run_mcts_commander_goldfish_game(
     let mut state = GameState::new_commander(2);
     state.card_db = Some(db);
     rules::setup_commander_game(&mut state, deck, deck, commander, commander);
-    mcts::run_mcts_goldfish_game(&mut state, config, verbose)
+    mcts::run_mcts_goldfish_game(&mut state, config, verbose, None)
 }
 
 /// Run many MCTS goldfish games in parallel and aggregate results.
@@ -632,7 +632,7 @@ pub fn simulate_mcts_goldfish(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_game(&mut state, deck, deck);
         state
-    }, None)
+    }, None, None)
 }
 
 /// Like [`simulate_mcts_goldfish`], but increments `progress` after each game
@@ -643,6 +643,7 @@ pub fn simulate_mcts_goldfish_with_progress(
     config: &MctsConfig,
     num_games: u64,
     progress: &AtomicU64,
+    decisions: &AtomicU64,
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
     aggregate_mcts_goldfish_results(num_games, config, |_| {
@@ -650,7 +651,7 @@ pub fn simulate_mcts_goldfish_with_progress(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_game(&mut state, deck, deck);
         state
-    }, Some(progress))
+    }, Some(progress), Some(decisions))
 }
 
 /// Run many Commander MCTS goldfish games in parallel and aggregate results.
@@ -667,7 +668,7 @@ pub fn simulate_mcts_commander_goldfish(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_commander_game(&mut state, deck, deck, commander, commander);
         state
-    }, None)
+    }, None, None)
 }
 
 /// Like [`simulate_mcts_commander_goldfish`], but increments `progress` after
@@ -679,6 +680,7 @@ pub fn simulate_mcts_commander_goldfish_with_progress(
     config: &MctsConfig,
     num_games: u64,
     progress: &AtomicU64,
+    decisions: &AtomicU64,
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
     aggregate_mcts_goldfish_results(num_games, config, |_| {
@@ -686,7 +688,7 @@ pub fn simulate_mcts_commander_goldfish_with_progress(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_commander_game(&mut state, deck, deck, commander, commander);
         state
-    }, Some(progress))
+    }, Some(progress), Some(decisions))
 }
 
 /// Shared aggregation logic for MCTS goldfish simulations.
@@ -698,6 +700,7 @@ fn aggregate_mcts_goldfish_results(
     config: &MctsConfig,
     make_state: impl Fn(u64) -> GameState + Send + Sync,
     progress: Option<&AtomicU64>,
+    decisions: Option<&AtomicU64>,
 ) -> MctsGoldfishResults {
     use std::sync::Mutex;
 
@@ -721,7 +724,7 @@ fn aggregate_mcts_goldfish_results(
 
     (0..num_games).into_par_iter().for_each(|i| {
         let mut state = make_state(i);
-        let result = mcts::run_mcts_goldfish_game(&mut state, config, false);
+        let result = mcts::run_mcts_goldfish_game(&mut state, config, false, decisions);
 
         total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
 

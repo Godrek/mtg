@@ -30,6 +30,7 @@
 //!   so any actual kill always beats any non-kill.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
@@ -696,6 +697,7 @@ pub fn run_mcts_goldfish_game(
     state: &mut GameState,
     config: &MctsConfig,
     verbose: bool,
+    decisions_counter: Option<&AtomicU64>,
 ) -> MctsGameResult {
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
@@ -786,6 +788,10 @@ pub fn run_mcts_goldfish_game(
 
             best
         };
+
+        if let Some(counter) = decisions_counter {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }
 
         rules::apply_action(state, &action);
         actions_taken += 1;
