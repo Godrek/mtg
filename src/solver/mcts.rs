@@ -301,6 +301,18 @@ fn tree_walk(
             continue;
         }
 
+        // Mulligan phase — handle with rollout strategy, no tree branching.
+        // MulliganMulligan introduces stochasticity (random shuffle/draw) that
+        // breaks MCTS tree reuse: the same tree node would be visited with
+        // different hands across iterations, causing action mismatches that
+        // corrupt the mulligan state machine. The GreedyStrategy heuristic
+        // handles mulligans well, so we skip tree search for this phase.
+        if state.phase == Phase::Mulligan {
+            let action = rollout_strategy.choose_action(state, player);
+            rules::apply_action(state, &action);
+            continue;
+        }
+
         // --- Player 0 decision node — break out of loop to handle below ---
         break;
     }
@@ -444,6 +456,13 @@ impl Strategy for MctsStrategy {
             return GoldfishStrategy.choose_action(state, player);
         }
 
+        // Mulligan phase — delegate to GreedyStrategy. MCTS tree search is
+        // unsound for mulligans because MulliganMulligan introduces stochastic
+        // shuffle/draw that breaks tree node reuse across iterations.
+        if state.phase == Phase::Mulligan {
+            return GreedyStrategy.choose_action(state, player);
+        }
+
         let actions = legal_actions(state);
         if actions.is_empty() {
             return Action::PassPriority;
@@ -523,6 +542,26 @@ pub fn run_mcts_goldfish_game(
         if player != 0 {
             // Goldfish — deterministic, no search needed
             let action = goldfish.choose_action(state, player);
+            rules::apply_action(state, &action);
+            actions_taken += 1;
+            continue;
+        }
+
+        // Mulligan phase — use GreedyStrategy heuristic directly.
+        // MCTS tree search over mulligan decisions is unsound because
+        // MulliganMulligan involves stochastic shuffle/draw, causing
+        // tree nodes to be visited with different hands across iterations.
+        if state.phase == Phase::Mulligan {
+            let greedy = GreedyStrategy;
+            let action = greedy.choose_action(state, player);
+            if verbose {
+                eprintln!(
+                    "T{} {:?} P0: {} (greedy mulligan)",
+                    state.turn_number,
+                    state.phase,
+                    format_action(&action, state),
+                );
+            }
             rules::apply_action(state, &action);
             actions_taken += 1;
             continue;
