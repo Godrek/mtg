@@ -377,11 +377,13 @@ fn run_standard_goldfish(
     print_fastest_sequence(&mcts_results, config);
 
     // ── 6. Sample game trace ───────────────────────────────────────────
+    let result = run_mcts_goldfish_game(db, &deck, config, true);
+
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
-    println!("(Actions logged to stderr)\n");
-
-    let result = run_mcts_goldfish_game(db, &deck, config, true);
+    for line in &result.trace_lines {
+        println!("{}", line);
+    }
     println!(
         "Result: {} on T{} ({} actions), life: {}/{}",
         if result.won { "WIN" } else { "DRAW" },
@@ -476,11 +478,13 @@ fn run_commander_goldfish(
     print_fastest_sequence(&mcts_results, config);
 
     // ── 6. Sample game trace ───────────────────────────────────────────
+    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true);
+
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
-    println!("(Actions logged to stderr)\n");
-
-    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true);
+    for line in &result.trace_lines {
+        println!("{}", line);
+    }
     println!(
         "Result: {} on T{} ({} actions), life: {}/{}",
         if result.won { "WIN" } else { "DRAW" },
