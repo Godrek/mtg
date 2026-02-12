@@ -632,7 +632,25 @@ pub fn simulate_mcts_goldfish(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_game(&mut state, deck, deck);
         state
-    })
+    }, None)
+}
+
+/// Like [`simulate_mcts_goldfish`], but increments `progress` after each game
+/// completes so a background thread can report progress.
+pub fn simulate_mcts_goldfish_with_progress(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    config: &MctsConfig,
+    num_games: u64,
+    progress: &AtomicU64,
+) -> MctsGoldfishResults {
+    let db = Arc::new(card_db.clone());
+    aggregate_mcts_goldfish_results(num_games, config, |_| {
+        let mut state = GameState::new(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_game(&mut state, deck, deck);
+        state
+    }, Some(progress))
 }
 
 /// Run many Commander MCTS goldfish games in parallel and aggregate results.
@@ -649,14 +667,37 @@ pub fn simulate_mcts_commander_goldfish(
         state.card_db = Some(Arc::clone(&db));
         rules::setup_commander_game(&mut state, deck, deck, commander, commander);
         state
-    })
+    }, None)
+}
+
+/// Like [`simulate_mcts_commander_goldfish`], but increments `progress` after
+/// each game completes so a background thread can report progress.
+pub fn simulate_mcts_commander_goldfish_with_progress(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    commander: CardId,
+    config: &MctsConfig,
+    num_games: u64,
+    progress: &AtomicU64,
+) -> MctsGoldfishResults {
+    let db = Arc::new(card_db.clone());
+    aggregate_mcts_goldfish_results(num_games, config, |_| {
+        let mut state = GameState::new_commander(2);
+        state.card_db = Some(Arc::clone(&db));
+        rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+        state
+    }, Some(progress))
 }
 
 /// Shared aggregation logic for MCTS goldfish simulations.
+///
+/// If `progress` is provided, it is incremented (atomically) after each game
+/// completes, allowing a background thread to report progress.
 fn aggregate_mcts_goldfish_results(
     num_games: u64,
     config: &MctsConfig,
     make_state: impl Fn(u64) -> GameState + Send + Sync,
+    progress: Option<&AtomicU64>,
 ) -> MctsGoldfishResults {
     use std::sync::Mutex;
 
@@ -711,6 +752,10 @@ fn aggregate_mcts_goldfish_results(
             losses.fetch_add(1, Ordering::Relaxed);
         } else {
             draws.fetch_add(1, Ordering::Relaxed);
+        }
+
+        if let Some(p) = progress {
+            p.fetch_add(1, Ordering::Relaxed);
         }
     });
 
