@@ -20,6 +20,7 @@
 //!   GAMES=100         Number of games to simulate (default: 100)
 //!   DECK=red          Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: red)
 //!   FORMAT=standard   Format: "standard" or "commander" (default: auto-detect)
+//!   CHECKPOINT=path   Save/resume results to/from a JSON checkpoint file (optional)
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -389,12 +390,13 @@ fn merge_and_save_checkpoint(
     new_results: MctsGoldfishResults,
     checkpoint_path: Option<&str>,
 ) -> MctsGoldfishResults {
-    let Some(path) = checkpoint_path else {
+    let Some(cp) = checkpoint_path else {
         return new_results;
     };
+    let path = std::path::Path::new(cp);
 
     // Try to load a previous checkpoint.
-    let merged = if std::path::Path::new(path).exists() {
+    let merged = if path.exists() {
         match MctsGoldfishResults::load_checkpoint(path) {
             Ok(previous) => {
                 let merged = previous.merge(&new_results);
@@ -405,7 +407,7 @@ fn merge_and_save_checkpoint(
                 merged
             }
             Err(e) => {
-                eprintln!("Warning: failed to load checkpoint {}: {}", path, e);
+                eprintln!("Warning: failed to load checkpoint {}: {}", path.display(), e);
                 eprintln!("Starting fresh checkpoint with current results.");
                 new_results
             }
@@ -420,7 +422,7 @@ fn merge_and_save_checkpoint(
 
     // Save the (possibly merged) results.
     if let Err(e) = merged.save_checkpoint(path) {
-        eprintln!("Warning: failed to save checkpoint {}: {}", path, e);
+        eprintln!("Warning: failed to save checkpoint {}: {}", path.display(), e);
     }
     println!();
 

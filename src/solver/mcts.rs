@@ -943,10 +943,17 @@ impl MctsGoldfishResults {
         }
 
         // Keep the fastest sequence from whichever run achieved it.
-        let fastest_sequence = if other.wins > 0 && other.fastest_kill < self.fastest_kill {
-            other.fastest_sequence.clone()
-        } else {
-            self.fastest_sequence.clone()
+        let fastest_sequence = match (self.wins > 0, other.wins > 0) {
+            (true, true) => {
+                if other.fastest_kill < self.fastest_kill {
+                    other.fastest_sequence.clone()
+                } else {
+                    self.fastest_sequence.clone()
+                }
+            }
+            (true, false) => self.fastest_sequence.clone(),
+            (false, true) => other.fastest_sequence.clone(),
+            (false, false) => vec![],
         };
 
         MctsGoldfishResults {
@@ -966,16 +973,19 @@ impl MctsGoldfishResults {
     }
 
     /// Save results to a JSON checkpoint file.
-    pub fn save_checkpoint(&self, path: &str) -> Result<(), String> {
+    pub fn save_checkpoint(&self, path: &std::path::Path) -> Result<(), String> {
         let json =
             serde_json::to_string_pretty(self).map_err(|e| format!("serialize: {}", e))?;
-        std::fs::write(path, json).map_err(|e| format!("write {}: {}", path, e))
+        std::fs::write(path, json)
+            .map_err(|e| format!("write {}: {}", path.display(), e))
     }
 
     /// Load results from a JSON checkpoint file.
-    pub fn load_checkpoint(path: &str) -> Result<MctsGoldfishResults, String> {
-        let data = std::fs::read_to_string(path).map_err(|e| format!("read {}: {}", path, e))?;
-        serde_json::from_str(&data).map_err(|e| format!("deserialize {}: {}", path, e))
+    pub fn load_checkpoint(path: &std::path::Path) -> Result<MctsGoldfishResults, String> {
+        let data = std::fs::read_to_string(path)
+            .map_err(|e| format!("read {}: {}", path.display(), e))?;
+        serde_json::from_str(&data)
+            .map_err(|e| format!("deserialize {}: {}", path.display(), e))
     }
 }
 
@@ -1273,8 +1283,16 @@ mod tests {
 
     #[test]
     fn test_merge_with_no_wins() {
+        let seq_b = vec![DecisionStat {
+            turn: 3,
+            phase: Phase::PreCombatMain,
+            num_legal_actions: 4,
+            best_action_visits: 90,
+            best_action_avg_reward: 0.75,
+            action_description: "Cast Llanowar Elves".to_string(),
+        }];
         let a = make_results(10, 0, 0, 10, 0.0, 0, 0, vec![], vec![]);
-        let b = make_results(20, 15, 0, 5, 5.0, 3, 7, vec![0, 0, 0, 5, 5, 5], vec![]);
+        let b = make_results(20, 15, 0, 5, 5.0, 3, 7, vec![0, 0, 0, 5, 5, 5], seq_b);
 
         let merged = a.merge(&b);
 
@@ -1282,6 +1300,21 @@ mod tests {
         assert_eq!(merged.fastest_kill, 3);
         assert_eq!(merged.slowest_kill, 7);
         assert!((merged.avg_kill_turn - 5.0).abs() < 1e-10);
+        // Sequence from b should be kept since a has no wins
+        assert_eq!(merged.fastest_sequence.len(), 1);
+        assert_eq!(
+            merged.fastest_sequence[0].action_description,
+            "Cast Llanowar Elves"
+        );
+    }
+
+    /// Drop guard that removes a file when it goes out of scope,
+    /// ensuring cleanup even if a test panics.
+    struct TempFileGuard(std::path::PathBuf);
+    impl Drop for TempFileGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
     }
 
     #[test]
@@ -1299,12 +1332,11 @@ mod tests {
             }],
         );
 
-        let dir = std::env::temp_dir();
-        let path = dir.join("mcts_test_checkpoint.json");
-        let path_str = path.to_str().unwrap();
+        let path = std::env::temp_dir().join("mcts_test_checkpoint.json");
+        let _guard = TempFileGuard(path.clone());
 
-        results.save_checkpoint(path_str).unwrap();
-        let loaded = MctsGoldfishResults::load_checkpoint(path_str).unwrap();
+        results.save_checkpoint(&path).unwrap();
+        let loaded = MctsGoldfishResults::load_checkpoint(&path).unwrap();
 
         assert_eq!(loaded.total_games, results.total_games);
         assert_eq!(loaded.wins, results.wins);
@@ -1319,14 +1351,12 @@ mod tests {
             loaded.fastest_sequence[0].action_description,
             "Cast Lightning Bolt"
         );
-
-        // Clean up
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_checkpoint_load_missing_file() {
-        let result = MctsGoldfishResults::load_checkpoint("/tmp/nonexistent_mcts_ckpt_12345.json");
+        let path = std::path::Path::new("/tmp/nonexistent_mcts_ckpt_12345.json");
+        let result = MctsGoldfishResults::load_checkpoint(path);
         assert!(result.is_err());
     }
 }
