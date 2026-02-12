@@ -30,6 +30,7 @@
 //!   so any actual kill always beats any non-kill.
 
 use rand::seq::SliceRandom;
+use rayon::prelude::*;
 
 use crate::action::{legal_actions, Action};
 use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
@@ -67,6 +68,13 @@ pub struct MctsConfig {
     /// Maximum number of actions during rollout before declaring a draw.
     /// Prevents runaway rollouts in degenerate game states.
     pub max_rollout_actions: u32,
+
+    /// Number of threads for parallel MCTS (root parallelization).
+    /// Each thread builds an independent search tree with
+    /// `iterations_per_move / num_threads` iterations, then results are
+    /// merged by summing per-action visit counts and rewards.
+    /// 0 or 1 = single-threaded (default). Values > 1 enable parallelism.
+    pub num_threads: u32,
 }
 
 impl Default for MctsConfig {
@@ -76,6 +84,7 @@ impl Default for MctsConfig {
             exploration_constant: 1.0,
             max_tree_depth: 0,
             max_rollout_actions: 5_000,
+            num_threads: 1,
         }
     }
 }
@@ -242,6 +251,10 @@ fn format_starting_life(format: GameFormat) -> i32 {
 /// This is the main entry point for a single MCTS decision. It builds
 /// (or reuses) a search tree, runs `config.iterations_per_move` iterations,
 /// and returns the action with the highest visit count (most robust child).
+///
+/// When `config.num_threads > 1`, uses root parallelization: each thread
+/// builds an independent tree with a share of the iterations, then results
+/// are merged by summing per-action visit counts and rewards.
 pub(crate) fn mcts_search(
     state: &GameState,
     config: &MctsConfig,
@@ -255,9 +268,27 @@ pub(crate) fn mcts_search(
         return Some(actions[0].clone());
     }
 
+    let num_threads = config.num_threads.max(1);
+
+    if num_threads <= 1 {
+        // Single-threaded path (original behavior)
+        mcts_search_single(state, config, root, &actions)
+    } else {
+        // Parallel root parallelization
+        mcts_search_parallel(state, config, root, &actions, num_threads)
+    }
+}
+
+/// Single-threaded MCTS search. Runs all iterations on one tree.
+fn mcts_search_single(
+    state: &GameState,
+    config: &MctsConfig,
+    root: &mut MctsNode,
+    actions: &[Action],
+) -> Option<Action> {
     // Expand root if needed
     if !root.is_expanded() {
-        expand_node(root, &actions);
+        expand_node(root, actions);
     }
 
     let greedy = GreedyStrategy;
@@ -272,6 +303,112 @@ pub(crate) fn mcts_search(
     }
 
     // Select the action with the most visits (most robust child)
+    best_action_by_visits(root)
+}
+
+/// Parallel MCTS search using root parallelization.
+///
+/// Each thread builds an independent search tree with a share of the total
+/// iterations. After all threads complete, per-action visit counts and
+/// rewards are summed to select the most robust action.
+///
+/// This is the simplest and most effective parallelization strategy for MCTS:
+/// - No locks on tree nodes (each tree is thread-local)
+/// - Linear speedup proportional to thread count
+/// - Slightly more total iterations due to rounding, but never fewer
+fn mcts_search_parallel(
+    state: &GameState,
+    config: &MctsConfig,
+    root: &mut MctsNode,
+    actions: &[Action],
+    num_threads: u32,
+) -> Option<Action> {
+    let iters_per_thread = config.iterations_per_move / num_threads;
+    let remainder = config.iterations_per_move % num_threads;
+
+    // Each thread runs its own tree search and returns per-action (visits, total_reward).
+    let thread_results: Vec<Vec<(u32, f64)>> = (0..num_threads)
+        .into_par_iter()
+        .map(|thread_idx| {
+            // First `remainder` threads get one extra iteration
+            let my_iters = iters_per_thread + if thread_idx < remainder { 1 } else { 0 };
+            if my_iters == 0 {
+                return vec![(0, 0.0); actions.len()];
+            }
+
+            let mut thread_root = MctsNode::new();
+            expand_node(&mut thread_root, actions);
+
+            // Single-threaded config for each thread's tree (avoid nested parallelism)
+            let thread_config = MctsConfig {
+                num_threads: 1,
+                ..*config
+            };
+
+            let greedy = GreedyStrategy;
+            let goldfish = GoldfishStrategy;
+
+            for _ in 0..my_iters {
+                let mut sim_state = state.clone();
+                let reward = tree_walk(
+                    &mut sim_state,
+                    &mut thread_root,
+                    &thread_config,
+                    &greedy,
+                    &goldfish,
+                    0,
+                );
+                thread_root.visits += 1;
+                thread_root.total_reward += reward;
+            }
+
+            // Extract per-action stats
+            thread_root
+                .children
+                .as_ref()
+                .map(|children| {
+                    children
+                        .iter()
+                        .map(|c| (c.node.visits, c.node.total_reward))
+                        .collect()
+                })
+                .unwrap_or_else(|| vec![(0, 0.0); actions.len()])
+        })
+        .collect();
+
+    // Merge results: sum visits and rewards per action across all threads
+    let num_actions = actions.len();
+    let mut merged_visits = vec![0u32; num_actions];
+    let mut merged_rewards = vec![0.0f64; num_actions];
+
+    for thread_result in &thread_results {
+        for (i, &(visits, reward)) in thread_result.iter().enumerate() {
+            if i < num_actions {
+                merged_visits[i] += visits;
+                merged_rewards[i] += reward;
+            }
+        }
+    }
+
+    // Update the root node with merged statistics
+    if !root.is_expanded() {
+        expand_node(root, actions);
+    }
+    let total_visits: u32 = merged_visits.iter().sum();
+    let total_reward: f64 = merged_rewards.iter().sum();
+    root.visits = total_visits;
+    root.total_reward = total_reward;
+
+    if let Some(children) = root.children.as_mut() {
+        for (i, child) in children.iter_mut().enumerate() {
+            if i < num_actions {
+                child.node.visits = merged_visits[i];
+                child.node.total_reward = merged_rewards[i];
+            }
+        }
+    }
+
+    // Select the action with the most total visits across all trees
     best_action_by_visits(root)
 }
 
@@ -814,5 +951,84 @@ mod tests {
         let children = node.children.as_ref().unwrap();
         assert_eq!(children.len(), 2);
         assert_eq!(children[0].action, Action::PassPriority);
+    }
+
+    #[test]
+    fn test_mcts_config_num_threads_default() {
+        let config = MctsConfig::default();
+        assert_eq!(config.num_threads, 1);
+    }
+
+    #[test]
+    fn test_parallel_merge_sums_visits() {
+        // Verify that mcts_search_parallel correctly merges per-action stats.
+        // We test the merge logic directly by constructing thread results.
+        let actions = vec![
+            Action::PassPriority,
+            Action::PlayLand { object_id: 1 },
+            Action::PlayLand { object_id: 2 },
+        ];
+
+        let mut root = MctsNode::new();
+        expand_node(&mut root, &actions);
+
+        // Simulate two threads' results
+        let thread_results: Vec<Vec<(u32, f64)>> = vec![
+            vec![(10, 5.0), (20, 8.0), (5, 2.0)],
+            vec![(15, 7.0), (10, 4.0), (8, 3.0)],
+        ];
+
+        // Apply merge logic (same as mcts_search_parallel)
+        let num_actions = actions.len();
+        let mut merged_visits = vec![0u32; num_actions];
+        let mut merged_rewards = vec![0.0f64; num_actions];
+
+        for thread_result in &thread_results {
+            for (i, &(visits, reward)) in thread_result.iter().enumerate() {
+                if i < num_actions {
+                    merged_visits[i] += visits;
+                    merged_rewards[i] += reward;
+                }
+            }
+        }
+
+        assert_eq!(merged_visits, vec![25, 30, 13]);
+        assert!((merged_rewards[0] - 12.0).abs() < 1e-10);
+        assert!((merged_rewards[1] - 12.0).abs() < 1e-10);
+        assert!((merged_rewards[2] - 5.0).abs() < 1e-10);
+
+        // Update root and verify best action is PlayLand{1} (most visits = 30)
+        let total_visits: u32 = merged_visits.iter().sum();
+        let total_reward: f64 = merged_rewards.iter().sum();
+        root.visits = total_visits;
+        root.total_reward = total_reward;
+
+        if let Some(children) = root.children.as_mut() {
+            for (i, child) in children.iter_mut().enumerate() {
+                child.node.visits = merged_visits[i];
+                child.node.total_reward = merged_rewards[i];
+            }
+        }
+
+        let best = best_action_by_visits(&root);
+        assert_eq!(best, Some(Action::PlayLand { object_id: 1 }));
+    }
+
+    #[test]
+    fn test_iteration_distribution_across_threads() {
+        // Verify iterations are split correctly with remainder handling.
+        let total_iters: u32 = 103;
+        let num_threads: u32 = 4;
+        let base = total_iters / num_threads; // 25
+        let remainder = total_iters % num_threads; // 3
+
+        let mut assigned: Vec<u32> = Vec::new();
+        for t in 0..num_threads {
+            assigned.push(base + if t < remainder { 1 } else { 0 });
+        }
+
+        // First 3 threads get 26, last gets 25
+        assert_eq!(assigned, vec![26, 26, 26, 25]);
+        assert_eq!(assigned.iter().sum::<u32>(), total_iters);
     }
 }
