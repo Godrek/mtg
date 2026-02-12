@@ -21,19 +21,24 @@
 //!   DECK=red          Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: red)
 //!   FORMAT=standard   Format: "standard" or "commander" (default: auto-detect)
 //!   CHECKPOINT=path   Save/resume results to/from a JSON checkpoint file (optional)
+//!   CHECKPOINT_DIR=   Directory for checkpoint save/resume (default: none)
+//!   CHECKPOINT_EVERY= Save checkpoint every N games (default: 10)
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
+
 use mtg_gto::card::sample;
-use mtg_gto::game::CardDatabase;
+use mtg_gto::game::{CardDatabase, GameState};
+use mtg_gto::rules;
 use mtg_gto::simulation::{
     simulate_goldfish, simulate_commander_goldfish, GoldfishResults,
     simulate_mcts_goldfish_with_progress, simulate_mcts_commander_goldfish_with_progress,
     run_mcts_goldfish_game, run_mcts_commander_goldfish_game,
 };
-use mtg_gto::solver::mcts::{MctsConfig, MctsGoldfishResults};
+use mtg_gto::solver::mcts::{self, MctsConfig, MctsCampaignCheckpoint, MctsGoldfishResults};
 use mtg_gto::strategy::GreedyStrategy;
 
 fn main() {
@@ -65,6 +70,11 @@ fn main() {
         .unwrap_or(1);
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "red".to_string());
     let checkpoint_path = std::env::var("CHECKPOINT").ok();
+    let checkpoint_dir = std::env::var("CHECKPOINT_DIR").ok();
+    let checkpoint_every: u64 = std::env::var("CHECKPOINT_EVERY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10);
 
     let db = sample::build_sample_db();
 
@@ -91,14 +101,223 @@ fn main() {
     if let Some(ref cp) = checkpoint_path {
         println!("Checkpoint: {}", cp);
     }
+    if let Some(ref dir) = checkpoint_dir {
+        println!("Checkpoint dir: {} (every {} games)", dir, checkpoint_every);
+    }
     println!();
 
-    if is_commander {
-        run_commander_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
+    if let Some(ref dir) = checkpoint_dir {
+        // ── Campaign checkpoint mode: run with save/resume ───────────────
+        if is_commander {
+            run_commander_checkpoint(&db, &deck_name, &config, num_games, dir, checkpoint_every);
+        } else {
+            run_standard_checkpoint(&db, &deck_name, &config, num_games, dir, checkpoint_every);
+        }
     } else {
-        run_standard_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
+        // ── Standard mode (with optional simple checkpoint) ──────────────
+        if is_commander {
+            run_commander_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
+        } else {
+            run_standard_goldfish(&db, &deck_name, &config, num_games, checkpoint_path.as_deref());
+        }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Checkpoint mode: standard format
+// ---------------------------------------------------------------------------
+
+fn run_standard_checkpoint(
+    db: &CardDatabase,
+    deck_name: &str,
+    config: &MctsConfig,
+    num_games: u64,
+    checkpoint_dir: &str,
+    checkpoint_every: u64,
+) {
+    let deck = match deck_name {
+        "green" => sample::green_stompy_deck(),
+        _ => sample::red_aggro_deck(),
+    };
+
+    // Try to resume from existing checkpoint
+    let mut checkpoint = match MctsCampaignCheckpoint::load(checkpoint_dir) {
+        Ok(cp) => {
+            println!(
+                "Resumed from checkpoint: {}/{} games completed ({:.1}% win rate)",
+                cp.games_completed,
+                cp.total_games_planned,
+                cp.results.win_rate() * 100.0,
+            );
+            // Allow extending: if user asks for more games than originally planned
+            let mut cp = cp;
+            if num_games > cp.total_games_planned {
+                cp.total_games_planned = num_games;
+            }
+            cp
+        }
+        Err(_) => {
+            println!("Starting fresh campaign ({} games)", num_games);
+            MctsCampaignCheckpoint::new(config.clone(), deck_name.to_string(), num_games)
+        }
+    };
+
+    let remaining = checkpoint.games_remaining();
+    if remaining == 0 {
+        println!("Campaign already complete!");
+        checkpoint.results.display();
+        return;
+    }
+
+    println!("Running {} remaining games...\n", remaining);
+    let t0 = Instant::now();
+
+    run_campaign_batched(
+        &mut checkpoint,
+        remaining,
+        checkpoint_every,
+        checkpoint_dir,
+        |_game_idx| {
+            let db_arc = Arc::new(db.clone());
+            let mut state = GameState::new(2);
+            state.card_db = Some(db_arc);
+            rules::setup_game(&mut state, &deck, &deck);
+            mcts::run_mcts_goldfish_game(&mut state, config, false)
+        },
+    );
+
+    let elapsed = t0.elapsed();
+    println!("\nCompleted in {:.1}s ({:.2} games/sec)\n", elapsed.as_secs_f64(), remaining as f64 / elapsed.as_secs_f64());
+    checkpoint.results.display();
+}
+
+// ---------------------------------------------------------------------------
+// Checkpoint mode: commander format
+// ---------------------------------------------------------------------------
+
+fn run_commander_checkpoint(
+    db: &CardDatabase,
+    deck_name: &str,
+    config: &MctsConfig,
+    num_games: u64,
+    checkpoint_dir: &str,
+    checkpoint_every: u64,
+) {
+    let (deck, commander, _tutor_targets) = match deck_name {
+        "brimaz" => {
+            let (d, c) = sample::brimaz_commander_deck();
+            (d, c, Vec::new())
+        }
+        "ashcoat" => {
+            let (d, c) = sample::ashcoat_commander_deck();
+            (d, c, Vec::new())
+        }
+        _ => sample::kinnan_commander_deck(),
+    };
+
+    let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
+    println!("Commander: {}\n", commander_name);
+
+    // Try to resume from existing checkpoint
+    let mut checkpoint = match MctsCampaignCheckpoint::load(checkpoint_dir) {
+        Ok(cp) => {
+            println!(
+                "Resumed from checkpoint: {}/{} games completed ({:.1}% win rate)",
+                cp.games_completed,
+                cp.total_games_planned,
+                cp.results.win_rate() * 100.0,
+            );
+            let mut cp = cp;
+            if num_games > cp.total_games_planned {
+                cp.total_games_planned = num_games;
+            }
+            cp
+        }
+        Err(_) => {
+            println!("Starting fresh campaign ({} games)", num_games);
+            MctsCampaignCheckpoint::new(config.clone(), deck_name.to_string(), num_games)
+        }
+    };
+
+    let remaining = checkpoint.games_remaining();
+    if remaining == 0 {
+        println!("Campaign already complete!");
+        checkpoint.results.display();
+        return;
+    }
+
+    println!("Running {} remaining games...\n", remaining);
+    let t0 = Instant::now();
+
+    run_campaign_batched(
+        &mut checkpoint,
+        remaining,
+        checkpoint_every,
+        checkpoint_dir,
+        |_game_idx| {
+            let db_arc = Arc::new(db.clone());
+            let mut state = GameState::new_commander(2);
+            state.card_db = Some(db_arc);
+            rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+            mcts::run_mcts_goldfish_game(&mut state, config, false)
+        },
+    );
+
+    let elapsed = t0.elapsed();
+    println!("\nCompleted in {:.1}s ({:.2} games/sec)\n", elapsed.as_secs_f64(), remaining as f64 / elapsed.as_secs_f64());
+    checkpoint.results.display();
+}
+
+// ---------------------------------------------------------------------------
+// Shared campaign runner with batched checkpointing
+// ---------------------------------------------------------------------------
+
+/// Run games in parallel batches, checkpointing after each batch.
+///
+/// Games within a batch run in parallel (via rayon). Between batches,
+/// results are folded into the checkpoint and saved to disk.
+fn run_campaign_batched(
+    checkpoint: &mut MctsCampaignCheckpoint,
+    total_remaining: u64,
+    batch_size: u64,
+    checkpoint_dir: &str,
+    run_game: impl Fn(u64) -> mcts::MctsGameResult + Send + Sync,
+) {
+    let mut done = 0u64;
+    while done < total_remaining {
+        let batch = batch_size.min(total_remaining - done);
+        let batch_start = checkpoint.games_completed;
+
+        // Run batch in parallel
+        let results: Vec<mcts::MctsGameResult> = (0..batch)
+            .into_par_iter()
+            .map(|i| run_game(batch_start + i))
+            .collect();
+
+        // Fold results into checkpoint (sequential — cheap)
+        for result in results {
+            checkpoint.add_game(result);
+        }
+        done += batch;
+
+        // Save checkpoint
+        if let Err(e) = checkpoint.save(checkpoint_dir) {
+            eprintln!("Warning: failed to save checkpoint: {}", e);
+        } else {
+            println!(
+                "  [{}/{}] saved checkpoint ({:.1}% win, avg T{:.2})",
+                checkpoint.games_completed,
+                checkpoint.total_games_planned,
+                checkpoint.results.win_rate() * 100.0,
+                checkpoint.results.avg_kill_turn,
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Non-checkpoint mode (original behavior)
+// ---------------------------------------------------------------------------
 
 fn run_standard_goldfish(
     db: &CardDatabase,
