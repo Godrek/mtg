@@ -21,6 +21,7 @@
 //!   DECK=red          Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: red)
 //!   FORMAT=standard   Format: "standard" or "commander" (default: auto-detect)
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -121,12 +122,11 @@ fn run_standard_goldfish(
     let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
     let mcts_results = simulate_mcts_goldfish_with_progress(db, &deck, config, num_games, &progress);
     done.store(true, Ordering::Relaxed);
-    let mcts_time = t0.elapsed();
-    eprintln!(
-        "  game {}/{} | {:.1}s elapsed",
-        num_games, num_games, mcts_time.as_secs_f64(),
-    );
     let _ = printer.join();
+    let mcts_time = t0.elapsed();
+    // Clear the progress line, then print the final summary
+    print!("\r{: <60}\r", "");
+    let _ = std::io::stdout().flush();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
     // ── 3. Comparison ──────────────────────────────────────────────────
@@ -220,12 +220,11 @@ fn run_commander_goldfish(
     let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
     let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress);
     done.store(true, Ordering::Relaxed);
-    let mcts_time = t0.elapsed();
-    eprintln!(
-        "  game {}/{} | {:.1}s elapsed",
-        num_games, num_games, mcts_time.as_secs_f64(),
-    );
     let _ = printer.join();
+    let mcts_time = t0.elapsed();
+    // Clear the progress line, then print the final summary
+    print!("\r{: <60}\r", "");
+    let _ = std::io::stdout().flush();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
     // ── 3. Comparison ──────────────────────────────────────────────────
@@ -387,15 +386,16 @@ fn spawn_progress_thread(
             }
             let completed = progress.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
-            let eta = if completed > 0 {
-                elapsed / completed as f64 * (total - completed) as f64
+            if completed > 0 {
+                let eta = elapsed / completed as f64 * (total - completed) as f64;
+                print!(
+                    "\r  game {}/{} | {:.1}s elapsed | ETA {:.0}s",
+                    completed, total, elapsed, eta,
+                );
             } else {
-                0.0
-            };
-            eprintln!(
-                "  game {}/{} | {:.1}s elapsed | ETA {:.0}s",
-                completed, total, elapsed, eta,
-            );
+                print!("\r  game 0/{} | {:.1}s elapsed | ETA ...", total, elapsed);
+            }
+            let _ = std::io::stdout().flush();
         }
     })
 }
