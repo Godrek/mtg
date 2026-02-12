@@ -131,7 +131,10 @@ fn run_standard_goldfish(
     print_distribution_comparison(&greedy_results, &mcts_results);
     println!();
 
-    // ── 5. Sample game trace ───────────────────────────────────────────
+    // ── 5. Fastest win sequence ──────────────────────────────────────
+    print_fastest_sequence(&mcts_results, config);
+
+    // ── 6. Sample game trace ───────────────────────────────────────────
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
     println!("(Actions logged to stderr)\n");
@@ -218,7 +221,10 @@ fn run_commander_goldfish(
     print_distribution_comparison(&greedy_results, &mcts_results);
     println!();
 
-    // ── 5. Sample game trace ───────────────────────────────────────────
+    // ── 5. Fastest win sequence ──────────────────────────────────────
+    print_fastest_sequence(&mcts_results, config);
+
+    // ── 6. Sample game trace ───────────────────────────────────────────
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
     println!("(Actions logged to stderr)\n");
@@ -248,6 +254,31 @@ fn run_commander_goldfish(
             );
         }
     }
+}
+
+fn print_fastest_sequence(
+    r: &mtg_gto::solver::mcts::MctsGoldfishResults,
+    config: &MctsConfig,
+) {
+    if r.fastest_sequence.is_empty() {
+        return;
+    }
+    println!("Fastest Win Sequence (T{} kill)", r.fastest_kill);
+    println!("─────────────────────────────────");
+    for (i, stat) in r.fastest_sequence.iter().enumerate() {
+        println!(
+            "  #{:<3} T{} {:?}: {} (of {} options, {}/{} visits, Q={:.3})",
+            i + 1,
+            stat.turn,
+            stat.phase,
+            stat.action_description,
+            stat.num_legal_actions,
+            stat.best_action_visits,
+            config.iterations_per_move,
+            stat.best_action_avg_reward,
+        );
+    }
+    println!();
 }
 
 fn print_strategy_row(name: &str, r: &GoldfishResults) {

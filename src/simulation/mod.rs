@@ -670,6 +670,8 @@ fn aggregate_mcts_goldfish_results(
     let total_decisions = AtomicU64::new(0);
     // Use Mutex<f64> for exact floating-point accumulation (no ×1000 truncation).
     let total_reward = Mutex::new(0.0f64);
+    // Track the decision sequence from the fastest winning game.
+    let fastest_sequence: Mutex<Vec<mcts::DecisionStat>> = Mutex::new(Vec::new());
 
     let max_turn = 20u32;
     let distribution: Vec<AtomicU64> = (0..=max_turn)
@@ -699,8 +701,12 @@ fn aggregate_mcts_goldfish_results(
             if (turn as usize) < distribution.len() {
                 distribution[turn as usize].fetch_add(1, Ordering::Relaxed);
             }
-            fastest.fetch_min(turn as u64, Ordering::Relaxed);
+            let prev_fastest = fastest.fetch_min(turn as u64, Ordering::Relaxed);
             slowest.fetch_max(turn as u64, Ordering::Relaxed);
+            // If this game is the new fastest (or tied), save its decision sequence
+            if (turn as u64) <= prev_fastest {
+                *fastest_sequence.lock().unwrap() = result.decision_stats;
+            }
         } else if result.final_life[0] <= 0 {
             losses.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -743,6 +749,7 @@ fn aggregate_mcts_goldfish_results(
             0.0
         },
         kill_turn_distribution: kill_turn_dist,
+        fastest_sequence: fastest_sequence.into_inner().unwrap(),
     }
 }
 
