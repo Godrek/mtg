@@ -21,13 +21,15 @@
 //!   DECK=red          Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: red)
 //!   FORMAT=standard   Format: "standard" or "commander" (default: auto-detect)
 
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use mtg_gto::card::sample;
 use mtg_gto::game::CardDatabase;
 use mtg_gto::simulation::{
     simulate_goldfish, simulate_commander_goldfish, GoldfishResults,
-    simulate_mcts_goldfish, simulate_mcts_commander_goldfish,
+    simulate_mcts_goldfish_with_progress, simulate_mcts_commander_goldfish_with_progress,
     run_mcts_goldfish_game, run_mcts_commander_goldfish_game,
 };
 use mtg_gto::solver::mcts::MctsConfig;
@@ -114,8 +116,17 @@ fn run_standard_goldfish(
     // ── 2. MCTS simulation ─────────────────────────────────────────────
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
-    let mcts_results = simulate_mcts_goldfish(db, &deck, config, num_games);
+    let progress = Arc::new(AtomicU64::new(0));
+    let done = Arc::new(AtomicBool::new(false));
+    let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
+    let mcts_results = simulate_mcts_goldfish_with_progress(db, &deck, config, num_games, &progress);
+    done.store(true, Ordering::Relaxed);
     let mcts_time = t0.elapsed();
+    eprintln!(
+        "  game {}/{} | {:.1}s elapsed",
+        num_games, num_games, mcts_time.as_secs_f64(),
+    );
+    let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
     // ── 3. Comparison ──────────────────────────────────────────────────
@@ -204,8 +215,17 @@ fn run_commander_goldfish(
     // ── 2. MCTS simulation ─────────────────────────────────────────────
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
-    let mcts_results = simulate_mcts_commander_goldfish(db, &deck, commander, config, num_games);
+    let progress = Arc::new(AtomicU64::new(0));
+    let done = Arc::new(AtomicBool::new(false));
+    let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
+    let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress);
+    done.store(true, Ordering::Relaxed);
     let mcts_time = t0.elapsed();
+    eprintln!(
+        "  game {}/{} | {:.1}s elapsed",
+        num_games, num_games, mcts_time.as_secs_f64(),
+    );
+    let _ = printer.join();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
     // ── 3. Comparison ──────────────────────────────────────────────────
@@ -348,4 +368,34 @@ fn print_distribution_comparison(
             turn, pg, pm,
         );
     }
+}
+
+/// Spawn a background thread that prints MCTS game-level progress every 2 seconds.
+///
+/// Returns the thread handle so the caller can join after the simulation completes.
+fn spawn_progress_thread(
+    progress: Arc<AtomicU64>,
+    done: Arc<AtomicBool>,
+    total: u64,
+    start: Instant,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(Duration::from_secs(2));
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            let completed = progress.load(Ordering::Relaxed);
+            let elapsed = start.elapsed().as_secs_f64();
+            let eta = if completed > 0 {
+                elapsed / completed as f64 * (total - completed) as f64
+            } else {
+                0.0
+            };
+            eprintln!(
+                "  game {}/{} | {:.1}s elapsed | ETA {:.0}s",
+                completed, total, elapsed, eta,
+            );
+        }
+    })
 }
