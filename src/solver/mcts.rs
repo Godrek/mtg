@@ -316,6 +316,19 @@ fn mcts_search_single(
 /// - No locks on tree nodes (each tree is thread-local)
 /// - Linear speedup proportional to thread count
 /// - Slightly more total iterations due to rounding, but never fewer
+///
+/// **Root overwrite:** The passed-in `root` node is overwritten with merged
+/// statistics from all threads. This is fine because both callers
+/// (`MctsStrategy::choose_action` and `run_mcts_goldfish_game`) create a
+/// fresh `MctsNode::new()` per decision — tree reuse across decisions is
+/// not supported. The root is populated solely so callers can read decision
+/// stats (visit counts, avg reward) for logging.
+///
+/// **Nested parallelism:** This uses Rayon's `into_par_iter`, which shares
+/// the global thread pool with the outer game-level parallelism in
+/// `simulate_mcts_goldfish`. When many games run concurrently, inner MCTS
+/// parallelism won't get additional threads (the pool is already saturated).
+/// `num_threads > 1` is most useful when running a single game or few games.
 fn mcts_search_parallel(
     state: &GameState,
     config: &MctsConfig,
