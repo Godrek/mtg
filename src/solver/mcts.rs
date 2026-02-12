@@ -675,6 +675,9 @@ pub struct MctsGameResult {
     pub final_life: [i32; 2],
     /// Per-decision statistics: (turn, phase, num_actions_considered, iterations_used, best_action_visits, best_action_avg_reward)
     pub decision_stats: Vec<DecisionStat>,
+    /// Buffered verbose trace lines (only populated when verbose=true).
+    #[serde(skip)]
+    pub trace_lines: Vec<String>,
 }
 
 /// Statistics for a single MCTS decision point.
@@ -702,6 +705,7 @@ pub fn run_mcts_goldfish_game(
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
     let mut decision_stats = Vec::new();
+    let mut trace_lines: Vec<String> = Vec::new();
 
     while !state.game_over
         && state.turn_number <= GOLDFISH_MAX_TURNS
@@ -734,12 +738,12 @@ pub fn run_mcts_goldfish_game(
             let greedy = GreedyStrategy;
             let action = greedy.choose_action(state, player);
             if verbose {
-                eprintln!(
+                trace_lines.push(format!(
                     "T{} {:?} P0: {} (greedy mulligan)",
                     state.turn_number,
                     state.phase,
                     format_action(&action, state),
-                );
+                ));
             }
             rules::apply_action(state, &action);
             actions_taken += 1;
@@ -771,7 +775,7 @@ pub fn run_mcts_goldfish_game(
             }
 
             if verbose {
-                eprintln!(
+                trace_lines.push(format!(
                     "T{} {:?} P0: {} (of {} actions, {}/{} iters)",
                     state.turn_number,
                     state.phase,
@@ -783,7 +787,7 @@ pub fn run_mcts_goldfish_game(
                         .map(|c| c.node.visits)
                         .unwrap_or(0),
                     config.iterations_per_move,
-                );
+                ));
             }
 
             best
@@ -807,6 +811,7 @@ pub fn run_mcts_goldfish_game(
         actions_taken,
         final_life: [state.players[0].life, state.players[1].life],
         decision_stats,
+        trace_lines,
     }
 }
 

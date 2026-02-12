@@ -365,11 +365,7 @@ fn run_standard_goldfish(
     print_mcts_strategy_row("MCTS", &mcts_results);
     println!();
 
-    let delta = greedy_results.avg_kill_turn - mcts_results.avg_kill_turn;
-    println!(
-        "MCTS improves by {:.2} turns on average (Greedy T{:.2} → MCTS T{:.2})",
-        delta, greedy_results.avg_kill_turn, mcts_results.avg_kill_turn,
-    );
+    print_improvement_summary(&greedy_results, &mcts_results);
     println!();
 
     // ── 4. Kill turn distribution comparison ───────────────────────────
@@ -382,11 +378,13 @@ fn run_standard_goldfish(
     print_fastest_sequence(&mcts_results, config);
 
     // ── 6. Sample game trace ───────────────────────────────────────────
+    let result = run_mcts_goldfish_game(db, &deck, config, true);
+
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
-    println!("(Actions logged to stderr)\n");
-
-    let result = run_mcts_goldfish_game(db, &deck, config, true);
+    for line in &result.trace_lines {
+        println!("{}", line);
+    }
     println!(
         "Result: {} on T{} ({} actions), life: {}/{}",
         if result.won { "WIN" } else { "DRAW" },
@@ -469,11 +467,7 @@ fn run_commander_goldfish(
     print_mcts_strategy_row("MCTS", &mcts_results);
     println!();
 
-    let delta = greedy_results.avg_kill_turn - mcts_results.avg_kill_turn;
-    println!(
-        "MCTS improves by {:.2} turns on average (Greedy T{:.2} → MCTS T{:.2})",
-        delta, greedy_results.avg_kill_turn, mcts_results.avg_kill_turn,
-    );
+    print_improvement_summary(&greedy_results, &mcts_results);
     println!();
 
     // ── 4. Kill turn distribution comparison ───────────────────────────
@@ -486,11 +480,13 @@ fn run_commander_goldfish(
     print_fastest_sequence(&mcts_results, config);
 
     // ── 6. Sample game trace ───────────────────────────────────────────
+    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true);
+
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");
-    println!("(Actions logged to stderr)\n");
-
-    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true);
+    for line in &result.trace_lines {
+        println!("{}", line);
+    }
     println!(
         "Result: {} on T{} ({} actions), life: {}/{}",
         if result.won { "WIN" } else { "DRAW" },
@@ -543,30 +539,81 @@ fn print_fastest_sequence(
 }
 
 fn print_strategy_row(name: &str, r: &GoldfishResults) {
-    println!(
-        "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
-        name,
-        r.win_rate() * 100.0,
-        r.avg_kill_turn,
-        r.fastest_kill,
-        r.slowest_kill,
-        r.draws,
-    );
+    if r.wins > 0 {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            r.avg_kill_turn,
+            r.fastest_kill,
+            r.slowest_kill,
+            r.draws,
+        );
+    } else {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill={:<6}  fastest={:<4}  slowest={:<4}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            "-",
+            "-",
+            "-",
+            r.draws,
+        );
+    }
 }
 
 fn print_mcts_strategy_row(
     name: &str,
     r: &mtg_gto::solver::mcts::MctsGoldfishResults,
 ) {
-    println!(
-        "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
-        name,
-        r.win_rate() * 100.0,
-        r.avg_kill_turn,
-        r.fastest_kill,
-        r.slowest_kill,
-        r.draws,
-    );
+    if r.wins > 0 {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            r.avg_kill_turn,
+            r.fastest_kill,
+            r.slowest_kill,
+            r.draws,
+        );
+    } else {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill={:<6}  fastest={:<4}  slowest={:<4}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            "-",
+            "-",
+            "-",
+            r.draws,
+        );
+    }
+}
+
+fn print_improvement_summary(
+    greedy: &GoldfishResults,
+    mcts: &mtg_gto::solver::mcts::MctsGoldfishResults,
+) {
+    if greedy.wins > 0 && mcts.wins > 0 {
+        let delta = greedy.avg_kill_turn - mcts.avg_kill_turn;
+        println!(
+            "MCTS improves by {:.2} turns on average (Greedy T{:.2} → MCTS T{:.2})",
+            delta, greedy.avg_kill_turn, mcts.avg_kill_turn,
+        );
+    } else if greedy.wins == 0 && mcts.wins > 0 {
+        println!(
+            "Greedy never won; MCTS wins {:.1}% with avg kill T{:.2}",
+            mcts.win_rate() * 100.0,
+            mcts.avg_kill_turn,
+        );
+    } else if greedy.wins > 0 && mcts.wins == 0 {
+        println!(
+            "MCTS never won; Greedy wins {:.1}% with avg kill T{:.2}",
+            greedy.win_rate() * 100.0,
+            greedy.avg_kill_turn,
+        );
+    } else {
+        println!("Neither strategy won any games");
+    }
 }
 
 fn print_distribution_comparison(

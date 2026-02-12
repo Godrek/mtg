@@ -295,15 +295,27 @@ fn resolve_card_names(action: &str, names: &HashMap<String, String>) -> String {
 }
 
 fn print_strategy_row(name: &str, r: &GoldfishResults) {
-    println!(
-        "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
-        name,
-        r.win_rate() * 100.0,
-        r.avg_kill_turn,
-        r.fastest_kill,
-        r.slowest_kill,
-        r.draws,
-    );
+    if r.wins > 0 {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill=T{:<5.2}  fastest=T{:<3}  slowest=T{:<3}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            r.avg_kill_turn,
+            r.fastest_kill,
+            r.slowest_kill,
+            r.draws,
+        );
+    } else {
+        println!(
+            "  {:<8} win={:>5.1}%  avg_kill={:<6}  fastest={:<4}  slowest={:<4}  draws={}",
+            name,
+            r.win_rate() * 100.0,
+            "-",
+            "-",
+            "-",
+            r.draws,
+        );
+    }
 }
 
 fn print_kill_distribution(r: &GoldfishResults) {
