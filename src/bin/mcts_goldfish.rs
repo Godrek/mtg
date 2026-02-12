@@ -33,7 +33,7 @@ use mtg_gto::simulation::{
     simulate_mcts_goldfish_with_progress, simulate_mcts_commander_goldfish_with_progress,
     run_mcts_goldfish_game, run_mcts_commander_goldfish_game,
 };
-use mtg_gto::solver::mcts::MctsConfig;
+use mtg_gto::solver::mcts::{MctsConfig, MctsProgress};
 use mtg_gto::strategy::GreedyStrategy;
 
 fn main() {
@@ -117,7 +117,10 @@ fn run_standard_goldfish(
     // ── 2. MCTS simulation ─────────────────────────────────────────────
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
-    let progress = Arc::new(AtomicU64::new(0));
+    let progress = Arc::new(MctsProgress {
+        games_completed: AtomicU64::new(0),
+        decisions_completed: AtomicU64::new(0),
+    });
     let done = Arc::new(AtomicBool::new(false));
     let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
     let mcts_results = simulate_mcts_goldfish_with_progress(db, &deck, config, num_games, &progress);
@@ -125,7 +128,7 @@ fn run_standard_goldfish(
     let _ = printer.join();
     let mcts_time = t0.elapsed();
     // Clear the progress line, then print the final summary
-    print!("\r{: <60}\r", "");
+    print!("\r{: <72}\r", "");
     let _ = std::io::stdout().flush();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
@@ -215,7 +218,10 @@ fn run_commander_goldfish(
     // ── 2. MCTS simulation ─────────────────────────────────────────────
     println!("Running MCTS goldfish ({} games, {} iters/decision)...", num_games, config.iterations_per_move);
     let t0 = Instant::now();
-    let progress = Arc::new(AtomicU64::new(0));
+    let progress = Arc::new(MctsProgress {
+        games_completed: AtomicU64::new(0),
+        decisions_completed: AtomicU64::new(0),
+    });
     let done = Arc::new(AtomicBool::new(false));
     let printer = spawn_progress_thread(progress.clone(), done.clone(), num_games, t0);
     let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress);
@@ -223,7 +229,7 @@ fn run_commander_goldfish(
     let _ = printer.join();
     let mcts_time = t0.elapsed();
     // Clear the progress line, then print the final summary
-    print!("\r{: <60}\r", "");
+    print!("\r{: <72}\r", "");
     let _ = std::io::stdout().flush();
     println!("MCTS simulation complete in {:.1}s\n", mcts_time.as_secs_f64());
 
@@ -369,13 +375,14 @@ fn print_distribution_comparison(
     }
 }
 
-/// Spawn a background thread that prints MCTS game-level progress every 2 seconds.
+/// Spawn a background thread that prints MCTS progress every 2 seconds.
 ///
-/// Returns the thread handle so the caller can join after the simulation completes.
+/// Shows both decision-level (fine-grained) and game-level (coarse) progress.
+/// Decision counts update frequently even when individual games are long-running.
 fn spawn_progress_thread(
-    progress: Arc<AtomicU64>,
+    progress: Arc<MctsProgress>,
     done: Arc<AtomicBool>,
-    total: u64,
+    total_games: u64,
     start: Instant,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
@@ -384,16 +391,20 @@ fn spawn_progress_thread(
             if done.load(Ordering::Relaxed) {
                 break;
             }
-            let completed = progress.load(Ordering::Relaxed);
+            let games = progress.games_completed.load(Ordering::Relaxed);
+            let decisions = progress.decisions_completed.load(Ordering::Relaxed);
             let elapsed = start.elapsed().as_secs_f64();
-            if completed > 0 {
-                let eta = elapsed / completed as f64 * (total - completed) as f64;
+            if games > 0 {
+                let eta = elapsed / games as f64 * (total_games - games) as f64;
                 print!(
-                    "\r  game {}/{} | {:.1}s elapsed | ETA {:.0}s",
-                    completed, total, elapsed, eta,
+                    "\r  game {}/{} | {} decisions | {:.1}s elapsed | ETA {:.0}s   ",
+                    games, total_games, decisions, elapsed, eta,
                 );
             } else {
-                print!("\r  game 0/{} | {:.1}s elapsed | ETA ...", total, elapsed);
+                print!(
+                    "\r  game 0/{} | {} decisions | {:.1}s elapsed               ",
+                    total_games, decisions, elapsed,
+                );
             }
             let _ = std::io::stdout().flush();
         }

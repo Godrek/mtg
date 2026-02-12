@@ -29,6 +29,8 @@
 //! - Draw/loss: partial credit for life reduction, scaled to `[0, 0.04]`
 //!   so any actual kill always beats any non-kill.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
 
@@ -37,6 +39,17 @@ use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
 use crate::rules;
 use crate::simulation::format_action_name;
 use crate::strategy::{GoldfishStrategy, GreedyStrategy, Strategy};
+
+/// Atomic counters for tracking MCTS simulation progress across parallel games.
+///
+/// Games complete infrequently (each may take 60+ seconds with high iteration
+/// counts), so tracking decisions provides much more responsive progress.
+pub struct MctsProgress {
+    /// Number of games fully completed.
+    pub games_completed: AtomicU64,
+    /// Number of MCTS decisions (search calls) completed across all games.
+    pub decisions_completed: AtomicU64,
+}
 
 /// Maximum turns for goldfish MCTS games (matches simulation module).
 const GOLDFISH_MAX_TURNS: u32 = 20;
@@ -694,6 +707,17 @@ pub fn run_mcts_goldfish_game(
     config: &MctsConfig,
     verbose: bool,
 ) -> MctsGameResult {
+    run_mcts_goldfish_game_with_progress(state, config, verbose, None)
+}
+
+/// Like [`run_mcts_goldfish_game`], but increments `progress.decisions_completed`
+/// after each MCTS search finishes, giving fine-grained progress updates.
+pub fn run_mcts_goldfish_game_with_progress(
+    state: &mut GameState,
+    config: &MctsConfig,
+    verbose: bool,
+    progress: Option<&MctsProgress>,
+) -> MctsGameResult {
     let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
     let mut decision_stats = Vec::new();
@@ -763,6 +787,10 @@ pub fn run_mcts_goldfish_game(
                     };
                     decision_stats.push(stat);
                 }
+            }
+
+            if let Some(p) = progress {
+                p.decisions_completed.fetch_add(1, Ordering::Relaxed);
             }
 
             if verbose {

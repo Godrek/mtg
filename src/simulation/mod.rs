@@ -580,7 +580,7 @@ fn aggregate_goldfish_results(
 // MCTS goldfish — solitaire optimization using Monte Carlo Tree Search
 // ---------------------------------------------------------------------------
 
-use crate::solver::mcts::{self, MctsConfig, MctsGoldfishResults};
+use crate::solver::mcts::{self, MctsConfig, MctsGoldfishResults, MctsProgress};
 
 /// Run a single goldfish game using MCTS for player 0's decisions.
 ///
@@ -635,14 +635,14 @@ pub fn simulate_mcts_goldfish(
     }, None)
 }
 
-/// Like [`simulate_mcts_goldfish`], but increments `progress` after each game
-/// completes so a background thread can report progress.
+/// Like [`simulate_mcts_goldfish`], but updates `progress` counters as games
+/// and individual MCTS decisions complete.
 pub fn simulate_mcts_goldfish_with_progress(
     card_db: &CardDatabase,
     deck: &[CardId],
     config: &MctsConfig,
     num_games: u64,
-    progress: &AtomicU64,
+    progress: &MctsProgress,
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
     aggregate_mcts_goldfish_results(num_games, config, |_| {
@@ -670,15 +670,15 @@ pub fn simulate_mcts_commander_goldfish(
     }, None)
 }
 
-/// Like [`simulate_mcts_commander_goldfish`], but increments `progress` after
-/// each game completes so a background thread can report progress.
+/// Like [`simulate_mcts_commander_goldfish`], but updates `progress` counters
+/// as games and individual MCTS decisions complete.
 pub fn simulate_mcts_commander_goldfish_with_progress(
     card_db: &CardDatabase,
     deck: &[CardId],
     commander: CardId,
     config: &MctsConfig,
     num_games: u64,
-    progress: &AtomicU64,
+    progress: &MctsProgress,
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
     aggregate_mcts_goldfish_results(num_games, config, |_| {
@@ -691,13 +691,14 @@ pub fn simulate_mcts_commander_goldfish_with_progress(
 
 /// Shared aggregation logic for MCTS goldfish simulations.
 ///
-/// If `progress` is provided, it is incremented (atomically) after each game
-/// completes, allowing a background thread to report progress.
+/// If `progress` is provided, `decisions_completed` is incremented after each
+/// MCTS search finishes and `games_completed` after each game finishes. This
+/// provides responsive progress even when individual games take minutes.
 fn aggregate_mcts_goldfish_results(
     num_games: u64,
     config: &MctsConfig,
     make_state: impl Fn(u64) -> GameState + Send + Sync,
-    progress: Option<&AtomicU64>,
+    progress: Option<&MctsProgress>,
 ) -> MctsGoldfishResults {
     use std::sync::Mutex;
 
@@ -721,7 +722,7 @@ fn aggregate_mcts_goldfish_results(
 
     (0..num_games).into_par_iter().for_each(|i| {
         let mut state = make_state(i);
-        let result = mcts::run_mcts_goldfish_game(&mut state, config, false);
+        let result = mcts::run_mcts_goldfish_game_with_progress(&mut state, config, false, progress);
 
         total_actions.fetch_add(result.actions_taken as u64, Ordering::Relaxed);
 
@@ -755,7 +756,7 @@ fn aggregate_mcts_goldfish_results(
         }
 
         if let Some(p) = progress {
-            p.fetch_add(1, Ordering::Relaxed);
+            p.games_completed.fetch_add(1, Ordering::Relaxed);
         }
     });
 
