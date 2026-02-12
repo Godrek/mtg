@@ -5002,6 +5002,7 @@ fn test_mcts_single_goldfish_game_completes() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
 
     let result = simulation::run_mcts_goldfish_game(&db, &red, &config, false);
@@ -5028,6 +5029,7 @@ fn test_mcts_goldfish_simulation_produces_valid_results() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
 
     let results = simulation::simulate_mcts_goldfish(&db, &red, &config, 10);
@@ -5052,6 +5054,7 @@ fn test_mcts_goldfish_kill_turn_distribution_consistent() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
 
     let results = simulation::simulate_mcts_goldfish(&db, &red, &config, 20);
@@ -5098,6 +5101,7 @@ fn test_mcts_strategy_plays_legal_actions() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
     let mcts = MctsStrategy::new(config);
 
@@ -5122,6 +5126,7 @@ fn test_mcts_decision_stats_populated() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
 
     let result = simulation::run_mcts_goldfish_game(&db, &red, &config, false);
@@ -5168,6 +5173,7 @@ fn test_mcts_commander_goldfish_completes() {
         exploration_constant: 1.0,
         max_tree_depth: 0,
         max_rollout_actions: 2_000,
+        num_threads: 1,
     };
 
     let result = simulation::run_mcts_commander_goldfish_game(
@@ -5176,4 +5182,31 @@ fn test_mcts_commander_goldfish_completes() {
 
     assert!(result.kill_turn > 0);
     assert!(result.actions_taken > 0);
+}
+
+#[test]
+fn test_mcts_parallel_goldfish_produces_valid_results() {
+    use mtg_gto::solver::mcts::MctsConfig;
+
+    let db = sample::build_sample_db();
+    let red = sample::red_aggro_deck();
+
+    let config = MctsConfig {
+        iterations_per_move: 20,
+        exploration_constant: 1.0,
+        max_tree_depth: 0,
+        max_rollout_actions: 2_000,
+        num_threads: 2,
+    };
+
+    let results = simulation::simulate_mcts_goldfish(&db, &red, &config, 5);
+
+    assert_eq!(results.total_games, 5);
+    assert_eq!(
+        results.wins + results.losses + results.draws,
+        5,
+        "wins + losses + draws should equal total games"
+    );
+    // Sanity: parallel path should still find wins with a reasonable deck
+    assert!(results.wins > 0, "Parallel MCTS should win at least one goldfish game");
 }

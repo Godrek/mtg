@@ -16,6 +16,7 @@
 //!   ITERATIONS=500    MCTS iterations per decision (default: 500)
 //!   EXPLORE=1.0       UCB1 exploration constant (default: 1.0)
 //!   DEPTH=0           Max tree depth, 0=unlimited (default: 0)
+//!   THREADS=1         Threads per MCTS decision, root parallelization (default: 1)
 //!   GAMES=100         Number of games to simulate (default: 100)
 //!   DECK=red          Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: red)
 //!   FORMAT=standard   Format: "standard" or "commander" (default: auto-detect)
@@ -55,6 +56,10 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(100);
+    let num_threads: u32 = std::env::var("THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
     let deck_name = std::env::var("DECK").unwrap_or_else(|_| "red".to_string());
 
     let db = sample::build_sample_db();
@@ -64,6 +69,7 @@ fn main() {
         exploration_constant: explore,
         max_tree_depth: max_depth,
         max_rollout_actions: 5_000,
+        num_threads,
     };
 
     // Determine deck and format
@@ -76,6 +82,7 @@ fn main() {
     println!("MCTS iters: {} per decision", iterations);
     println!("Explore C:  {:.2}", explore);
     println!("Tree depth: {}", if max_depth == 0 { "unlimited".to_string() } else { format!("{}", max_depth) });
+    println!("Threads:    {}{}", num_threads.max(1), if num_threads <= 1 { " (single-threaded)" } else { " (root parallelization)" });
     println!("Games:      {}", num_games);
     println!();
 
