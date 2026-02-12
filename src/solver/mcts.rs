@@ -29,7 +29,10 @@
 //! - Draw/loss: partial credit for life reduction, scaled to `[0, 0.04]`
 //!   so any actual kill always beats any non-kill.
 
+use std::path::Path;
+
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 
 use crate::action::{legal_actions, Action};
 use crate::game::{GameFormat, GameState, Phase, PlayerIndex};
@@ -48,7 +51,7 @@ const GOLDFISH_MAX_ACTIONS: u32 = 10_000;
 // ---------------------------------------------------------------------------
 
 /// Configuration for MCTS search.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MctsConfig {
     /// Number of MCTS iterations (tree walks) per decision point.
     /// More iterations = better play but slower decisions.
@@ -90,7 +93,7 @@ impl Default for MctsConfig {
 /// root. In goldfish mode, only the pilot (player 0) has meaningful
 /// decisions; goldfish actions are applied deterministically without
 /// creating tree branches.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MctsNode {
     /// Number of times this node has been visited during search.
     visits: u32,
@@ -105,7 +108,7 @@ pub(crate) struct MctsNode {
 }
 
 /// A child edge in the MCTS tree (action + resulting node).
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct MctsChild {
     /// The action that transitions from the parent to this child.
     action: Action,
@@ -509,7 +512,7 @@ impl Strategy for MctsStrategy {
 // ---------------------------------------------------------------------------
 
 /// Result of a single MCTS goldfish game.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MctsGameResult {
     /// Whether player 0 won.
     pub won: bool,
@@ -524,7 +527,7 @@ pub struct MctsGameResult {
 }
 
 /// Statistics for a single MCTS decision point.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionStat {
     pub turn: u32,
     pub phase: Phase,
@@ -662,7 +665,7 @@ fn format_action(action: &Action, state: &GameState) -> String {
 // ---------------------------------------------------------------------------
 
 /// Aggregate results from many MCTS goldfish games.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MctsGoldfishResults {
     pub total_games: u64,
     pub wins: u64,
@@ -706,6 +709,156 @@ impl MctsGoldfishResults {
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Campaign checkpoint: save/resume across sessions
+// ---------------------------------------------------------------------------
+
+/// A campaign checkpoint captures aggregate results plus metadata so that
+/// a multi-game MCTS run can be resumed across sessions.
+///
+/// Save after every N games; on resume, load the checkpoint, skip the first
+/// `games_completed` games, and continue accumulating into the same results.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MctsCampaignCheckpoint {
+    /// Config used for this campaign (verified on resume).
+    pub config: MctsConfig,
+    /// Deck identifier (for human reference / verification).
+    pub deck_name: String,
+    /// Total number of games planned.
+    pub total_games_planned: u64,
+    /// Number of games already completed.
+    pub games_completed: u64,
+    /// Aggregate results accumulated so far.
+    pub results: MctsGoldfishResults,
+    /// Per-game results for detailed analysis (optional, can be large).
+    pub game_results: Vec<MctsGameResult>,
+}
+
+impl MctsCampaignCheckpoint {
+    /// Create a new empty checkpoint for a fresh campaign.
+    pub fn new(config: MctsConfig, deck_name: String, total_games: u64) -> Self {
+        let max_turn = GOLDFISH_MAX_TURNS as usize;
+        MctsCampaignCheckpoint {
+            config,
+            deck_name,
+            total_games_planned: total_games,
+            games_completed: 0,
+            results: MctsGoldfishResults {
+                total_games: 0,
+                wins: 0,
+                losses: 0,
+                draws: 0,
+                avg_kill_turn: 0.0,
+                fastest_kill: 0,
+                slowest_kill: 0,
+                avg_actions: 0.0,
+                avg_decisions_per_game: 0.0,
+                avg_best_reward: 0.0,
+                kill_turn_distribution: vec![0u64; max_turn + 1],
+            },
+            game_results: Vec::new(),
+        }
+    }
+
+    /// Fold a single game result into the aggregate.
+    pub fn add_game(&mut self, result: MctsGameResult) {
+        let r = &mut self.results;
+        r.total_games += 1;
+        self.games_completed += 1;
+
+        // Running averages: accumulate totals, compute averages at display time
+        let n = r.total_games as f64;
+
+        let avg_reward: f64 = if result.decision_stats.is_empty() {
+            0.0
+        } else {
+            result
+                .decision_stats
+                .iter()
+                .map(|d| d.best_action_avg_reward)
+                .sum::<f64>()
+                / result.decision_stats.len() as f64
+        };
+
+        // Update running averages using incremental formula:
+        // new_avg = old_avg + (value - old_avg) / n
+        r.avg_actions += (result.actions_taken as f64 - r.avg_actions) / n;
+        r.avg_decisions_per_game +=
+            (result.decision_stats.len() as f64 - r.avg_decisions_per_game) / n;
+        r.avg_best_reward += (avg_reward - r.avg_best_reward) / n;
+
+        if result.won {
+            r.wins += 1;
+            let turn = result.kill_turn;
+            // Update avg kill turn (running average over wins only)
+            let nw = r.wins as f64;
+            r.avg_kill_turn += (turn as f64 - r.avg_kill_turn) / nw;
+
+            if (turn as usize) < r.kill_turn_distribution.len() {
+                r.kill_turn_distribution[turn as usize] += 1;
+            }
+            if r.fastest_kill == 0 || turn < r.fastest_kill {
+                r.fastest_kill = turn;
+            }
+            if turn > r.slowest_kill {
+                r.slowest_kill = turn;
+            }
+        } else if result.final_life[0] <= 0 {
+            r.losses += 1;
+        } else {
+            r.draws += 1;
+        }
+
+        self.game_results.push(result);
+    }
+
+    /// Save checkpoint to disk (bincode).
+    pub fn save(&self, dir: &str) -> Result<(), String> {
+        let path = Path::new(dir);
+        std::fs::create_dir_all(path).map_err(|e| format!("mkdir: {}", e))?;
+        let filename = path.join("mcts_campaign.bin");
+        let bytes = bincode::serialize(self).map_err(|e| format!("serialize: {}", e))?;
+        std::fs::write(&filename, bytes).map_err(|e| format!("write: {}", e))?;
+        // Also write a human-readable summary
+        let summary = path.join("mcts_campaign_summary.txt");
+        let text = format!(
+            "MCTS Campaign Checkpoint\n\
+             ========================\n\
+             Deck: {}\n\
+             Games: {}/{}\n\
+             Win rate: {:.1}%\n\
+             Avg kill turn: {:.2}\n\
+             Fastest: T{}\n\
+             Slowest: T{}\n\
+             Config: {} iters, C={:.2}, depth={}\n",
+            self.deck_name,
+            self.games_completed,
+            self.total_games_planned,
+            self.results.win_rate() * 100.0,
+            self.results.avg_kill_turn,
+            self.results.fastest_kill,
+            self.results.slowest_kill,
+            self.config.iterations_per_move,
+            self.config.exploration_constant,
+            self.config.max_tree_depth,
+        );
+        std::fs::write(&summary, text).map_err(|e| format!("write summary: {}", e))?;
+        Ok(())
+    }
+
+    /// Load checkpoint from disk.
+    pub fn load(dir: &str) -> Result<Self, String> {
+        let path = Path::new(dir).join("mcts_campaign.bin");
+        let bytes = std::fs::read(&path).map_err(|e| format!("read: {}", e))?;
+        bincode::deserialize(&bytes).map_err(|e| format!("deserialize: {}", e))
+    }
+
+    /// How many games remain.
+    pub fn games_remaining(&self) -> u64 {
+        self.total_games_planned.saturating_sub(self.games_completed)
     }
 }
 
