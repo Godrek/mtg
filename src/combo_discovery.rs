@@ -338,22 +338,15 @@ pub fn discover_combos(
     config: &DiscoveryConfig,
 ) -> Vec<DiscoveredCombo> {
     let mut discovered = Vec::new();
-    let mut seen_piece_sets: Vec<Vec<CardId>> = Vec::new();
 
-    // Try all subsets of increasing size
+    // Try all subsets of increasing size.
+    // We do NOT prune supersets: a 3-piece combo can be meaningfully
+    // different from a 2-piece subset (e.g., adding Blood Artist to
+    // Marrow-Gnawer + Thornbite Staff produces infinite damage with
+    // fewer startup creatures).
     for size in 2..=config.max_combo_pieces.min(card_ids.len()) {
         for_each_combination(card_ids, size, |subset| {
-            // Skip if a subset of these pieces already forms a combo
-            // (e.g., if A+B is a combo, don't report A+B+C)
-            let dominated = seen_piece_sets.iter().any(|known| {
-                known.iter().all(|id| subset.contains(id))
-            });
-            if dominated {
-                return;
-            }
-
             if let Some(combo) = explore_combination(db, subset, config) {
-                seen_piece_sets.push(combo.pieces.clone());
                 discovered.push(combo);
             }
         });
@@ -850,8 +843,14 @@ fn apply_combo_action(
                 fire_death_triggers(state, pieces, static_ctx);
             }
 
-            // Apply the ability's effect
+            // Apply the ability's effect. Any newly created tokens
+            // fire ETB triggers (e.g., Ayara drains per entering creature).
+            let tokens_before = state.creature_tokens;
             apply_combo_effect(state, &ability.effect, *piece_index, pieces);
+            let tokens_created = state.creature_tokens.saturating_sub(tokens_before);
+            if tokens_created > 0 {
+                fire_etb_triggers(state, pieces, static_ctx, tokens_created);
+            }
         }
     }
 }
@@ -860,6 +859,7 @@ fn apply_combo_action(
 ///
 /// Called when a creature dies (sacrificed, destroyed). Checks each piece
 /// for triggered abilities with `ACreatureDies` and applies their effects.
+/// After each trigger resolves, any newly created tokens fire ETB triggers.
 fn fire_death_triggers(
     state: &mut ExploreState,
     pieces: &[&CardDef],
@@ -868,7 +868,35 @@ fn fire_death_triggers(
     for (piece_idx, piece) in pieces.iter().enumerate() {
         for trigger in &piece.triggered_abilities {
             if trigger.trigger == TriggerCondition::ACreatureDies {
+                let tokens_before = state.creature_tokens;
                 apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
+                let tokens_created = state.creature_tokens.saturating_sub(tokens_before);
+                if tokens_created > 0 {
+                    fire_etb_triggers(state, pieces, static_ctx, tokens_created);
+                }
+            }
+        }
+    }
+}
+
+/// Fire all enter-the-battlefield triggers across all pieces.
+///
+/// Called when creature tokens are created. Each entering creature fires
+/// `ACreatureEnters` triggers (e.g., Ayara drains 1 per entering creature).
+/// Does not recursively fire ETB triggers for tokens created by ETB effects
+/// to avoid infinite loops.
+fn fire_etb_triggers(
+    state: &mut ExploreState,
+    pieces: &[&CardDef],
+    static_ctx: &StaticContext,
+    count: u32,
+) {
+    for _ in 0..count {
+        for (piece_idx, piece) in pieces.iter().enumerate() {
+            for trigger in &piece.triggered_abilities {
+                if trigger.trigger == TriggerCondition::ACreatureEnters {
+                    apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
+                }
             }
         }
     }
@@ -1299,7 +1327,10 @@ mod tests {
     #[test]
     fn test_marrow_gnawer_thornbite_blood_artist() {
         let db = sample::build_sample_db();
-        // With Blood Artist: each death during the cycle drains the opponent
+        // With Blood Artist: each death during the cycle drains the opponent.
+        // The 3-piece combo needs fewer startup creatures (1 vs 2) because
+        // Blood Artist adds a piece creature, making CreaturesControlled
+        // higher even at break-even token counts.
         let cards = vec![
             ids::MARROW_GNAWER,
             ids::THORNBITE_STAFF,
@@ -1313,11 +1344,34 @@ mod tests {
             "Should discover Marrow-Gnawer + Thornbite + Blood Artist"
         );
 
-        // The 2-piece combo (Marrow+Staff) should be found first
+        // The 2-piece combo (Marrow+Staff) should still be found
         let two_piece = combos.iter().find(|c| c.pieces.len() == 2);
         assert!(
             two_piece.is_some(),
             "Should find the 2-piece combo"
+        );
+
+        // The 3-piece combo should also be found with damage output
+        let three_piece = combos.iter().find(|c| {
+            c.pieces.len() == 3 && c.pieces.contains(&ids::BLOOD_ARTIST)
+        });
+        assert!(
+            three_piece.is_some(),
+            "Should find the 3-piece combo with Blood Artist"
+        );
+        let three_piece = three_piece.unwrap();
+        assert!(
+            three_piece.damage_per_cycle > 0 || three_piece.life_per_cycle > 0,
+            "3-piece combo should deal damage or gain life, got damage={} life={}",
+            three_piece.damage_per_cycle,
+            three_piece.life_per_cycle,
+        );
+        // The 3-piece combo needs fewer startup creatures than the 2-piece
+        assert!(
+            three_piece.startup_creatures < two_piece.unwrap().startup_creatures,
+            "3-piece combo should need fewer startup creatures ({}) than 2-piece ({})",
+            three_piece.startup_creatures,
+            two_piece.unwrap().startup_creatures,
         );
     }
 
@@ -1392,7 +1446,11 @@ mod tests {
     }
 
     #[test]
-    fn test_superset_pruning() {
+    fn test_supersets_not_pruned() {
+        // Supersets are no longer pruned because a 3-piece combo can be
+        // meaningfully different from a 2-piece subset (e.g., adding a
+        // drain-on-death effect). Both the 2-piece and 3-piece combos
+        // should be discovered.
         let db = sample::build_sample_db();
         let cards = vec![
             ids::BASALT_MONOLITH,
@@ -1403,12 +1461,42 @@ mod tests {
 
         let combos = discover_combos(&db, &cards, &config);
 
-        assert_eq!(
-            combos.len(),
-            1,
-            "Should find exactly the 2-piece combo, not supersets"
+        let two_piece = combos.iter().find(|c| c.pieces.len() == 2);
+        assert!(
+            two_piece.is_some(),
+            "Should still find the 2-piece combo"
         );
-        assert_eq!(combos[0].pieces.len(), 2);
+    }
+
+    #[test]
+    fn test_marrow_gnawer_thornbite_ayara_etb_triggers() {
+        let db = sample::build_sample_db();
+        // Ayara triggers on ACreatureEnters — each rat token entering
+        // drains the opponent for 1. This tests that ETB triggers fire
+        // during combo discovery when tokens are created.
+        let cards = vec![
+            ids::MARROW_GNAWER,
+            ids::THORNBITE_STAFF,
+            ids::AYARA_FIRST_OF_LOCTHWAIN,
+        ];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+
+        let three_piece = combos.iter().find(|c| {
+            c.pieces.len() == 3 && c.pieces.contains(&ids::AYARA_FIRST_OF_LOCTHWAIN)
+        });
+        assert!(
+            three_piece.is_some(),
+            "Should find the 3-piece combo with Ayara"
+        );
+        let three_piece = three_piece.unwrap();
+        assert!(
+            three_piece.damage_per_cycle > 0 || three_piece.life_per_cycle > 0,
+            "Ayara ETB should produce damage/life per cycle, got damage={} life={}",
+            three_piece.damage_per_cycle,
+            three_piece.life_per_cycle,
+        );
     }
 
     #[test]
