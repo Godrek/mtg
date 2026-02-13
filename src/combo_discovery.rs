@@ -10,27 +10,38 @@
 //! For each subset of cards (typically pairs and triples):
 //! 1. Place all cards on a virtual "battlefield" (the combo workspace)
 //! 2. DFS through all possible ability activations (mana abilities,
-//!    activated abilities)
+//!    activated abilities) with triggered ability chains
 //! 3. Track the "configuration" (which pieces are tapped/untapped)
 //!    along the search path
 //! 4. When revisiting a configuration with equal or greater resources,
 //!    a cycle is detected — this represents an infinite combo
 //!
-//! Static abilities (e.g., Kinnan's mana bonus) are modeled as modifiers
-//! that affect mana production during the exploration.
+//! The engine models:
+//! - **Mana abilities** (tap for mana) with static modifiers (Kinnan)
+//! - **Activated abilities** with mana costs, tap costs, and sacrifice costs
+//! - **Triggered abilities** that fire when creatures die (Thornbite Staff,
+//!   Blood Artist, Ogre Slumlord)
+//! - **Creature tokens** as a tracked resource (Marrow-Gnawer creates rats)
+//! - **Equipment links** (Thornbite Staff untaps equipped creature)
 //!
-//! # Example
+//! # Examples
 //!
 //! Basalt Monolith + Kinnan, Bonder Prodigy:
-//! - Step 1: Tap Monolith for {C}{C}{C}, Kinnan adds {C} → pool = 4
-//! - Step 2: Pay {3} to untap Monolith → pool = 1
-//! - Cycle detected: same configuration (both untapped), net +1 mana
+//! - Tap Monolith for {C}{C}{C}, Kinnan adds {C} → pool = 4
+//! - Pay {3} to untap Monolith → pool = 1
+//! - Cycle detected: same config, net +1 mana
+//!
+//! Marrow-Gnawer + Thornbite Staff (with 2+ other rats):
+//! - Tap Marrow-Gnawer, sacrifice a rat → rat dies
+//! - Death trigger: Thornbite Staff untaps Marrow-Gnawer
+//! - Effect: create X rat tokens (X = rats controlled)
+//! - Cycle detected: same config, net +N creatures
 //!
 //! # Usage
 //!
 //! ```ignore
 //! let db = sample::build_sample_db();
-//! let card_ids = vec![BASALT_MONOLITH, KINNAN_BONDER_PRODIGY, THRASIOS_TRITON_HERO];
+//! let card_ids = vec![BASALT_MONOLITH, KINNAN_BONDER_PRODIGY];
 //! let config = DiscoveryConfig::default();
 //! let combos = discover_combos(&db, &card_ids, &config);
 //! for combo in &combos {
@@ -41,7 +52,10 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::card::{CardDef, CardId, CardType, Effect, ManaAbility, TargetSpec};
+use crate::card::{
+    CardDef, CardId, CardType, DynamicValue, Effect, ManaAbility, SacrificeCost, TargetSpec,
+    TriggerCondition,
+};
 use crate::combo::{ComboDef, ComboEffect, ComboPrecondition, ComboRegistry};
 use crate::game::CardDatabase;
 use crate::layers::StaticAbility;
@@ -55,25 +69,25 @@ use crate::mana::{Color, ManaPool};
 #[derive(Debug, Clone)]
 pub struct DiscoveryConfig {
     /// Maximum number of cards to consider in a single combo (default: 3).
-    /// Higher values find more complex combos but increase search time
-    /// exponentially: C(N, max_pieces) combinations explored.
     pub max_combo_pieces: usize,
 
     /// Maximum depth of the action sequence DFS (default: 20).
-    /// Longer sequences are unlikely to represent practical combos.
     pub max_depth: usize,
 
     /// Maximum initial mana to try when kick-starting combos (default: 10).
-    /// Some combos require seed mana to begin the loop. We try
-    /// starting with 0, 1, ..., max_startup_mana colorless mana.
     pub max_startup_mana: u32,
 
-    /// Minimum net mana per cycle to consider a combo worth registering
-    /// (default: 1). Break-even loops (net 0) are not useful.
+    /// Minimum net mana per cycle to consider a mana-only combo worth
+    /// registering (default: 1). Does not apply when damage/life/draw/tokens
+    /// are produced.
     pub min_net_mana: u32,
 
     /// Default reward weight for discovered combos (default: 0.2).
     pub default_reward_weight: f64,
+
+    /// Maximum initial creature tokens to try (default: 5).
+    /// Some combos require seed creatures (e.g., Marrow-Gnawer needs rats).
+    pub max_startup_creatures: u32,
 }
 
 impl Default for DiscoveryConfig {
@@ -84,6 +98,7 @@ impl Default for DiscoveryConfig {
             max_startup_mana: 10,
             min_net_mana: 1,
             default_reward_weight: 0.2,
+            max_startup_creatures: 5,
         }
     }
 }
@@ -92,7 +107,10 @@ impl Default for DiscoveryConfig {
 // Internal state for exploration
 // =========================================================================
 
-/// A snapshot of which pieces are tapped — the "configuration" for cycle detection.
+/// A snapshot of which pieces are tapped — the "configuration" for cycle
+/// detection. Resources (mana, creature tokens) are tracked separately
+/// since they grow/shrink and we detect cycles by comparing resource
+/// levels across visits to the same configuration.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct PieceConfig {
     tapped: Vec<bool>,
@@ -113,6 +131,9 @@ struct ExploreState {
     tapped: Vec<bool>,
     /// Current mana pool.
     mana_pool: ManaPool,
+    /// Number of creature tokens on the battlefield.
+    /// Includes all creatures that can be sacrificed (non-piece creatures).
+    creature_tokens: u32,
     /// Accumulated side effects during this exploration path.
     side_effects: SideEffects,
 }
@@ -133,17 +154,22 @@ enum ComboAction {
         piece_index: usize,
         ability_index: usize,
     },
-    /// Activate a non-mana ability on a piece.
+    /// Activate a non-mana ability on a piece (may involve sacrifice).
     ActivateAbility {
         piece_index: usize,
         ability_index: usize,
     },
 }
 
-/// Contextual information about the static abilities present across all pieces.
+/// Contextual information about static abilities and equipment links.
 struct StaticContext {
     /// How many pieces have ManaFromNonlandBonus (e.g., Kinnan).
     mana_from_nonland_bonus_count: u32,
+    /// Equipment links: (equipment_piece_idx, equipped_creature_idx).
+    /// When an equipment's triggered ability fires with "untap equipped
+    /// creature" (UntapTarget { target: Controller }), we untap the
+    /// linked creature instead of the equipment itself.
+    equipment_links: Vec<(usize, usize)>,
 }
 
 // =========================================================================
@@ -161,6 +187,8 @@ pub struct DiscoveredCombo {
     pub net_colorless_per_cycle: u32,
     /// Net colored mana gained per cycle (by color).
     pub net_colored_per_cycle: HashMap<Color, u32>,
+    /// Net creature tokens gained per cycle.
+    pub net_creatures_per_cycle: u32,
     /// Damage dealt to opponent per cycle.
     pub damage_per_cycle: u32,
     /// Life gained per cycle.
@@ -171,6 +199,8 @@ pub struct DiscoveredCombo {
     pub cycle_actions: Vec<String>,
     /// Minimum startup mana required to begin the loop.
     pub startup_mana: u32,
+    /// Minimum startup creature tokens required.
+    pub startup_creatures: u32,
 }
 
 impl DiscoveredCombo {
@@ -183,6 +213,9 @@ impl DiscoveredCombo {
             + self.net_colored_per_cycle.values().sum::<u32>();
         if total_mana > 0 {
             effects.push("Infinite Mana".to_string());
+        }
+        if self.net_creatures_per_cycle > 0 {
+            effects.push("Infinite Tokens".to_string());
         }
         if self.damage_per_cycle > 0 {
             effects.push("Infinite Damage".to_string());
@@ -219,7 +252,6 @@ impl DiscoveredCombo {
         let mut effects = Vec::new();
 
         if self.net_colorless_per_cycle > 0 {
-            // Produce 100 as "effectively infinite"
             effects.push(ComboEffect::AddColorlessMana(100));
         }
 
@@ -229,7 +261,8 @@ impl DiscoveredCombo {
             }
         }
 
-        if self.damage_per_cycle > 0 {
+        if self.damage_per_cycle > 0 || self.net_creatures_per_cycle > 0 {
+            // Infinite tokens with any sac outlet = effectively infinite damage
             effects.push(ComboEffect::DealDamageToOpponent(100));
         }
 
@@ -257,11 +290,17 @@ impl fmt::Display for DiscoveredCombo {
         if self.startup_mana > 0 {
             writeln!(f, "  Startup mana: {}", self.startup_mana)?;
         }
+        if self.startup_creatures > 0 {
+            writeln!(f, "  Startup creatures: {}", self.startup_creatures)?;
+        }
 
         let total_mana = self.net_colorless_per_cycle
             + self.net_colored_per_cycle.values().sum::<u32>();
         if total_mana > 0 {
             writeln!(f, "  Net mana/cycle: +{}", total_mana)?;
+        }
+        if self.net_creatures_per_cycle > 0 {
+            writeln!(f, "  Net creatures/cycle: +{}", self.net_creatures_per_cycle)?;
         }
         if self.damage_per_cycle > 0 {
             writeln!(f, "  Damage/cycle: {}", self.damage_per_cycle)?;
@@ -360,79 +399,184 @@ pub fn discover_and_register(
 // Exploration engine
 // =========================================================================
 
+/// Check if a piece is an Equipment (has Equipment subtype).
+fn is_equipment(piece: &CardDef) -> bool {
+    piece
+        .subtypes
+        .iter()
+        .any(|s| s.0 == "Equipment")
+}
+
+/// Check if a piece is a creature.
+fn is_creature(piece: &CardDef) -> bool {
+    piece.card_types.contains(&CardType::Creature)
+}
+
+/// Check if any piece has a sacrifice-cost ability or a death trigger,
+/// meaning creature tokens are relevant for this combination.
+fn needs_creature_tokens(pieces: &[&CardDef]) -> bool {
+    for piece in pieces {
+        for ability in &piece.activated_abilities {
+            if ability.sacrifice_cost.is_some() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Explore a specific combination of cards for infinite combos.
 fn explore_combination(
     db: &CardDatabase,
     piece_ids: &[CardId],
     config: &DiscoveryConfig,
 ) -> Option<DiscoveredCombo> {
-    // Look up card definitions
     let pieces: Vec<&CardDef> = piece_ids.iter().filter_map(|id| db.get(*id)).collect();
 
     if pieces.len() != piece_ids.len() {
-        return None; // Some cards not found in DB
+        return None;
     }
 
-    // Build static context (check for ability modifiers across all pieces)
-    let static_ctx = build_static_context(&pieces);
+    // Determine which equipment configurations to try.
+    // Equipment pieces can be attached to any creature piece.
+    let equipment_indices: Vec<usize> = pieces
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| is_equipment(p))
+        .map(|(i, _)| i)
+        .collect();
+    let creature_indices: Vec<usize> = pieces
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| is_creature(p))
+        .map(|(i, _)| i)
+        .collect();
 
-    // Global visited set: maps each configuration to the best total mana
-    // we've explored from. If we reach a config with <= mana, skip it —
-    // any cycle reachable from less mana is also reachable from more mana
-    // (since all actions available with less mana are also available with
-    // more). This prevents combinatorial explosion in non-productive
-    // card combinations.
-    let mut visited: HashMap<PieceConfig, u32> = HashMap::new();
+    // Generate all possible equipment attachment configurations.
+    // Each equipment can be attached to any creature, or unattached.
+    let attachment_configs = if equipment_indices.is_empty() || creature_indices.is_empty() {
+        vec![vec![]] // No equipment links
+    } else {
+        generate_attachment_configs(&equipment_indices, &creature_indices)
+    };
 
-    // Try with increasing startup mana
-    for startup_mana in 0..=config.max_startup_mana {
-        let state = ExploreState {
-            tapped: vec![false; pieces.len()],
-            mana_pool: ManaPool {
-                colorless: startup_mana,
-                ..ManaPool::empty()
-            },
-            side_effects: SideEffects::default(),
+    // Determine if creature tokens are relevant for this combination
+    let uses_creatures = needs_creature_tokens(&pieces);
+
+    // Try each equipment configuration
+    for links in &attachment_configs {
+        let static_ctx = StaticContext {
+            mana_from_nonland_bonus_count: count_mana_bonus(&pieces),
+            equipment_links: links.clone(),
         };
 
-        let mut path: Vec<(PieceConfig, ManaPool, SideEffects, ComboAction)> = Vec::new();
+        // Determine creature token range to try
+        let max_creatures = if uses_creatures {
+            config.max_startup_creatures
+        } else {
+            0
+        };
 
-        if let Some(result) = dfs(
-            &state,
-            &mut path,
-            &pieces,
-            &static_ctx,
-            config,
-            0,
-            startup_mana,
-            &mut visited,
-        ) {
-            return Some(result);
+        let mut visited: HashMap<PieceConfig, (u32, u32)> = HashMap::new();
+
+        for startup_creatures in 0..=max_creatures {
+            for startup_mana in 0..=config.max_startup_mana {
+                let state = ExploreState {
+                    tapped: vec![false; pieces.len()],
+                    mana_pool: ManaPool {
+                        colorless: startup_mana,
+                        ..ManaPool::empty()
+                    },
+                    creature_tokens: startup_creatures,
+                    side_effects: SideEffects::default(),
+                };
+
+                let mut path: Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)> =
+                    Vec::new();
+
+                if let Some(result) = dfs(
+                    &state,
+                    &mut path,
+                    &pieces,
+                    &static_ctx,
+                    config,
+                    0,
+                    startup_mana,
+                    startup_creatures,
+                    &mut visited,
+                ) {
+                    return Some(result);
+                }
+            }
         }
     }
 
     None
 }
 
+/// Generate all equipment attachment configurations.
+///
+/// Each equipment piece can be attached to any creature piece.
+/// Returns a list of link vectors, where each link is (equipment_idx, creature_idx).
+fn generate_attachment_configs(
+    equipment_indices: &[usize],
+    creature_indices: &[usize],
+) -> Vec<Vec<(usize, usize)>> {
+    let mut configs = Vec::new();
+
+    if equipment_indices.len() == 1 {
+        // Single equipment: try attaching to each creature
+        for &ci in creature_indices {
+            configs.push(vec![(equipment_indices[0], ci)]);
+        }
+    } else {
+        // Multiple equipment: try all combinations
+        // For simplicity, enumerate all possible assignments
+        let mut current = vec![0usize; equipment_indices.len()];
+        loop {
+            let links: Vec<(usize, usize)> = equipment_indices
+                .iter()
+                .zip(current.iter())
+                .map(|(&ei, &ci_idx)| (ei, creature_indices[ci_idx]))
+                .collect();
+            configs.push(links);
+
+            // Increment: find rightmost index that can be bumped
+            let mut carry = true;
+            for idx in (0..current.len()).rev() {
+                if carry {
+                    current[idx] += 1;
+                    if current[idx] >= creature_indices.len() {
+                        current[idx] = 0;
+                    } else {
+                        carry = false;
+                    }
+                }
+            }
+            if carry {
+                break; // All combinations exhausted
+            }
+        }
+    }
+
+    configs
+}
+
 /// Depth-first search for cycles in the ability activation graph.
 ///
-/// The key insight: with N pieces there are only 2^N possible tap
-/// configurations, so cycles are found quickly. We track the path of
-/// (config, mana_pool, side_effects) at each step. When we revisit
-/// a configuration with >= mana, a net-positive cycle is detected.
-///
 /// The `visited` map prunes redundant exploration: once we've explored
-/// a configuration with N total mana, revisiting it with <= N mana from
-/// a different path can't discover any new cycles.
+/// a configuration with N total mana and M creatures, revisiting with
+/// <= mana and <= creatures can't discover new cycles.
 fn dfs(
     state: &ExploreState,
-    path: &mut Vec<(PieceConfig, ManaPool, SideEffects, ComboAction)>,
+    path: &mut Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)>,
     pieces: &[&CardDef],
     static_ctx: &StaticContext,
     config: &DiscoveryConfig,
     depth: usize,
     startup_mana: u32,
-    visited: &mut HashMap<PieceConfig, u32>,
+    startup_creatures: u32,
+    visited: &mut HashMap<PieceConfig, (u32, u32)>,
 ) -> Option<DiscoveredCombo> {
     if depth > config.max_depth {
         return None;
@@ -440,17 +584,20 @@ fn dfs(
 
     let current_config = state.config();
 
-    // 1. Check for cycles in the current path (BEFORE visited pruning,
-    //    since the cycle itself is what we're looking for).
-    for (i, (prev_config, prev_mana, prev_effects, _)) in path.iter().enumerate() {
+    // 1. Check for cycles in the current path.
+    for (i, (prev_config, prev_mana, prev_creatures, prev_effects, _)) in
+        path.iter().enumerate()
+    {
         if current_config == *prev_config {
-            // Same configuration — check if we have more resources
-            if mana_pool_ge(&state.mana_pool, prev_mana) {
+            if mana_pool_ge(&state.mana_pool, prev_mana)
+                && state.creature_tokens >= *prev_creatures
+            {
                 let net_colorless = state
                     .mana_pool
                     .colorless
                     .saturating_sub(prev_mana.colorless);
-                let net_total = mana_pool_diff_total(&state.mana_pool, prev_mana);
+                let net_total_mana = mana_pool_diff_total(&state.mana_pool, prev_mana);
+                let net_creatures = state.creature_tokens.saturating_sub(*prev_creatures);
                 let net_damage = state
                     .side_effects
                     .damage_dealt
@@ -464,18 +611,18 @@ fn dfs(
                     .cards_drawn
                     .saturating_sub(prev_effects.cards_drawn);
 
-                // Must produce something useful
-                let produces_something =
-                    net_total >= config.min_net_mana || net_damage > 0 || net_life > 0 || net_draw > 0;
+                let produces_something = net_total_mana >= config.min_net_mana
+                    || net_creatures > 0
+                    || net_damage > 0
+                    || net_life > 0
+                    || net_draw > 0;
 
                 if produces_something {
-                    // Build the cycle action descriptions from the path
                     let cycle_actions: Vec<String> = path[i..]
                         .iter()
-                        .map(|(_, _, _, action)| describe_action(action, pieces))
+                        .map(|(_, _, _, _, action)| describe_action(action, pieces))
                         .collect();
 
-                    // Build net colored mana map
                     let mut net_colored = HashMap::new();
                     for &color in &Color::ALL {
                         let prev = prev_mana.get(color);
@@ -490,26 +637,29 @@ fn dfs(
                         piece_names: pieces.iter().map(|p| p.name.clone()).collect(),
                         net_colorless_per_cycle: net_colorless,
                         net_colored_per_cycle: net_colored,
+                        net_creatures_per_cycle: net_creatures,
                         damage_per_cycle: net_damage,
                         life_per_cycle: net_life,
                         cards_per_cycle: net_draw,
                         cycle_actions,
                         startup_mana,
+                        startup_creatures,
                     });
                 }
             }
         }
     }
 
-    // 2. Visited pruning: if we've already fully explored this config
-    //    with >= total mana, no new cycles can be found from here.
+    // 2. Visited pruning: skip if we've explored this config with
+    //    >= mana AND >= creatures.
     let total_mana = state.mana_pool.total();
-    if let Some(&best_mana) = visited.get(&current_config) {
-        if total_mana <= best_mana {
+    let tokens = state.creature_tokens;
+    if let Some(&(best_mana, best_creatures)) = visited.get(&current_config) {
+        if total_mana <= best_mana && tokens <= best_creatures {
             return None;
         }
     }
-    visited.insert(current_config.clone(), total_mana);
+    visited.insert(current_config.clone(), (total_mana, tokens));
 
     // 3. Generate all legal actions and explore each
     let actions = legal_combo_actions(state, pieces);
@@ -521,6 +671,7 @@ fn dfs(
         path.push((
             current_config.clone(),
             state.mana_pool.clone(),
+            state.creature_tokens,
             state.side_effects.clone(),
             action,
         ));
@@ -533,6 +684,7 @@ fn dfs(
             config,
             depth + 1,
             startup_mana,
+            startup_creatures,
             visited,
         );
 
@@ -578,7 +730,14 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
                 continue;
             }
 
-            // Only consider abilities with effects we can model in combo discovery
+            // Check sacrifice cost
+            if let Some(ref sac_cost) = ability.sacrifice_cost {
+                if !can_pay_sacrifice(state, sac_cost, piece_idx, pieces) {
+                    continue;
+                }
+            }
+
+            // Only consider abilities with effects we can model
             if is_combo_relevant_effect(&ability.effect) {
                 actions.push(ComboAction::ActivateAbility {
                     piece_index: piece_idx,
@@ -591,10 +750,25 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
     actions
 }
 
+/// Check if the current state can pay a sacrifice cost.
+fn can_pay_sacrifice(
+    state: &ExploreState,
+    sac_cost: &SacrificeCost,
+    _source_idx: usize,
+    _pieces: &[&CardDef],
+) -> bool {
+    match sac_cost {
+        SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_) => {
+            // Need at least one creature token to sacrifice.
+            // The piece creatures themselves could also be sacrificed, but
+            // that would remove a combo piece and break the loop. So we only
+            // count creature tokens.
+            state.creature_tokens >= 1
+        }
+    }
+}
+
 /// Check if an effect is relevant for combo discovery.
-///
-/// We only model effects that directly contribute to resource cycles:
-/// untapping, mana production, damage, life, and card draw.
 fn is_combo_relevant_effect(effect: &Effect) -> bool {
     match effect {
         Effect::UntapTarget { .. }
@@ -602,7 +776,9 @@ fn is_combo_relevant_effect(effect: &Effect) -> bool {
         | Effect::DealDamage { .. }
         | Effect::GainLife { .. }
         | Effect::DrawCards { .. }
-        | Effect::LoseLife { .. } => true,
+        | Effect::LoseLife { .. }
+        | Effect::CreateToken(_)
+        | Effect::CreateTokens { .. } => true,
         Effect::Multiple(effects) => effects.iter().any(is_combo_relevant_effect),
         _ => false,
     }
@@ -623,7 +799,6 @@ fn apply_combo_action(
             let piece = pieces[*piece_index];
             let ma = &piece.mana_abilities[*ability_index];
 
-            // Produce mana
             match ma {
                 ManaAbility::TapForColor(color) => {
                     state.mana_pool.add_color(*color, 1);
@@ -632,11 +807,9 @@ fn apply_combo_action(
                     state.mana_pool.colorless += 1;
                 }
                 ManaAbility::TapForAny => {
-                    // For discovery purposes, treat as colorless
                     state.mana_pool.colorless += 1;
                 }
                 ManaAbility::TapForChoice(_colors) => {
-                    // For discovery purposes, treat as colorless
                     state.mana_pool.colorless += 1;
                 }
                 ManaAbility::TapForColorlessAmount(n) => {
@@ -644,14 +817,13 @@ fn apply_combo_action(
                 }
             }
 
-            // Apply ManaFromNonlandBonus (e.g., Kinnan) if the source is nonland
+            // ManaFromNonlandBonus (e.g., Kinnan)
             if static_ctx.mana_from_nonland_bonus_count > 0
                 && !piece.card_types.contains(&CardType::Land)
             {
                 state.mana_pool.colorless += static_ctx.mana_from_nonland_bonus_count;
             }
 
-            // Tap the piece
             state.tapped[*piece_index] = true;
         }
 
@@ -670,13 +842,100 @@ fn apply_combo_action(
                 state.tapped[*piece_index] = true;
             }
 
-            // Apply effect
+            // Pay sacrifice cost — this happens BEFORE the effect resolves.
+            // Creature dying fires death triggers.
+            if ability.sacrifice_cost.is_some() {
+                state.creature_tokens = state.creature_tokens.saturating_sub(1);
+                // Fire death triggers on all pieces
+                fire_death_triggers(state, pieces, static_ctx);
+            }
+
+            // Apply the ability's effect
             apply_combo_effect(state, &ability.effect, *piece_index, pieces);
         }
     }
 }
 
-/// Apply an effect during combo exploration.
+/// Fire all death triggers across all pieces.
+///
+/// Called when a creature dies (sacrificed, destroyed). Checks each piece
+/// for triggered abilities with `ACreatureDies` and applies their effects.
+fn fire_death_triggers(
+    state: &mut ExploreState,
+    pieces: &[&CardDef],
+    static_ctx: &StaticContext,
+) {
+    for (piece_idx, piece) in pieces.iter().enumerate() {
+        for trigger in &piece.triggered_abilities {
+            if trigger.trigger == TriggerCondition::ACreatureDies {
+                apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
+            }
+        }
+    }
+}
+
+/// Apply a triggered ability effect.
+///
+/// For equipment pieces, `UntapTarget { target: Controller }` means
+/// "untap equipped creature" — we resolve this through the equipment links
+/// in the static context.
+fn apply_trigger_effect(
+    state: &mut ExploreState,
+    effect: &Effect,
+    source_piece: usize,
+    pieces: &[&CardDef],
+    static_ctx: &StaticContext,
+) {
+    match effect {
+        Effect::UntapTarget { target } => {
+            if matches!(target, TargetSpec::Controller) {
+                // Check if this is an equipment piece with a link
+                if let Some(&(_, equipped_idx)) = static_ctx
+                    .equipment_links
+                    .iter()
+                    .find(|&&(eq_idx, _)| eq_idx == source_piece)
+                {
+                    // Untap the equipped creature
+                    state.tapped[equipped_idx] = false;
+                } else {
+                    // Not equipment — untap self
+                    state.tapped[source_piece] = false;
+                }
+            }
+        }
+        Effect::CreateToken(_) => {
+            state.creature_tokens += 1;
+        }
+        Effect::CreateTokens { count, .. } => {
+            let n = evaluate_dynamic_value(count, state, pieces);
+            state.creature_tokens += n;
+        }
+        Effect::DealDamage { amount, target } => {
+            if matches!(target, TargetSpec::Opponent | TargetSpec::AnyPlayer) {
+                state.side_effects.damage_dealt += amount;
+            }
+        }
+        Effect::GainLife { amount } => {
+            state.side_effects.life_gained += amount;
+        }
+        Effect::DrawCards { count } => {
+            state.side_effects.cards_drawn += count;
+        }
+        Effect::LoseLife { amount, target } => {
+            if matches!(target, TargetSpec::Opponent) {
+                state.side_effects.damage_dealt += amount;
+            }
+        }
+        Effect::Multiple(effects) => {
+            for sub in effects {
+                apply_trigger_effect(state, sub, source_piece, pieces, static_ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Apply an activated ability effect during combo exploration.
 fn apply_combo_effect(
     state: &mut ExploreState,
     effect: &Effect,
@@ -686,12 +945,9 @@ fn apply_combo_effect(
     match effect {
         Effect::UntapTarget { target } => {
             match target {
-                // Controller target on an activated ability = untap self
-                // (e.g., Basalt Monolith: "{3}: Untap Basalt Monolith")
                 TargetSpec::Controller => {
                     state.tapped[source_piece] = false;
                 }
-                // For other untap targets, try untapping each tapped piece
                 _ => {
                     for i in 0..pieces.len() {
                         if i != source_piece && state.tapped[i] {
@@ -706,6 +962,13 @@ fn apply_combo_effect(
             Some(c) => state.mana_pool.add_color(*c, *amount),
             None => state.mana_pool.colorless += amount,
         },
+        Effect::CreateToken(_) => {
+            state.creature_tokens += 1;
+        }
+        Effect::CreateTokens { count, .. } => {
+            let n = evaluate_dynamic_value(count, state, pieces);
+            state.creature_tokens += n;
+        }
         Effect::DealDamage { amount, target } => {
             if matches!(target, TargetSpec::Opponent | TargetSpec::AnyPlayer) {
                 state.side_effects.damage_dealt += amount;
@@ -727,7 +990,27 @@ fn apply_combo_effect(
                 apply_combo_effect(state, sub, source_piece, pieces);
             }
         }
-        _ => {} // Other effects not modeled in combo discovery
+        _ => {}
+    }
+}
+
+/// Evaluate a DynamicValue in the combo discovery context.
+fn evaluate_dynamic_value(
+    value: &DynamicValue,
+    state: &ExploreState,
+    pieces: &[&CardDef],
+) -> u32 {
+    match value {
+        DynamicValue::CreaturesControlled => {
+            // Count: creature tokens + creature pieces on the battlefield
+            let piece_creatures = pieces
+                .iter()
+                .filter(|p| is_creature(p))
+                .count() as u32;
+            state.creature_tokens + piece_creatures
+        }
+        // Other dynamic values not relevant for combo discovery
+        _ => 1,
     }
 }
 
@@ -735,19 +1018,17 @@ fn apply_combo_effect(
 // Helpers
 // =========================================================================
 
-/// Build the static context from the pieces on the battlefield.
-fn build_static_context(pieces: &[&CardDef]) -> StaticContext {
-    let mut bonus_count = 0u32;
+/// Count how many pieces have ManaFromNonlandBonus.
+fn count_mana_bonus(pieces: &[&CardDef]) -> u32 {
+    let mut count = 0u32;
     for piece in pieces {
         for sa in &piece.static_abilities {
             if matches!(sa, StaticAbility::ManaFromNonlandBonus) {
-                bonus_count += 1;
+                count += 1;
             }
         }
     }
-    StaticContext {
-        mana_from_nonland_bonus_count: bonus_count,
-    }
+    count
 }
 
 /// Check if mana pool `a` is >= mana pool `b` in every component.
@@ -821,11 +1102,10 @@ fn for_each_combination<T: Clone>(items: &[T], size: usize, mut callback: impl F
     loop {
         callback(&buffer);
 
-        // Find the rightmost index that can be incremented
         let mut i = size;
         loop {
             if i == 0 {
-                return; // All combinations exhausted
+                return;
             }
             i -= 1;
             if indices[i] < items.len() - size + i {
@@ -833,13 +1113,11 @@ fn for_each_combination<T: Clone>(items: &[T], size: usize, mut callback: impl F
             }
         }
 
-        // Increment it and reset all indices to the right
         indices[i] += 1;
         for j in (i + 1)..size {
             indices[j] = indices[j - 1] + 1;
         }
 
-        // Update buffer
         for (k, &idx) in indices.iter().enumerate() {
             buffer[k] = items[idx].clone();
         }
@@ -884,7 +1162,6 @@ mod tests {
     #[test]
     fn test_basalt_alone_is_not_infinite() {
         let db = sample::build_sample_db();
-        // Basalt Monolith alone: taps for 3, pay 3 to untap = break-even
         let cards = vec![ids::BASALT_MONOLITH];
         let config = DiscoveryConfig {
             max_combo_pieces: 2,
@@ -901,7 +1178,6 @@ mod tests {
     #[test]
     fn test_grim_kinnan_is_not_infinite() {
         let db = sample::build_sample_db();
-        // Grim Monolith + Kinnan: taps for 3, +1 = 4, but costs 4 to untap = break-even
         let cards = vec![ids::GRIM_MONOLITH, ids::KINNAN_BONDER_PRODIGY];
         let config = DiscoveryConfig::default();
 
@@ -926,7 +1202,6 @@ mod tests {
 
         let combos = discover_combos(&db, &cards, &config);
 
-        // Should find Basalt + Kinnan as a 2-piece combo
         let basalt_kinnan = combos.iter().find(|c| {
             c.pieces.contains(&ids::BASALT_MONOLITH)
                 && c.pieces.contains(&ids::KINNAN_BONDER_PRODIGY)
@@ -971,6 +1246,85 @@ mod tests {
         );
     }
 
+    // =====================================================================
+    // Creature-based combo tests
+    // =====================================================================
+
+    #[test]
+    fn test_discover_marrow_gnawer_thornbite_staff() {
+        let db = sample::build_sample_db();
+        let cards = vec![ids::MARROW_GNAWER, ids::THORNBITE_STAFF];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            !combos.is_empty(),
+            "Should discover Marrow-Gnawer + Thornbite Staff combo"
+        );
+
+        let combo = &combos[0];
+        assert!(combo.pieces.contains(&ids::MARROW_GNAWER));
+        assert!(combo.pieces.contains(&ids::THORNBITE_STAFF));
+        assert!(
+            combo.net_creatures_per_cycle > 0,
+            "Should produce net creatures per cycle, got {}",
+            combo.net_creatures_per_cycle
+        );
+        // Needs at least 2 creature tokens (Marrow-Gnawer counts as 1 creature,
+        // plus 2 other rats to get exponential growth: sac 1, create 2+ tokens)
+        assert!(
+            combo.startup_creatures >= 2,
+            "Should need at least 2 startup creatures, got {}",
+            combo.startup_creatures
+        );
+    }
+
+    #[test]
+    fn test_marrow_gnawer_alone_not_infinite() {
+        let db = sample::build_sample_db();
+        // Without Thornbite Staff, Marrow-Gnawer can't untap himself
+        let cards = vec![ids::MARROW_GNAWER];
+        let config = DiscoveryConfig {
+            max_combo_pieces: 2,
+            ..Default::default()
+        };
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            combos.is_empty(),
+            "Marrow-Gnawer alone should not be an infinite combo"
+        );
+    }
+
+    #[test]
+    fn test_marrow_gnawer_thornbite_blood_artist() {
+        let db = sample::build_sample_db();
+        // With Blood Artist: each death during the cycle drains the opponent
+        let cards = vec![
+            ids::MARROW_GNAWER,
+            ids::THORNBITE_STAFF,
+            ids::BLOOD_ARTIST,
+        ];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            !combos.is_empty(),
+            "Should discover Marrow-Gnawer + Thornbite + Blood Artist"
+        );
+
+        // The 2-piece combo (Marrow+Staff) should be found first
+        let two_piece = combos.iter().find(|c| c.pieces.len() == 2);
+        assert!(
+            two_piece.is_some(),
+            "Should find the 2-piece combo"
+        );
+    }
+
+    // =====================================================================
+    // Utility tests
+    // =====================================================================
+
     #[test]
     fn test_combination_iterator() {
         let items = vec![1, 2, 3, 4];
@@ -1000,7 +1354,7 @@ mod tests {
         for_each_combination(&items, 3, |combo| {
             results.push(combo.to_vec());
         });
-        assert_eq!(results.len(), 1); // C(3,3) = 1
+        assert_eq!(results.len(), 1);
         assert_eq!(results[0], vec![1, 2, 3]);
     }
 
@@ -1017,7 +1371,6 @@ mod tests {
         assert!(mana_pool_ge(&a, &b));
         assert!(!mana_pool_ge(&b, &a));
 
-        // Equal counts as >=
         let c = ManaPool {
             colorless: 5,
             ..ManaPool::empty()
@@ -1028,11 +1381,7 @@ mod tests {
     #[test]
     fn test_no_combos_among_vanilla_creatures() {
         let db = sample::build_sample_db();
-        let cards = vec![
-            ids::GRIZZLY_BEARS,
-            ids::GREY_OGRE,
-            ids::SERRA_ANGEL,
-        ];
+        let cards = vec![ids::GRIZZLY_BEARS, ids::GREY_OGRE, ids::SERRA_ANGEL];
         let config = DiscoveryConfig::default();
 
         let combos = discover_combos(&db, &cards, &config);
@@ -1045,8 +1394,6 @@ mod tests {
     #[test]
     fn test_superset_pruning() {
         let db = sample::build_sample_db();
-        // If Basalt+Kinnan is found as a 2-piece combo, the 3-piece
-        // combination Basalt+Kinnan+Thrasios should be pruned as redundant.
         let cards = vec![
             ids::BASALT_MONOLITH,
             ids::KINNAN_BONDER_PRODIGY,
@@ -1056,12 +1403,20 @@ mod tests {
 
         let combos = discover_combos(&db, &cards, &config);
 
-        // Should find exactly 1 combo (the 2-piece version)
         assert_eq!(
             combos.len(),
             1,
             "Should find exactly the 2-piece combo, not supersets"
         );
         assert_eq!(combos[0].pieces.len(), 2);
+    }
+
+    #[test]
+    fn test_equipment_attachment_configs() {
+        // 1 equipment, 2 creatures → 2 configs
+        let configs = generate_attachment_configs(&[0], &[1, 2]);
+        assert_eq!(configs.len(), 2);
+        assert!(configs.contains(&vec![(0, 1)]));
+        assert!(configs.contains(&vec![(0, 2)]));
     }
 }

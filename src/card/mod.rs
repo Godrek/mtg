@@ -85,8 +85,20 @@ pub enum ManaAbility {
 pub struct ActivatedAbility {
     pub cost: ManaCost,
     pub requires_tap: bool,
+    /// Additional cost: sacrifice a permanent as part of activating this ability.
+    #[serde(default)]
+    pub sacrifice_cost: Option<SacrificeCost>,
     pub effect: Effect,
     pub description: String,
+}
+
+/// A sacrifice cost required to activate an ability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SacrificeCost {
+    /// Sacrifice any creature you control (e.g., Nezumi Bone-Reader).
+    AnyCreature,
+    /// Sacrifice a creature with a specific subtype (e.g., Marrow-Gnawer: "Sacrifice a Rat").
+    CreatureWithSubtype(Subtype),
 }
 
 /// A triggered ability.
