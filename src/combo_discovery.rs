@@ -161,6 +161,10 @@ enum ComboAction {
     ActivateAbility {
         piece_index: usize,
         ability_index: usize,
+        /// For abilities with targeted untap effects (non-Controller),
+        /// which piece to untap. None means the ability doesn't have
+        /// a targeted untap, or targets self (Controller).
+        untap_target: Option<usize>,
     },
 }
 
@@ -770,10 +774,37 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
 
             // Only consider abilities with effects we can model
             if is_combo_relevant_effect(&ability.effect) {
-                actions.push(ComboAction::ActivateAbility {
-                    piece_index: piece_idx,
-                    ability_index: ability_idx,
-                });
+                if has_targeted_untap(&ability.effect) {
+                    // Branch on which piece to untap. Generate one action
+                    // per tapped non-source piece, so the DFS explores all
+                    // possibilities instead of greedily picking the first.
+                    let mut any_target = false;
+                    for i in 0..pieces.len() {
+                        if i != piece_idx && state.tapped[i] {
+                            actions.push(ComboAction::ActivateAbility {
+                                piece_index: piece_idx,
+                                ability_index: ability_idx,
+                                untap_target: Some(i),
+                            });
+                            any_target = true;
+                        }
+                    }
+                    // If nothing is tapped, the untap does nothing — still
+                    // allow the action for its other effects (damage, etc.)
+                    if !any_target {
+                        actions.push(ComboAction::ActivateAbility {
+                            piece_index: piece_idx,
+                            ability_index: ability_idx,
+                            untap_target: None,
+                        });
+                    }
+                } else {
+                    actions.push(ComboAction::ActivateAbility {
+                        piece_index: piece_idx,
+                        ability_index: ability_idx,
+                        untap_target: None,
+                    });
+                }
             }
         }
     }
@@ -799,6 +830,16 @@ fn can_pay_sacrifice(
             // engine's job, not the discovery engine's.
             state.creature_tokens >= 1
         }
+    }
+}
+
+/// Check if an effect contains a targeted (non-Controller) UntapTarget.
+/// These require branching in the DFS to try each possible untap target.
+fn has_targeted_untap(effect: &Effect) -> bool {
+    match effect {
+        Effect::UntapTarget { target } => !matches!(target, TargetSpec::Controller),
+        Effect::Multiple(effects) => effects.iter().any(has_targeted_untap),
+        _ => false,
     }
 }
 
@@ -866,6 +907,7 @@ fn apply_combo_action(
         ComboAction::ActivateAbility {
             piece_index,
             ability_index,
+            untap_target,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
@@ -889,7 +931,7 @@ fn apply_combo_action(
             // Apply the ability's effect. Any newly created tokens
             // fire ETB triggers (e.g., Ayara drains per entering creature).
             let tokens_before = state.creature_tokens;
-            apply_combo_effect(state, &ability.effect, *piece_index, pieces);
+            apply_combo_effect(state, &ability.effect, *piece_index, pieces, *untap_target);
             let tokens_created = state.creature_tokens.saturating_sub(tokens_before);
             if tokens_created > 0 {
                 fire_etb_triggers(state, pieces, static_ctx, tokens_created);
@@ -1007,11 +1049,16 @@ fn apply_trigger_effect(
 }
 
 /// Apply an activated ability effect during combo exploration.
+///
+/// `untap_target` specifies which piece to untap for non-Controller
+/// UntapTarget effects. This is chosen during action generation so
+/// the DFS branches on all valid targets.
 fn apply_combo_effect(
     state: &mut ExploreState,
     effect: &Effect,
     source_piece: usize,
     pieces: &[&CardDef],
+    untap_target: Option<usize>,
 ) {
     match effect {
         Effect::UntapTarget { target } => {
@@ -1020,12 +1067,10 @@ fn apply_combo_effect(
                     state.tapped[source_piece] = false;
                 }
                 _ => {
-                    for i in 0..pieces.len() {
-                        if i != source_piece && state.tapped[i] {
-                            state.tapped[i] = false;
-                            break;
-                        }
+                    if let Some(idx) = untap_target {
+                        state.tapped[idx] = false;
                     }
+                    // If untap_target is None, nothing is tapped to untap
                 }
             }
         }
@@ -1058,7 +1103,7 @@ fn apply_combo_effect(
         }
         Effect::Multiple(effects) => {
             for sub in effects {
-                apply_combo_effect(state, sub, source_piece, pieces);
+                apply_combo_effect(state, sub, source_piece, pieces, untap_target);
             }
         }
         _ => {}
@@ -1172,10 +1217,17 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
         ComboAction::ActivateAbility {
             piece_index,
             ability_index,
+            untap_target,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
-            format!("Activate {}: {}", piece.name, ability.description)
+            match untap_target {
+                Some(idx) => format!(
+                    "Activate {}: {} (untap {})",
+                    piece.name, ability.description, pieces[*idx].name,
+                ),
+                None => format!("Activate {}: {}", piece.name, ability.description),
+            }
         }
     }
 }
