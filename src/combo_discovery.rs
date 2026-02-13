@@ -752,10 +752,13 @@ fn can_pay_sacrifice(
 ) -> bool {
     match sac_cost {
         SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_) => {
-            // Need at least one creature token to sacrifice.
-            // The piece creatures themselves could also be sacrificed, but
-            // that would remove a combo piece and break the loop. So we only
-            // count creature tokens.
+            // Creatures are fungible for combo discovery: we intentionally
+            // ignore subtype restrictions (e.g., Marrow-Gnawer's "sacrifice
+            // a Rat") because the engine identifies *potential* combos —
+            // actual legality (does a Rat exist to sacrifice?) is checked at
+            // runtime. Tracking token subtypes would require exhaustive
+            // search over all possible board states, which is the game
+            // engine's job, not the discovery engine's.
             state.creature_tokens >= 1
         }
     }
