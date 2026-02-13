@@ -479,6 +479,9 @@ fn explore_combination(
 
         let mut visited: HashMap<PieceConfig, (u32, u32)> = HashMap::new();
 
+        // Invariant: iterating from 0 upward and returning on the first
+        // combo found guarantees that the reported startup_mana and
+        // startup_creatures are the minimum values required.
         for startup_creatures in 0..=max_creatures {
             for startup_mana in 0..=config.max_startup_mana {
                 let state = ExploreState {
@@ -767,7 +770,7 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
 
             // Check sacrifice cost
             if let Some(ref sac_cost) = ability.sacrifice_cost {
-                if !can_pay_sacrifice(state, sac_cost, piece_idx, pieces) {
+                if !can_pay_sacrifice(state, sac_cost) {
                     continue;
                 }
             }
@@ -813,12 +816,7 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
 }
 
 /// Check if the current state can pay a sacrifice cost.
-fn can_pay_sacrifice(
-    state: &ExploreState,
-    sac_cost: &SacrificeCost,
-    _source_idx: usize,
-    _pieces: &[&CardDef],
-) -> bool {
+fn can_pay_sacrifice(state: &ExploreState, sac_cost: &SacrificeCost) -> bool {
     match sac_cost {
         SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_) => {
             // Creatures are fungible for combo discovery: we intentionally
@@ -1208,9 +1206,7 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
                         None => "{C}".to_string(),
                     }
                 }
-                ManaAbility::TapForColorlessAmount(n) => {
-                    format!("{{{C}}}", C = "C".repeat(*n as usize))
-                }
+                ManaAbility::TapForColorlessAmount(n) => format!("{{{n}}}"),
             };
             format!("Tap {} for {}", piece.name, mana_desc)
         }
