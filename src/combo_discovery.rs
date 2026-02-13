@@ -153,6 +153,9 @@ enum ComboAction {
     ActivateManaAbility {
         piece_index: usize,
         ability_index: usize,
+        /// For TapForAny/TapForChoice abilities, which color to produce.
+        /// None means produce colorless.
+        color_choice: Option<Color>,
     },
     /// Activate a non-mana ability on a piece (may involve sacrifice).
     ActivateAbility {
@@ -700,14 +703,49 @@ fn dfs(
 fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAction> {
     let mut actions = Vec::new();
 
+    // Collect colors needed by activated ability costs in this combo,
+    // so TapForAny only branches on relevant colors (not all 5).
+    let needed_colors = colors_needed_by_pieces(pieces);
+
     for (piece_idx, piece) in pieces.iter().enumerate() {
         // Mana abilities (require the piece to be untapped for tap abilities)
         if !state.tapped[piece_idx] {
-            for (ability_idx, _ma) in piece.mana_abilities.iter().enumerate() {
-                actions.push(ComboAction::ActivateManaAbility {
-                    piece_index: piece_idx,
-                    ability_index: ability_idx,
-                });
+            for (ability_idx, ma) in piece.mana_abilities.iter().enumerate() {
+                match ma {
+                    ManaAbility::TapForAny => {
+                        // Generate one action per needed color, plus colorless.
+                        actions.push(ComboAction::ActivateManaAbility {
+                            piece_index: piece_idx,
+                            ability_index: ability_idx,
+                            color_choice: None,
+                        });
+                        for &color in &needed_colors {
+                            actions.push(ComboAction::ActivateManaAbility {
+                                piece_index: piece_idx,
+                                ability_index: ability_idx,
+                                color_choice: Some(color),
+                            });
+                        }
+                    }
+                    ManaAbility::TapForChoice(colors) => {
+                        // Generate one action per listed color option.
+                        for &color in colors {
+                            actions.push(ComboAction::ActivateManaAbility {
+                                piece_index: piece_idx,
+                                ability_index: ability_idx,
+                                color_choice: Some(color),
+                            });
+                        }
+                    }
+                    _ => {
+                        // Fixed-output abilities: no choice needed.
+                        actions.push(ComboAction::ActivateManaAbility {
+                            piece_index: piece_idx,
+                            ability_index: ability_idx,
+                            color_choice: None,
+                        });
+                    }
+                }
             }
         }
 
@@ -791,6 +829,7 @@ fn apply_combo_action(
         ComboAction::ActivateManaAbility {
             piece_index,
             ability_index,
+            color_choice,
         } => {
             let piece = pieces[*piece_index];
             let ma = &piece.mana_abilities[*ability_index];
@@ -802,11 +841,12 @@ fn apply_combo_action(
                 ManaAbility::TapForColorless => {
                     state.mana_pool.colorless += 1;
                 }
-                ManaAbility::TapForAny => {
-                    state.mana_pool.colorless += 1;
-                }
-                ManaAbility::TapForChoice(_colors) => {
-                    state.mana_pool.colorless += 1;
+                ManaAbility::TapForAny | ManaAbility::TapForChoice(_) => {
+                    // Use the chosen color, or colorless if no choice.
+                    match color_choice {
+                        Some(c) => state.mana_pool.add_color(*c, 1),
+                        None => state.mana_pool.colorless += 1,
+                    }
                 }
                 ManaAbility::TapForColorlessAmount(n) => {
                     state.mana_pool.colorless += n;
@@ -1049,6 +1089,33 @@ fn evaluate_dynamic_value(
 // Helpers
 // =========================================================================
 
+/// Collect the set of colors required by activated ability costs across all
+/// pieces. Used to limit TapForAny branching to only relevant colors.
+fn colors_needed_by_pieces(pieces: &[&CardDef]) -> Vec<Color> {
+    let mut needed = Vec::new();
+    for piece in pieces {
+        for ability in &piece.activated_abilities {
+            let c = &ability.cost;
+            if c.white > 0 && !needed.contains(&Color::White) {
+                needed.push(Color::White);
+            }
+            if c.blue > 0 && !needed.contains(&Color::Blue) {
+                needed.push(Color::Blue);
+            }
+            if c.black > 0 && !needed.contains(&Color::Black) {
+                needed.push(Color::Black);
+            }
+            if c.red > 0 && !needed.contains(&Color::Red) {
+                needed.push(Color::Red);
+            }
+            if c.green > 0 && !needed.contains(&Color::Green) {
+                needed.push(Color::Green);
+            }
+        }
+    }
+    needed
+}
+
 /// Count how many pieces have ManaFromNonlandBonus.
 fn count_mana_bonus(pieces: &[&CardDef]) -> u32 {
     let mut count = 0u32;
@@ -1083,17 +1150,18 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
         ComboAction::ActivateManaAbility {
             piece_index,
             ability_index,
+            color_choice,
         } => {
             let piece = pieces[*piece_index];
             let ma = &piece.mana_abilities[*ability_index];
             let mana_desc = match ma {
                 ManaAbility::TapForColor(c) => format!("{{{}}}", color_symbol(*c)),
                 ManaAbility::TapForColorless => "{C}".to_string(),
-                ManaAbility::TapForAny => "{any}".to_string(),
-                ManaAbility::TapForChoice(colors) => {
-                    let syms: Vec<String> =
-                        colors.iter().map(|c| color_symbol(*c).to_string()).collect();
-                    format!("{{{}}}", syms.join("/"))
+                ManaAbility::TapForAny | ManaAbility::TapForChoice(_) => {
+                    match color_choice {
+                        Some(c) => format!("{{{}}}", color_symbol(*c)),
+                        None => "{C}".to_string(),
+                    }
                 }
                 ManaAbility::TapForColorlessAmount(n) => {
                     format!("{{{C}}}", C = "C".repeat(*n as usize))
