@@ -56,7 +56,7 @@ use crate::card::{
     CardDef, CardId, CardType, DynamicValue, Effect, ManaAbility, SacrificeCost, TargetSpec,
     TriggerCondition,
 };
-use crate::combo::{ComboDef, ComboEffect, ComboPrecondition, ComboRegistry};
+use crate::combo::{ComboDef, ComboEffect, ComboPrecondition, ComboRegistry, INFINITE_AMOUNT};
 use crate::game::CardDatabase;
 use crate::layers::StaticAbility;
 use crate::mana::{Color, ManaPool};
@@ -259,26 +259,26 @@ impl DiscoveredCombo {
         let mut effects = Vec::new();
 
         if self.net_colorless_per_cycle > 0 {
-            effects.push(ComboEffect::AddColorlessMana(100));
+            effects.push(ComboEffect::AddColorlessMana(INFINITE_AMOUNT));
         }
 
         for (&color, &amount) in &self.net_colored_per_cycle {
             if amount > 0 {
-                effects.push(ComboEffect::AddColoredMana(color, 100));
+                effects.push(ComboEffect::AddColoredMana(color, INFINITE_AMOUNT));
             }
         }
 
         if self.damage_per_cycle > 0 || self.net_creatures_per_cycle > 0 {
             // Infinite tokens with any sac outlet = effectively infinite damage
-            effects.push(ComboEffect::DealDamageToOpponent(100));
+            effects.push(ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT));
         }
 
         if self.life_per_cycle > 0 {
-            effects.push(ComboEffect::GainLife(100));
+            effects.push(ComboEffect::GainLife(INFINITE_AMOUNT));
         }
 
         if self.cards_per_cycle > 0 {
-            effects.push(ComboEffect::DrawCards(50));
+            effects.push(ComboEffect::DrawCards(INFINITE_AMOUNT));
         }
 
         match effects.len() {

@@ -4854,8 +4854,8 @@ fn test_apply_macro_action_adds_mana() {
 
     assert_eq!(
         state.players[0].mana_pool.colorless,
-        before_mana + 100,
-        "Macro should add 100 colorless mana to player's pool"
+        before_mana + mtg_gto::combo::INFINITE_AMOUNT,
+        "Macro should add INFINITE_AMOUNT colorless mana to player's pool"
     );
     assert!(
         state.objects[&monolith].tapped,

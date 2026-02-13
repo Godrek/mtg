@@ -34,6 +34,11 @@ use crate::card::{CardId, ObjectId};
 use crate::game::{GameState, PlayerIndex};
 use crate::mana::Color;
 
+/// Amount used to represent "infinite" resources from combo loops.
+/// Set to 1,000,000 — large enough that no spell or ability in the game
+/// can exhaust it, but small enough to fit comfortably in u32/i32.
+pub const INFINITE_AMOUNT: u32 = 1_000_000;
+
 // =========================================================================
 // Combo definitions
 // =========================================================================
@@ -120,7 +125,7 @@ impl ComboRegistry {
 /// Currently registered:
 /// - **Basalt Monolith + Kinnan**: Tap Monolith for 3 colorless, Kinnan adds
 ///   1 (total 4), pay 3 to untap = net +1 per iteration = infinite colorless.
-///   Macro produces 100 colorless mana (enough to win via any mana sink).
+///   Macro produces `INFINITE_AMOUNT` colorless mana.
 ///
 /// NOT registered (common misconception):
 /// - Grim Monolith + Kinnan: Grim taps for 3, Kinnan adds 1 = 4 total, but
@@ -139,7 +144,7 @@ pub fn build_default_combos() -> ComboRegistry {
         name: "Basalt Monolith + Kinnan Infinite Mana".into(),
         required_pieces: vec![ids::BASALT_MONOLITH, ids::KINNAN_BONDER_PRODIGY],
         preconditions: vec![ComboPrecondition::PieceUntapped(ids::BASALT_MONOLITH)],
-        effect: ComboEffect::AddColorlessMana(100),
+        effect: ComboEffect::AddColorlessMana(INFINITE_AMOUNT),
         reward_weight: 0.2,
     });
 
@@ -485,8 +490,8 @@ mod tests {
 
         assert_eq!(
             state.players[0].mana_pool.colorless,
-            initial_colorless + 100,
-            "Combo should add 100 colorless mana"
+            initial_colorless + INFINITE_AMOUNT,
+            "Combo should add INFINITE_AMOUNT colorless mana"
         );
         assert!(
             state.objects[&monolith].tapped,
