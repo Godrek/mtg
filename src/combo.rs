@@ -50,6 +50,8 @@ pub struct ComboDef {
     pub id: usize,
     /// Human-readable name (e.g., "Basalt Monolith + Kinnan Infinite Mana").
     pub name: String,
+    /// What kind of infinite loop this is (can be multiple).
+    pub categories: Vec<ComboCategory>,
     /// Card IDs that must all be on the battlefield under the same controller.
     pub required_pieces: Vec<CardId>,
     /// Additional preconditions beyond having pieces on the battlefield.
@@ -60,6 +62,35 @@ pub struct ComboDef {
     /// some (but not all) pieces on the battlefield. Higher = more incentive
     /// to assemble the combo. Typical range: 0.05 to 0.3.
     pub reward_weight: f64,
+}
+
+/// Classification of what an infinite combo produces.
+///
+/// A single combo can belong to multiple categories (e.g., a token loop
+/// with Blood Artist is both `InfiniteTokens` and `InfiniteDamage`).
+/// Categories drive how `build_combo_effect` maps a discovered combo
+/// to a concrete `ComboEffect` for the game engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ComboCategory {
+    /// Net-positive mana per cycle (e.g., Basalt Monolith + Kinnan).
+    /// Effect: adds `INFINITE_AMOUNT` mana. Solver must still spend it.
+    InfiniteMana,
+    /// Net-positive creature tokens per cycle (e.g., Marrow-Gnawer + Thornbite).
+    /// Effect: creates `INFINITE_AMOUNT` tokens. Solver attacks with them.
+    InfiniteTokens,
+    /// Deals damage each cycle (e.g., Blood Artist in a sacrifice loop).
+    /// Effect: deals `INFINITE_AMOUNT` damage — instant win.
+    InfiniteDamage,
+    /// Gains life each cycle (e.g., Ayara in a token loop).
+    /// Effect: gains `INFINITE_AMOUNT` life.
+    InfiniteLifeGain,
+    /// Draws cards each cycle.
+    /// Effect: draws `INFINITE_AMOUNT` cards — risky, can deck out.
+    InfiniteDraw,
+    // Future categories:
+    // InfiniteETB — triggers ETB effects per cycle (subsumes tokens+payoff)
+    // InfiniteMill — mills opponent per cycle
+    // InfiniteStorm — increments cast count per cycle
 }
 
 /// What executing the combo produces.
@@ -75,6 +106,8 @@ pub enum ComboEffect {
     GainLife(u32),
     /// Draw N cards.
     DrawCards(u32),
+    /// Create N creature tokens (1/1 vanilla tokens for combat).
+    CreateTokens(u32),
     /// Multiple effects applied in sequence.
     Multiple(Vec<ComboEffect>),
 }
@@ -117,38 +150,76 @@ impl ComboRegistry {
 }
 
 // =========================================================================
-// Default combos for the Kinnan Commander deck
+// Combo categories helper
 // =========================================================================
 
-/// Build the default combo registry with well-known MTG combos.
+/// Classify a combo's categories from its per-cycle outputs.
+pub fn categorize(
+    net_mana: u32,
+    net_colored_mana: u32,
+    net_creatures: u32,
+    damage: u32,
+    life: u32,
+    draw: u32,
+) -> Vec<ComboCategory> {
+    let mut cats = Vec::new();
+    if net_mana > 0 || net_colored_mana > 0 {
+        cats.push(ComboCategory::InfiniteMana);
+    }
+    if net_creatures > 0 {
+        cats.push(ComboCategory::InfiniteTokens);
+    }
+    if damage > 0 {
+        cats.push(ComboCategory::InfiniteDamage);
+    }
+    if life > 0 {
+        cats.push(ComboCategory::InfiniteLifeGain);
+    }
+    if draw > 0 {
+        cats.push(ComboCategory::InfiniteDraw);
+    }
+    cats
+}
+
+/// Build a `ComboEffect` from a set of categories.
 ///
-/// Currently registered:
-/// - **Basalt Monolith + Kinnan**: Tap Monolith for 3 colorless, Kinnan adds
-///   1 (total 4), pay 3 to untap = net +1 per iteration = infinite colorless.
-///   Macro produces `INFINITE_AMOUNT` colorless mana.
+/// Mapping rules:
+/// - `InfiniteDamage` → `DealDamageToOpponent(INFINITE_AMOUNT)` (instant win)
+/// - `InfiniteMana` → `AddColorlessMana(INFINITE_AMOUNT)` (solver spends it)
+/// - `InfiniteTokens` → `CreateTokens(INFINITE_AMOUNT)` (solver attacks)
+/// - `InfiniteLifeGain` → `GainLife(INFINITE_AMOUNT)` (defensive)
+/// - `InfiniteDraw` → `DrawCards(INFINITE_AMOUNT)` (risky)
 ///
-/// NOT registered (common misconception):
-/// - Grim Monolith + Kinnan: Grim taps for 3, Kinnan adds 1 = 4 total, but
-///   Grim costs {4} to untap = net 0. This is break-even, not infinite.
-///   Kinnan only triggers when a permanent is tapped for mana, not when
-///   activating the untap ability.
-pub fn build_default_combos() -> ComboRegistry {
-    use crate::card::sample::ids;
+/// When a combo has `InfiniteTokens` but NOT `InfiniteDamage`, we produce
+/// tokens rather than assuming damage — the solver decides how to use them.
+pub fn effect_from_categories(categories: &[ComboCategory]) -> ComboEffect {
+    let mut effects = Vec::new();
 
-    let mut registry = ComboRegistry::new();
+    for cat in categories {
+        match cat {
+            ComboCategory::InfiniteMana => {
+                effects.push(ComboEffect::AddColorlessMana(INFINITE_AMOUNT));
+            }
+            ComboCategory::InfiniteTokens => {
+                effects.push(ComboEffect::CreateTokens(INFINITE_AMOUNT));
+            }
+            ComboCategory::InfiniteDamage => {
+                effects.push(ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT));
+            }
+            ComboCategory::InfiniteLifeGain => {
+                effects.push(ComboEffect::GainLife(INFINITE_AMOUNT));
+            }
+            ComboCategory::InfiniteDraw => {
+                effects.push(ComboEffect::DrawCards(INFINITE_AMOUNT));
+            }
+        }
+    }
 
-    // Basalt Monolith + Kinnan = infinite colorless mana
-    // Monolith taps for 3, Kinnan adds 1 = 4 total; pay 3 to untap = net +1/loop
-    registry.register(ComboDef {
-        id: 0,
-        name: "Basalt Monolith + Kinnan Infinite Mana".into(),
-        required_pieces: vec![ids::BASALT_MONOLITH, ids::KINNAN_BONDER_PRODIGY],
-        preconditions: vec![ComboPrecondition::PieceUntapped(ids::BASALT_MONOLITH)],
-        effect: ComboEffect::AddColorlessMana(INFINITE_AMOUNT),
-        reward_weight: 0.2,
-    });
-
-    registry
+    match effects.len() {
+        0 => ComboEffect::AddColorlessMana(0),
+        1 => effects.into_iter().next().unwrap(),
+        _ => ComboEffect::Multiple(effects),
+    }
 }
 
 // =========================================================================
@@ -333,6 +404,26 @@ fn apply_effect_recursive(
                 }
             }
         }
+        ComboEffect::CreateTokens(count) => {
+            // Create vanilla 1/1 creature tokens on the battlefield.
+            // The game engine tracks creatures as individual objects, so
+            // we cap the actual object count at 100 (enough to represent
+            // overwhelming board presence and lethal combat damage) even
+            // when the combo produces INFINITE_AMOUNT tokens.
+            use crate::card::TokenDef;
+            let actual_count = (*count).min(100);
+            let token_def = TokenDef {
+                name: "Creature Token".into(),
+                power: 1,
+                toughness: 1,
+                colors: vec![],
+                subtypes: vec![],
+                keywords: vec![],
+            };
+            for _ in 0..actual_count {
+                crate::rules::create_token_from_combo(state, &token_def, player);
+            }
+        }
         ComboEffect::Multiple(effects) => {
             for sub_effect in effects {
                 apply_effect_recursive(state, player, sub_effect);
@@ -350,10 +441,16 @@ mod tests {
     use super::*;
     use crate::card::sample::{self, ids};
     use crate::card::ZoneType;
+    use crate::combo_discovery::{discover_and_register, DiscoveryConfig};
     use std::sync::Arc;
 
+    /// Build a test state + registry via combo discovery (Basalt + Kinnan).
     fn setup_state_with_combos() -> (GameState, ComboRegistry) {
         let db = sample::build_sample_db();
+        let cards = vec![ids::BASALT_MONOLITH, ids::KINNAN_BONDER_PRODIGY];
+        let config = DiscoveryConfig::default();
+        let (registry, _) = discover_and_register(&db, &cards, &config);
+
         let mut state = GameState::new(2);
         state.card_db = Some(Arc::new(db));
 
@@ -363,7 +460,6 @@ mod tests {
             state.create_card_in_zone(sample::ids::FOREST, 1, ZoneType::Library);
         }
 
-        let registry = build_default_combos();
         (state, registry)
     }
 

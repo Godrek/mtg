@@ -56,7 +56,10 @@ use crate::card::{
     CardDef, CardId, CardType, DynamicValue, Effect, ManaAbility, SacrificeCost, TargetSpec,
     TriggerCondition,
 };
-use crate::combo::{ComboDef, ComboEffect, ComboPrecondition, ComboRegistry, INFINITE_AMOUNT};
+use crate::combo::{
+    ComboDef, ComboCategory, ComboPrecondition, ComboRegistry,
+    categorize, effect_from_categories,
+};
 use crate::game::CardDatabase;
 use crate::layers::StaticAbility;
 use crate::mana::{Color, ManaPool};
@@ -190,6 +193,8 @@ pub struct DiscoveredCombo {
     pub pieces: Vec<CardId>,
     /// Human-readable card names.
     pub piece_names: Vec<String>,
+    /// What kind(s) of infinite loop this is.
+    pub categories: Vec<ComboCategory>,
     /// Net colorless mana gained per cycle.
     pub net_colorless_per_cycle: u32,
     /// Net colored mana gained per cycle (by color).
@@ -214,77 +219,33 @@ impl DiscoveredCombo {
     /// Generate a human-readable name for this combo.
     pub fn name(&self) -> String {
         let names = self.piece_names.join(" + ");
-        let mut effects = Vec::new();
-
-        let total_mana = self.net_colorless_per_cycle
-            + self.net_colored_per_cycle.values().sum::<u32>();
-        if total_mana > 0 {
-            effects.push("Infinite Mana".to_string());
-        }
-        if self.net_creatures_per_cycle > 0 {
-            effects.push("Infinite Tokens".to_string());
-        }
-        if self.damage_per_cycle > 0 {
-            effects.push("Infinite Damage".to_string());
-        }
-        if self.life_per_cycle > 0 {
-            effects.push("Infinite Life".to_string());
-        }
-        if self.cards_per_cycle > 0 {
-            effects.push("Infinite Draw".to_string());
-        }
+        let effects: Vec<&str> = self.categories.iter().map(|c| match c {
+            ComboCategory::InfiniteMana => "Infinite Mana",
+            ComboCategory::InfiniteTokens => "Infinite Tokens",
+            ComboCategory::InfiniteDamage => "Infinite Damage",
+            ComboCategory::InfiniteLifeGain => "Infinite Life",
+            ComboCategory::InfiniteDraw => "Infinite Draw",
+        }).collect();
 
         if effects.is_empty() {
-            effects.push("Infinite Loop".to_string());
+            format!("{} Infinite Loop", names)
+        } else {
+            format!("{} {}", names, effects.join(" + "))
         }
-
-        format!("{} {}", names, effects.join(" + "))
     }
 
     /// Convert to a ComboDef suitable for registration in the ComboRegistry.
     pub fn to_combo_def(&self, reward_weight: f64) -> ComboDef {
-        let effect = self.build_combo_effect();
+        let effect = effect_from_categories(&self.categories);
 
         ComboDef {
             id: 0, // Assigned by registry.register()
             name: self.name(),
+            categories: self.categories.clone(),
             required_pieces: self.pieces.clone(),
             preconditions: Vec::new(), // Set by discover_and_register()
             effect,
             reward_weight,
-        }
-    }
-
-    fn build_combo_effect(&self) -> ComboEffect {
-        let mut effects = Vec::new();
-
-        if self.net_colorless_per_cycle > 0 {
-            effects.push(ComboEffect::AddColorlessMana(INFINITE_AMOUNT));
-        }
-
-        for (&color, &amount) in &self.net_colored_per_cycle {
-            if amount > 0 {
-                effects.push(ComboEffect::AddColoredMana(color, INFINITE_AMOUNT));
-            }
-        }
-
-        if self.damage_per_cycle > 0 || self.net_creatures_per_cycle > 0 {
-            // Infinite tokens with any sac outlet = effectively infinite damage
-            effects.push(ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT));
-        }
-
-        if self.life_per_cycle > 0 {
-            effects.push(ComboEffect::GainLife(INFINITE_AMOUNT));
-        }
-
-        if self.cards_per_cycle > 0 {
-            effects.push(ComboEffect::DrawCards(INFINITE_AMOUNT));
-        }
-
-        match effects.len() {
-            0 => ComboEffect::AddColorlessMana(0),
-            1 => effects.into_iter().next().unwrap(),
-            _ => ComboEffect::Multiple(effects),
         }
     }
 }
@@ -293,6 +254,15 @@ impl fmt::Display for DiscoveredCombo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Combo: {}", self.name())?;
         writeln!(f, "  Pieces: {}", self.piece_names.join(", "))?;
+
+        let cat_names: Vec<&str> = self.categories.iter().map(|c| match c {
+            ComboCategory::InfiniteMana => "Infinite Mana",
+            ComboCategory::InfiniteTokens => "Infinite Tokens",
+            ComboCategory::InfiniteDamage => "Infinite Damage",
+            ComboCategory::InfiniteLifeGain => "Infinite Life Gain",
+            ComboCategory::InfiniteDraw => "Infinite Draw",
+        }).collect();
+        writeln!(f, "  Categories: {}", cat_names.join(", "))?;
 
         if self.startup_mana > 0 {
             writeln!(f, "  Startup mana: {}", self.startup_mana)?;
@@ -635,9 +605,20 @@ fn dfs(
                         }
                     }
 
+                    let net_colored_total = net_colored.values().sum::<u32>();
+                    let categories = categorize(
+                        net_colorless,
+                        net_colored_total,
+                        net_creatures,
+                        net_damage,
+                        net_life,
+                        net_draw,
+                    );
+
                     return Some(DiscoveredCombo {
                         pieces: pieces.iter().map(|p| p.id).collect(),
                         piece_names: pieces.iter().map(|p| p.name.clone()).collect(),
+                        categories,
                         net_colorless_per_cycle: net_colorless,
                         net_colored_per_cycle: net_colored,
                         net_creatures_per_cycle: net_creatures,
