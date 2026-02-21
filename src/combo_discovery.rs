@@ -1285,6 +1285,16 @@ mod tests {
             combo.startup_mana, 0,
             "Basalt + Kinnan needs 0 startup mana"
         );
+        assert!(
+            combo.categories.contains(&ComboCategory::InfiniteMana),
+            "Basalt + Kinnan should be categorized as InfiniteMana, got {:?}",
+            combo.categories
+        );
+        assert_eq!(
+            combo.categories.len(), 1,
+            "Basalt + Kinnan should have exactly one category (InfiniteMana), got {:?}",
+            combo.categories
+        );
     }
 
     #[test]
@@ -1405,6 +1415,15 @@ mod tests {
             "Should need at least 2 startup creatures, got {}",
             combo.startup_creatures
         );
+        assert!(
+            combo.categories.contains(&ComboCategory::InfiniteTokens),
+            "Marrow-Gnawer + Thornbite should be categorized as InfiniteTokens, got {:?}",
+            combo.categories
+        );
+        assert!(
+            !combo.categories.contains(&ComboCategory::InfiniteDamage),
+            "2-piece token combo should not include InfiniteDamage without a payoff piece"
+        );
     }
 
     #[test]
@@ -1465,6 +1484,18 @@ mod tests {
             "3-piece combo should deal damage or gain life, got damage={} life={}",
             three_piece.damage_per_cycle,
             three_piece.life_per_cycle,
+        );
+        // Composite categories: tokens + damage + life gain
+        assert!(
+            three_piece.categories.contains(&ComboCategory::InfiniteTokens),
+            "Blood Artist combo should include InfiniteTokens, got {:?}",
+            three_piece.categories
+        );
+        assert!(
+            three_piece.categories.contains(&ComboCategory::InfiniteDamage)
+                || three_piece.categories.contains(&ComboCategory::InfiniteLifeGain),
+            "Blood Artist combo should include InfiniteDamage or InfiniteLifeGain, got {:?}",
+            three_piece.categories
         );
         // The 3-piece combo needs fewer startup creatures than the 2-piece
         assert!(
@@ -1596,6 +1627,18 @@ mod tests {
             "Ayara ETB should produce damage/life per cycle, got damage={} life={}",
             three_piece.damage_per_cycle,
             three_piece.life_per_cycle,
+        );
+        // Composite categories: tokens + damage + life gain
+        assert!(
+            three_piece.categories.contains(&ComboCategory::InfiniteTokens),
+            "Ayara combo should include InfiniteTokens, got {:?}",
+            three_piece.categories
+        );
+        assert!(
+            three_piece.categories.contains(&ComboCategory::InfiniteDamage)
+                || three_piece.categories.contains(&ComboCategory::InfiniteLifeGain),
+            "Ayara combo should include InfiniteDamage or InfiniteLifeGain, got {:?}",
+            three_piece.categories
         );
     }
 
