@@ -26,36 +26,43 @@ multi-phase abstraction. Phase 3C (Benchmarks) added engine throughput
 
 ```
 src/
-├── action/mod.rs         # Action enum (13 variants), legal_actions(), legal_actions_abstracted()
+├── action/mod.rs         # Action enum (14 variants), legal_actions(), legal_actions_abstracted()
 ├── action/canonical.rs   # CanonicalAction, canonicalize(), resolve()
 ├── card/mod.rs           # CardDef, CardInstance, Effect enum, TriggeredAbility
-├── card/sample.rs        # 111 card definitions, 2 prebuilt 60-card decks
+├── card/sample.rs        # 274 card definitions, 6 prebuilt decks (2 constructed, 4 Commander)
 ├── game/mod.rs           # GameState, PlayerState, CombatState, PlayerView, Arc<CardDatabase>
 ├── rules/mod.rs          # apply_action(), SBA/trigger loop (CR 704.3), combat, phases
 ├── events/mod.rs         # GameEvent enum (9 variants), EventBus, EventLog
 ├── replacement/mod.rs    # ReplacementEffect, ReplacementAction, PendingReplacementChoice
 ├── layers/mod.rs         # CR 613 layered effects engine, compute_characteristics()
+├── combo.rs              # ComboRegistry, ComboCategory, ComboEffect, detection & macro-action application
+├── combo_discovery.rs    # Exhaustive DFS combo discovery with cycle detection
 ├── info_set/mod.rs       # InformationSet, from_view(), hash_value(), InfoSetAbstraction trait, BucketedAbstraction
 ├── solver/mod.rs         # RegretTable, InfoSetData, ActionEntry, policy framework
+├── solver/mcts.rs        # MCTS with UCB1 selection for goldfish optimization
 ├── solver/mccfr.rs       # MCCFR traversal, train(), train_parallel(), train_extended(), checkpointing
-├── strategy/mod.rs       # Strategy trait, RandomStrategy, GreedyStrategy, McfrStrategy, AbstractedMcfrStrategy
+├── strategy/mod.rs       # Strategy trait, RandomStrategy, GreedyStrategy, GoldfishStrategy, McfrStrategy, AbstractedMcfrStrategy
 ├── simulation/mod.rs     # run_game(), simulate() with rayon parallelism
 ├── mana/mod.rs           # ManaPool, ManaCost, Color
 ├── deck_import.rs        # Deck importing from text files
+├── bin/combo_list.rs     # Combo discovery CLI
+├── bin/mcts_goldfish.rs  # MCTS goldfish optimizer
+├── bin/interactive.rs    # Manual goldfish play
+├── bin/commander_goldfish.rs  # Commander goldfish simulation
 └── lib.rs
 
 tests/
-├── integration_test.rs   # 87 end-to-end rules engine tests (including 17 Phase 3 tests)
-├── mccfr_test.rs         # 25 MCCFR solver + training scenario tests
+├── integration_test.rs   # 129 end-to-end rules engine tests
+├── mccfr_test.rs         # 36 MCCFR solver + training scenario tests
 ├── benchmark_test.rs     # 4 throughput benchmarks (Phase 3C)
-└── deck_import_test.rs   # 1 deck import test
+└── deck_import_test.rs   # Deck import tests
 ```
 
 ### Key Interfaces (Stable)
 
 - **`Strategy` trait** (`src/strategy/mod.rs`): `choose_action(&self, state: &GameState, player: PlayerIndex) -> Action`
-- **`Action` enum** (`src/action/mod.rs`): 13 variants including `Discard`, `OrderTriggers`, `ChooseReplacementOrder`
-- **`CanonicalAction`** (`src/action/canonical.rs`): 12 variants with verified round-trip invariant
+- **`Action` enum** (`src/action/mod.rs`): 14 variants including `Discard`, `OrderTriggers`, `ChooseReplacementOrder`, `ActivateMacro`
+- **`CanonicalAction`** (`src/action/canonical.rs`): 13 variants with verified round-trip invariant
 - **`PlayerView`** (`src/game/mod.rs`): Observation API — information-set boundary between engine and solver
 - **`legal_actions()` / `legal_actions_abstracted()`** (`src/action/mod.rs`): Full and bucketed modes
 - **`apply_action()`** (`src/rules/mod.rs`): Deterministic state transitions for all action types
@@ -63,6 +70,8 @@ tests/
 - **`InfoSetAbstraction` trait** (`src/info_set/mod.rs`): `abstract_info_set(&self, info_set: &InformationSet) -> u64`
 - **`train_parallel()`** (`src/solver/mccfr.rs`): Sharded parallel MCCFR with rayon
 - **`TrainConfig`** (`src/solver/mccfr.rs`): Extended config with abstraction, rollout mode, checkpointing
+- **`ComboRegistry`** (`src/combo.rs`): Registered combos with `ComboCategory` tags and `ComboEffect` macro-actions
+- **`discover_and_register()`** (`src/combo_discovery.rs`): Exhaustive DFS combo discovery, returns populated `ComboRegistry`
 
 ---
 

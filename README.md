@@ -1,64 +1,158 @@
 # MTG GTO Simulator
 
-A Magic: The Gathering game simulator built in Rust, designed for approximating Game Theory Optimal (GTO) play between two decks via high-volume simulation.
+A Magic: The Gathering game simulator built in Rust, designed for approximating Game Theory Optimal (GTO) play between two decks via high-volume simulation. Supports both 60-card constructed and Commander (EDH) formats.
 
 ## Overview
 
 True GTO for Magic is computationally intractable due to the game's enormous state space, but we can approximate win rates by simulating many games with heuristic or solver-derived strategies. This project provides:
 
-- A rules engine that handles the core MTG turn structure, priority system, stack, combat, and state-based actions
-- A trigger queue system with proper APNAP (Active Player, Non-Active Player) ordering
-- Parallel game simulation via Rayon for fast iteration
-- Pluggable strategy interface for building AI opponents and eventually CFR-based solvers
+- A rules engine covering the core MTG turn structure, priority system, stack, combat, state-based actions, triggers, replacement effects, and the layered continuous effects system (CR 613)
+- MCTS (Monte Carlo Tree Search) and MCCFR (Monte Carlo Counterfactual Regret Minimization) solvers
+- Automatic combo discovery that finds infinite loops via exhaustive DFS
+- Commander format support with command zone, commander tax, and commander damage
+- 274 card definitions across 6 prebuilt decks (2 constructed, 4 Commander)
+- Parallel simulation via Rayon
 
 ## Quick Start
 
 ```bash
 cargo build --release
-cargo run --release
+cargo run --release                          # Demo: Greedy vs MCCFR
+DECK=kinnan cargo run --release --bin mcts_goldfish   # MCTS goldfish optimization
+DECK=kinnan cargo run --release --bin combo_list      # Discover all combos in a deck
+cargo run --release --bin interactive        # Manual goldfish play
+cargo test                                   # Full test suite (~312 tests)
 ```
 
-This runs 1,000-game simulations across three matchup configurations (Greedy vs Greedy, Greedy vs Random, Random vs Greedy) using the built-in Mono-Red Aggro and Mono-Green Stompy decks.
+## Binaries
+
+### `combo_list` -- Combo Discovery
+
+Finds all infinite combos in a deck using exhaustive ability activation search with DFS cycle detection.
 
 ```bash
-cargo test
+DECK=kinnan cargo run --release --bin combo_list
+DECK=ashcoat cargo run --release --bin combo_list
+DECK=kinnan MAX_PIECES=2 cargo run --release --bin combo_list
 ```
 
-Runs the full test suite (unit + integration tests).
+Options (environment variables):
+- `DECK` -- Deck name: `red`, `green`, `kinnan`, `brimaz`, `ashcoat` (default: `kinnan`)
+- `MAX_PIECES` -- Max cards per combo (default: 3)
+- `MAX_DEPTH` -- DFS search depth (default: 20)
+- `MAX_MANA` -- Max startup mana to try (default: 10)
+- `MAX_CREATURES` -- Max startup creature tokens to try (default: 5)
+
+Output includes category classification (Infinite Mana, Infinite Tokens, Infinite Damage, etc.) and a summary of all combos grouped by category.
+
+### `mcts_goldfish` -- MCTS Goldfish Optimizer
+
+Runs goldfish (solitaire) games using Monte Carlo Tree Search to find optimal play sequences.
+
+```bash
+DECK=kinnan ITERATIONS=500 cargo run --release --bin mcts_goldfish
+```
+
+Options: `DECK`, `ITERATIONS`, `EXPLORE`, `DEPTH`, `THREADS`, `GAMES`, `CHECKPOINT`
+
+### `interactive` -- Manual Goldfish
+
+Play goldfish games manually with human-readable action selection.
+
+```bash
+DECK=kinnan cargo run --release --bin interactive
+```
+
+### `commander_goldfish` -- Commander Goldfish
+
+Goldfish simulation for Commander decks with command zone and commander tax.
 
 ## Architecture
 
 ```
 src/
-  lib.rs              # Module declarations
-  main.rs             # Entry point: runs sample simulations
-  mana/mod.rs         # Color, ManaCost, ManaPool with payment logic
-  card/mod.rs         # CardDef, CardInstance, effects, abilities, keywords
-  card/sample.rs      # 23 sample cards, 2 prebuilt 60-card decks
-  game/mod.rs         # GameState, phases, zones, stack, combat, CardDatabase
-  action/mod.rs       # Action enum, legal_actions() enumeration
-  rules/mod.rs        # Turn loop, stack resolution, combat, SBA, triggers
-  strategy/mod.rs     # Strategy trait, RandomStrategy, GreedyStrategy
-  simulation/mod.rs   # Parallel game runner via Rayon
+  lib.rs                # Module declarations
+  main.rs               # Entry point: Greedy vs MCCFR demo
+
+  mana/mod.rs           # Color, ManaCost, ManaPool with payment logic
+  card/mod.rs           # CardDef, CardInstance, effects, abilities, keywords
+  card/sample.rs        # 274 card definitions, 6 prebuilt decks
+  deck_import.rs        # Deck importing from text files
+
+  game/mod.rs           # GameState, phases, zones, stack, combat, CardDatabase
+  action/mod.rs         # Action enum (14 variants), legal_actions() enumeration
+  action/canonical.rs   # CanonicalAction for information set abstraction
+  rules/mod.rs          # Turn loop, stack resolution, combat, SBA, triggers
+  events/mod.rs         # GameEvent enum, EventBus, EventLog
+  replacement/mod.rs    # Replacement effects (CR 614)
+  layers/mod.rs         # Continuous effects layered system (CR 613)
+
+  combo.rs              # ComboRegistry, ComboCategory, ComboEffect, detection & application
+  combo_discovery.rs    # Exhaustive DFS combo discovery with cycle detection
+
+  strategy/mod.rs       # Strategy trait + 5 implementations
+  simulation/mod.rs     # Parallel game runner via Rayon
+  info_set/mod.rs       # Information sets, abstraction, bucketing
+  solver/mod.rs         # RegretTable, policy framework
+  solver/mcts.rs        # MCTS with UCB1 selection
+  solver/mccfr.rs       # MCCFR traversal, parallel training, checkpointing
+
+  bin/combo_list.rs     # Combo discovery CLI
+  bin/mcts_goldfish.rs  # MCTS goldfish optimizer
+  bin/interactive.rs    # Manual goldfish play
+  bin/commander_goldfish.rs  # Commander goldfish simulation
+
 tests/
-  integration_test.rs # End-to-end tests for game setup, triggers, simulation
+  integration_test.rs   # 129 end-to-end rules engine tests
+  mccfr_test.rs         # 36 MCCFR solver + training scenario tests
+  deck_import_test.rs   # Deck import tests
 ```
 
 ### Key Modules
 
 **`mana`** -- Color enum (WUBRG), `ManaCost` with parsing (`"{2}{W}{U}"`), and `ManaPool` with `can_pay()`/`pay()` logic.
 
-**`card`** -- Card definitions (`CardDef`) and per-game instances (`CardInstance`). Supports 18 keyword abilities, 10 trigger conditions, targeted effects (damage, destroy, bounce, buff, counter, draw, discard, tokens), and activated/triggered abilities.
+**`card`** -- Card definitions (`CardDef`) and per-game instances (`CardInstance`). Supports 18 keyword abilities, 19 trigger conditions, targeted effects (damage, destroy, bounce, buff, counter, draw, discard, tokens), activated/triggered abilities, equipment, and static abilities.
 
-**`game`** -- The complete `GameState` struct, cloneable for tree search. Tracks all zones (library, hand, battlefield, graveyard, exile, stack), player state, combat state, and pending triggers. Two-player only for now.
+**`game`** -- The complete `GameState` struct, cloneable for tree search. Tracks all zones (library, hand, battlefield, graveyard, exile, stack, command), player state, combat state, and pending triggers. Two-player. `Arc<CardDatabase>` for zero-cost cloning.
 
-**`action`** -- Enumerates all legal actions for the priority player: land plays, spell casting with target enumeration, mana abilities, activated abilities, attacker/blocker declarations. Handles Hexproof/Shroud targeting restrictions and Flying/Fear/Intimidate/Menace blocking restrictions.
+**`action`** -- Enumerates all legal actions for the priority player: land plays, spell casting with target enumeration, mana abilities, activated abilities, attacker/blocker declarations, combo macro-actions. Handles Hexproof/Shroud targeting restrictions and combat restrictions (Flying, Menace, etc.).
 
-**`rules`** -- The core rules engine. Handles the full turn structure (13 phases), priority passing, stack resolution, combat damage (first strike, double strike, trample, deathtouch, lifelink), state-based actions, and the trigger queue system. Uses a two-phase read-then-write pattern to satisfy the Rust borrow checker.
+**`rules`** -- The core rules engine. Handles the full turn structure (13 phases), priority passing, stack resolution, combat damage (first strike, double strike, trample, deathtouch, lifelink), state-based actions (CR 704.5), the trigger queue system with APNAP ordering, and replacement effects.
 
-**`strategy`** -- The `Strategy` trait is the interface for decision-making. `RandomStrategy` picks uniformly at random. `GreedyStrategy` uses heuristics (play lands, cast biggest spell, attack with all, block favorably).
+**`combo`** / **`combo_discovery`** -- Automatic infinite combo detection. The discovery engine uses exhaustive DFS to find cycles in ability activation sequences. Discovered combos are classified into categories (`InfiniteMana`, `InfiniteTokens`, `InfiniteDamage`, `InfiniteLifeGain`, `InfiniteDraw`) and registered as macro-actions that the solver can activate as a single decision during main phases.
+
+**`strategy`** -- Five strategy implementations:
+- `RandomStrategy` -- Uniform random legal actions
+- `GreedyStrategy` -- Heuristic-based (play lands, cast biggest spell, attack all)
+- `GoldfishStrategy` -- Passive opponent for goldfish testing
+- `McfrStrategy` -- MCCFR-trained with regret table lookup
+- `AbstractedMcfrStrategy` -- MCCFR-trained with information set abstraction
+
+**`solver`** -- MCTS with UCB1 selection for goldfish optimization. MCCFR for two-player GTO approximation with parallel training, checkpointing, and warm-starting from GreedyStrategy.
 
 **`simulation`** -- `simulate()` runs N games in parallel using Rayon and aggregates win rates, average turn count, and average actions per game.
+
+## Combo Discovery
+
+The combo discovery system finds infinite loops among cards in a deck by:
+
+1. **Generating all subsets** of cards up to `max_combo_pieces` (default 3)
+2. **DFS exploration** of all ability activation sequences for each subset
+3. **Cycle detection** -- when the state returns to a previous configuration with equal or greater resources, a combo is found
+4. **Category classification** -- each combo is tagged with what it produces:
+
+| Category | Example | Macro Effect |
+|---|---|---|
+| `InfiniteMana` | Basalt Monolith + Kinnan | Adds 1,000,000 colorless mana |
+| `InfiniteTokens` | Marrow-Gnawer + Thornbite Staff | Creates 100 creature tokens |
+| `InfiniteDamage` | Blood Artist + Marrow-Gnawer + Thornbite | Deals 1,000,000 damage (instant win) |
+| `InfiniteLifeGain` | Ayara + Marrow-Gnawer + Thornbite | Gains 1,000,000 life |
+| `InfiniteDraw` | (card draw per cycle) | Draws cards |
+
+Combos can belong to multiple categories simultaneously. For example, Ayara + Marrow-Gnawer + Thornbite Staff is `[InfiniteTokens, InfiniteDamage, InfiniteLifeGain]`.
+
+Discovered combos are registered as **macro-actions** (`Action::ActivateMacro`) that collapse an infinite loop into a single decision in the MCTS/MCCFR game tree. A proximity bonus incentivizes the solver to assemble combo pieces before the full combo is available.
 
 ## Rules Engine Coverage
 
@@ -69,65 +163,46 @@ tests/
 - Combat: declare attackers/blockers, first strike, double strike, trample, deathtouch, lifelink, vigilance
 - Blocking restrictions: Flying/Reach, Fear, Intimidate, Menace (2+ blockers)
 - Targeting restrictions: Hexproof, Shroud
-- State-based actions: life check, lethal damage, toughness <= 0
-- Trigger queue: ETB, dies, attacks, beginning of upkeep, end of turn
+- State-based actions: full CR 704.5 suite
+- Trigger queue: 19 trigger conditions including ETB, dies, attacks, watcher triggers, cast triggers
 - APNAP ordering for simultaneous triggers
+- Replacement effects (CR 614)
+- Continuous effects / layered system (CR 613)
+- Token creation with ETB triggers
 - Auto-tap lands for mana payment
 - Mana abilities (tap for color, colorless, any, choice)
 - `enters_tapped` support
-- Indestructible, Defender, Haste, Flash
+- Indestructible, Defender, Haste, Flash, and 18 keyword abilities
+- Equipment and static abilities
+- Commander format: command zone, commander tax, commander damage
 
 ### Not Yet Implemented
-- Token creation (effect is stubbed, `CreateToken` no-ops)
 - Planeswalker loyalty and abilities
-- Enchantment auras and equipment
-- ETB watcher triggers (e.g., "whenever a creature enters the battlefield")
-- Prowess
+- Enchantment auras
 - Protection (partially modeled)
 - Mulligan system
-- Exile-based effects (Swords to Plowshares exiles but is modeled as destroy)
-- Multi-color mana costs with proper color fixing
 - Suspend, cascade, and other alternate casting
+- Full multi-color mana fixing
 
-## Sample Cards (23)
+## Sample Decks (6)
 
-**Lands:** Mountain, Forest, Plains, Island, Swamp
+**60-Card Constructed:**
+- **Mono-Red Aggro** -- Mountains, Goblin Guide, Monastery Swiftspear, Lightning Bolt, burn
+- **Mono-Green Stompy** -- Forests, mana dorks, Kalonian Tusker, Leatherback Baloth
 
-**Creatures:** Gray Ogre, Goblin Guide, Monastery Swiftspear, Shivan Dragon, Grizzly Bears, Llanowar Elves, Elvish Mystic, Kalonian Tusker, Leatherback Baloth, Savannah Lions, Serra Angel, Elvish Visionary, Blade Splicer, Siege-Gang Commander
-
-**Instants/Sorceries:** Lightning Bolt, Shock, Lava Spike, Rift Bolt, Giant Growth, Swords to Plowshares, Counterspell
-
-## Sample Decks
-
-- **Mono-Red Aggro** (60 cards): Mountains, Goblin Guide, Monastery Swiftspear, Gray Ogre, Lightning Bolt, Shock, Lava Spike, Rift Bolt
-- **Mono-Green Stompy** (60 cards): Forests, Llanowar Elves, Elvish Mystic, Grizzly Bears, Kalonian Tusker, Leatherback Baloth, Giant Growth
-
-## Extending
-
-### Adding Cards
-
-Add new `CardDef` entries in `src/card/sample.rs` (or load from JSON/Scryfall API). Each card specifies types, keywords, mana cost, power/toughness, effects, and triggered/activated abilities.
-
-### Adding Strategies
-
-Implement the `Strategy` trait:
-
-```rust
-pub trait Strategy: Send + Sync {
-    fn choose_action(&self, state: &GameState, player: PlayerIndex) -> Action;
-    fn name(&self) -> &str;
-}
-```
-
-### Future: GTO Solving
-
-The `GameState` is fully cloneable and serializable, designed to support tree search algorithms like MCCFR (Monte Carlo Counterfactual Regret Minimization). The `Strategy` trait is the interface that a CFR solver would implement, mapping information sets to action distributions.
+**Commander (EDH):**
+- **Kinnan, Bonder Prodigy** -- Simic mana combo (Basalt Monolith + Kinnan infinite mana)
+- **Brimaz, King of Oreskos** -- Mono-white tokens/aggro
+- **Ashcoat of the Shadow Swarm** -- Mono-black rat tribal (Marrow-Gnawer + Thornbite Staff combos)
+- **Thrun, Breaker of Silence** -- Mono-green voltron
 
 ## Dependencies
 
-- **serde** + **serde_json**: Serialization for game state snapshots
+- **serde** + **serde_json**: Serialization for game state snapshots and checkpoints
 - **rand 0.8**: Random number generation for shuffling, random strategies
-- **rayon 1.8**: Data parallelism for running simulations across CPU cores
+- **rayon 1.8**: Data parallelism for simulations and MCCFR training
+- **bincode**: Binary serialization for MCCFR checkpoints
+- **ureq** (optional, `scryfall` feature): Scryfall API for card data import
 
 ## License
 
