@@ -2110,7 +2110,7 @@ fn create_token(state: &mut GameState, token_def: &TokenDef, controller: PlayerI
 /// Lightweight variant of `create_token` that skips ETB triggers and
 /// continuous effect refresh — suitable for batch token creation where
 /// firing triggers per-token would be prohibitively expensive.
-pub fn create_token_from_combo(
+pub(crate) fn create_token_from_combo(
     state: &mut GameState,
     token_def: &TokenDef,
     controller: PlayerIndex,

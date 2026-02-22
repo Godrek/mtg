@@ -192,7 +192,12 @@ pub fn categorize(
 ///
 /// When a combo has `InfiniteTokens` but NOT `InfiniteDamage`, we produce
 /// tokens rather than assuming damage — the solver decides how to use them.
+///
+/// When `InfiniteDamage` is present, we skip `CreateTokens` and `GainLife`
+/// since the opponent is already at negative 1M life — creating game objects
+/// or gaining life is wasted work.
 pub fn effect_from_categories(categories: &[ComboCategory]) -> ComboEffect {
+    let has_infinite_damage = categories.contains(&ComboCategory::InfiniteDamage);
     let mut effects = Vec::new();
 
     for cat in categories {
@@ -201,13 +206,20 @@ pub fn effect_from_categories(categories: &[ComboCategory]) -> ComboEffect {
                 effects.push(ComboEffect::AddColorlessMana(INFINITE_AMOUNT));
             }
             ComboCategory::InfiniteTokens => {
-                effects.push(ComboEffect::CreateTokens(INFINITE_AMOUNT));
+                // Skip token creation when we already deal infinite damage —
+                // creating 1M game objects is wasted work when opponent is dead
+                if !has_infinite_damage {
+                    effects.push(ComboEffect::CreateTokens(INFINITE_AMOUNT));
+                }
             }
             ComboCategory::InfiniteDamage => {
                 effects.push(ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT));
             }
             ComboCategory::InfiniteLifeGain => {
-                effects.push(ComboEffect::GainLife(INFINITE_AMOUNT));
+                // Skip life gain when we already deal infinite damage
+                if !has_infinite_damage {
+                    effects.push(ComboEffect::GainLife(INFINITE_AMOUNT));
+                }
             }
             ComboCategory::InfiniteDraw => {
                 effects.push(ComboEffect::DrawCards(INFINITE_AMOUNT));

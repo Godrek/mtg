@@ -347,11 +347,16 @@ pub fn discover_and_register(
     for combo in &combos {
         let mut combo_def = combo.to_combo_def(config.default_reward_weight);
 
-        // Set preconditions: pieces with mana abilities that require tap
-        // should be untapped for the combo to activate
+        // Set preconditions: pieces with mana abilities or tap-requiring
+        // activated abilities should be untapped for the combo to activate
         for &piece_id in &combo.pieces {
             if let Some(def) = db.get(piece_id) {
-                if !def.mana_abilities.is_empty() {
+                let has_mana_abilities = !def.mana_abilities.is_empty();
+                let has_tap_ability = def
+                    .activated_abilities
+                    .iter()
+                    .any(|a| a.requires_tap);
+                if has_mana_abilities || has_tap_ability {
                     combo_def
                         .preconditions
                         .push(ComboPrecondition::PieceUntapped(piece_id));

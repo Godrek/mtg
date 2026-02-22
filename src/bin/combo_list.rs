@@ -9,7 +9,7 @@
 //!   DECK=ashcoat MAX_PIECES=3 cargo run --release --bin combo_list
 //!
 //! Options (via environment variables):
-//!   DECK=kinnan       Deck: "red", "green", "kinnan", "brimaz", "ashcoat" (default: kinnan)
+//!   DECK=kinnan       Deck: "red", "green", "kinnan", "brimaz", "ashcoat", "thrun" (default: kinnan)
 //!   MAX_PIECES=3      Max cards per combo (default: 3)
 //!   MAX_DEPTH=20      DFS search depth (default: 20)
 //!   MAX_MANA=10       Max startup mana to try (default: 10)
@@ -57,6 +57,12 @@ fn main() {
             let mut cards = deck;
             cards.push(commander);
             (cards, "Ashcoat Commander")
+        }
+        "thrun" => {
+            let (deck, commander) = sample::thrun_commander_deck();
+            let mut cards = deck;
+            cards.push(commander);
+            (cards, "Thrun Commander")
         }
         _ => {
             let (deck, commander, _tutor_targets) = sample::kinnan_commander_deck();
