@@ -309,6 +309,98 @@ pub mod ids {
     // --- Instants / Sorceries ---
     pub const CHAIN_ASSASSINATION: u64 = 1010;
     pub const LIVING_DEATH: u64 = 1011;
+
+    // =====================================================================
+    // Magda, Brazen Outlaw Commander Deck
+    // =====================================================================
+
+    // --- Commander ---
+    pub const MAGDA_BRAZEN_OUTLAW: u64 = 1100;
+
+    // --- Creatures ---
+    pub const ADAPTIVE_AUTOMATON: u64 = 1101;
+    pub const BARKFORM_HARVESTER: u64 = 1102;
+    pub const BLOODFIRE_DWARF: u64 = 1103;
+    pub const DWARVEN_ARMORER: u64 = 1104;
+    pub const DWARVEN_GRUNT: u64 = 1105;
+    pub const DWARVEN_SCORCHER: u64 = 1106;
+    pub const DWARVEN_TRADER: u64 = 1107;
+    pub const ENSLAVED_DWARF: u64 = 1108;
+    pub const FLYWHEEL_RACER: u64 = 1109;
+    pub const KNUCKLES_THE_ECHIDNA: u64 = 1110;
+    pub const LIBERATED_DWARF: u64 = 1111;
+    pub const MAGDA_THE_HOARDMASTER: u64 = 1112;
+    pub const MAGUS_OF_THE_MOON: u64 = 1113;
+    pub const METALLIC_MIMIC: u64 = 1114;
+    pub const PINNACLE_MONK: u64 = 1115;
+    pub const PROFESSIONAL_FACE_BREAKER: u64 = 1116;
+    pub const RAGAVAN_NIMBLE_PILFERER: u64 = 1117;
+    pub const SIMIAN_SPIRIT_GUIDE: u64 = 1118;
+    pub const SPARK_MAGE: u64 = 1119;
+    pub const THREE_TREE_MASCOT: u64 = 1120;
+    pub const TWINSHOT_SNIPER: u64 = 1121;
+    pub const UNIVERSAL_AUTOMATON: u64 = 1122;
+    pub const ACADEMY_MANUFACTOR: u64 = 1123;
+    pub const LIFECRAFT_ENGINE: u64 = 1124;
+
+    // --- Artifacts ---
+    pub const CHALICE_OF_THE_VOID: u64 = 1130;
+    pub const CLOCK_OF_OMENS: u64 = 1131;
+    pub const CLOWN_CAR: u64 = 1132;
+    pub const DAMPING_SPHERE: u64 = 1133;
+    pub const DISRUPTOR_FLUTE: u64 = 1134;
+    pub const GRAFDIGGERS_CAGE: u64 = 1135;
+    pub const IDOL_OF_OBLIVION: u64 = 1136;
+    pub const KRARK_CLAN_IRONWORKS: u64 = 1137;
+    pub const LIQUIMETAL_TORQUE: u64 = 1138;
+    pub const NUKA_COLA_VENDING_MACHINE: u64 = 1139;
+    pub const PITHING_NEEDLE: u64 = 1140;
+    pub const PORTAL_TO_PHYREXIA: u64 = 1141;
+    pub const RELIC_OF_LEGENDS: u64 = 1142;
+    pub const SMUGGLERS_COPTER: u64 = 1143;
+    pub const STAFF_OF_COMPLEATION: u64 = 1144;
+    pub const STALACTITE_DAGGER: u64 = 1145;
+    pub const TORPOR_ORB: u64 = 1146;
+    pub const UNLICENSED_HEARSE: u64 = 1147;
+    pub const VEXING_BAUBLE: u64 = 1148;
+
+    // --- Instants / Sorceries ---
+    pub const ABRADE: u64 = 1150;
+    pub const BOTTLE_CAP_BLAST: u64 = 1151;
+    pub const DEAD_GONE: u64 = 1152;
+    pub const DEFLECTING_SWAT: u64 = 1153;
+    pub const GALVANIC_BLAST: u64 = 1154;
+    pub const JESKAS_WILL: u64 = 1155;
+    pub const MOGG_SALVAGE: u64 = 1156;
+    pub const PYROBLAST: u64 = 1157;
+    pub const RED_ELEMENTAL_BLAST: u64 = 1158;
+    pub const REDIRECT_LIGHTNING: u64 = 1159;
+    pub const RETURN_THE_FAVOR: u64 = 1160;
+    pub const SUNDERING_ERUPTION: u64 = 1161;
+    pub const TIBALTS_TRICKERY: u64 = 1162;
+    pub const UNTIMELY_MALFUNCTION: u64 = 1163;
+
+    // --- Enchantments ---
+    pub const BLOOD_MOON: u64 = 1170;
+
+    // --- Planeswalkers ---
+    pub const TEZZERET_CRUEL_CAPTAIN: u64 = 1175;
+
+    // --- Lands ---
+    pub const BARBARIAN_RING: u64 = 1180;
+    pub const CAVERN_OF_SOULS: u64 = 1181;
+    pub const CITY_OF_TRAITORS: u64 = 1182;
+    pub const CRYSTAL_VEIN: u64 = 1183;
+    pub const FIRDOCH_CORE: u64 = 1184;
+    pub const GREAT_FURNACE: u64 = 1185;
+    pub const HOLDOUT_SETTLEMENT: u64 = 1186;
+    pub const KAVARON_MEMORIAL_WORLD: u64 = 1187;
+    pub const MUTAVAULT: u64 = 1188;
+    pub const SHATTERSKULL_SMASHING: u64 = 1189;
+    pub const SURVIVORS_ENCAMPMENT: u64 = 1190;
+    pub const TALON_GATES_OF_MADARA: u64 = 1191;
+    pub const URZAS_SAGA: u64 = 1192;
+    pub const VOLATILE_FAULT: u64 = 1193;
 }
 
 pub const ALL_CARDS: &[CardCatalogEntry] = &[
@@ -1411,6 +1503,81 @@ pub const ALL_CARDS: &[CardCatalogEntry] = &[
     CardCatalogEntry { id: ids::SWARMYARD, key: "SWARMYARD", name: "Swarmyard" },
     CardCatalogEntry { id: ids::CHAIN_ASSASSINATION, key: "CHAIN_ASSASSINATION", name: "Chain Assassination" },
     CardCatalogEntry { id: ids::LIVING_DEATH, key: "LIVING_DEATH", name: "Living Death" },
+    // --- Magda Commander Deck ---
+    CardCatalogEntry { id: ids::MAGDA_BRAZEN_OUTLAW, key: "MAGDA_BRAZEN_OUTLAW", name: "Magda, Brazen Outlaw" },
+    CardCatalogEntry { id: ids::ADAPTIVE_AUTOMATON, key: "ADAPTIVE_AUTOMATON", name: "Adaptive Automaton" },
+    CardCatalogEntry { id: ids::BARKFORM_HARVESTER, key: "BARKFORM_HARVESTER", name: "Barkform Harvester" },
+    CardCatalogEntry { id: ids::BLOODFIRE_DWARF, key: "BLOODFIRE_DWARF", name: "Bloodfire Dwarf" },
+    CardCatalogEntry { id: ids::DWARVEN_ARMORER, key: "DWARVEN_ARMORER", name: "Dwarven Armorer" },
+    CardCatalogEntry { id: ids::DWARVEN_GRUNT, key: "DWARVEN_GRUNT", name: "Dwarven Grunt" },
+    CardCatalogEntry { id: ids::DWARVEN_SCORCHER, key: "DWARVEN_SCORCHER", name: "Dwarven Scorcher" },
+    CardCatalogEntry { id: ids::DWARVEN_TRADER, key: "DWARVEN_TRADER", name: "Dwarven Trader" },
+    CardCatalogEntry { id: ids::ENSLAVED_DWARF, key: "ENSLAVED_DWARF", name: "Enslaved Dwarf" },
+    CardCatalogEntry { id: ids::FLYWHEEL_RACER, key: "FLYWHEEL_RACER", name: "Flywheel Racer" },
+    CardCatalogEntry { id: ids::KNUCKLES_THE_ECHIDNA, key: "KNUCKLES_THE_ECHIDNA", name: "Knuckles the Echidna" },
+    CardCatalogEntry { id: ids::LIBERATED_DWARF, key: "LIBERATED_DWARF", name: "Liberated Dwarf" },
+    CardCatalogEntry { id: ids::MAGDA_THE_HOARDMASTER, key: "MAGDA_THE_HOARDMASTER", name: "Magda, the Hoardmaster" },
+    CardCatalogEntry { id: ids::MAGUS_OF_THE_MOON, key: "MAGUS_OF_THE_MOON", name: "Magus of the Moon" },
+    CardCatalogEntry { id: ids::METALLIC_MIMIC, key: "METALLIC_MIMIC", name: "Metallic Mimic" },
+    CardCatalogEntry { id: ids::PINNACLE_MONK, key: "PINNACLE_MONK", name: "Pinnacle Monk" },
+    CardCatalogEntry { id: ids::PROFESSIONAL_FACE_BREAKER, key: "PROFESSIONAL_FACE_BREAKER", name: "Professional Face-Breaker" },
+    CardCatalogEntry { id: ids::RAGAVAN_NIMBLE_PILFERER, key: "RAGAVAN_NIMBLE_PILFERER", name: "Ragavan, Nimble Pilferer" },
+    CardCatalogEntry { id: ids::SIMIAN_SPIRIT_GUIDE, key: "SIMIAN_SPIRIT_GUIDE", name: "Simian Spirit Guide" },
+    CardCatalogEntry { id: ids::SPARK_MAGE, key: "SPARK_MAGE", name: "Spark Mage" },
+    CardCatalogEntry { id: ids::THREE_TREE_MASCOT, key: "THREE_TREE_MASCOT", name: "Three Tree Mascot" },
+    CardCatalogEntry { id: ids::TWINSHOT_SNIPER, key: "TWINSHOT_SNIPER", name: "Twinshot Sniper" },
+    CardCatalogEntry { id: ids::UNIVERSAL_AUTOMATON, key: "UNIVERSAL_AUTOMATON", name: "Universal Automaton" },
+    CardCatalogEntry { id: ids::ACADEMY_MANUFACTOR, key: "ACADEMY_MANUFACTOR", name: "Academy Manufactor" },
+    CardCatalogEntry { id: ids::LIFECRAFT_ENGINE, key: "LIFECRAFT_ENGINE", name: "Lifecraft Engine" },
+    CardCatalogEntry { id: ids::CHALICE_OF_THE_VOID, key: "CHALICE_OF_THE_VOID", name: "Chalice of the Void" },
+    CardCatalogEntry { id: ids::CLOCK_OF_OMENS, key: "CLOCK_OF_OMENS", name: "Clock of Omens" },
+    CardCatalogEntry { id: ids::CLOWN_CAR, key: "CLOWN_CAR", name: "Clown Car" },
+    CardCatalogEntry { id: ids::DAMPING_SPHERE, key: "DAMPING_SPHERE", name: "Damping Sphere" },
+    CardCatalogEntry { id: ids::DISRUPTOR_FLUTE, key: "DISRUPTOR_FLUTE", name: "Disruptor Flute" },
+    CardCatalogEntry { id: ids::GRAFDIGGERS_CAGE, key: "GRAFDIGGERS_CAGE", name: "Grafdigger's Cage" },
+    CardCatalogEntry { id: ids::IDOL_OF_OBLIVION, key: "IDOL_OF_OBLIVION", name: "Idol of Oblivion" },
+    CardCatalogEntry { id: ids::KRARK_CLAN_IRONWORKS, key: "KRARK_CLAN_IRONWORKS", name: "Krark-Clan Ironworks" },
+    CardCatalogEntry { id: ids::LIQUIMETAL_TORQUE, key: "LIQUIMETAL_TORQUE", name: "Liquimetal Torque" },
+    CardCatalogEntry { id: ids::NUKA_COLA_VENDING_MACHINE, key: "NUKA_COLA_VENDING_MACHINE", name: "Nuka-Cola Vending Machine" },
+    CardCatalogEntry { id: ids::PITHING_NEEDLE, key: "PITHING_NEEDLE", name: "Pithing Needle" },
+    CardCatalogEntry { id: ids::PORTAL_TO_PHYREXIA, key: "PORTAL_TO_PHYREXIA", name: "Portal to Phyrexia" },
+    CardCatalogEntry { id: ids::RELIC_OF_LEGENDS, key: "RELIC_OF_LEGENDS", name: "Relic of Legends" },
+    CardCatalogEntry { id: ids::SMUGGLERS_COPTER, key: "SMUGGLERS_COPTER", name: "Smuggler's Copter" },
+    CardCatalogEntry { id: ids::STAFF_OF_COMPLEATION, key: "STAFF_OF_COMPLEATION", name: "Staff of Compleation" },
+    CardCatalogEntry { id: ids::STALACTITE_DAGGER, key: "STALACTITE_DAGGER", name: "Stalactite Dagger" },
+    CardCatalogEntry { id: ids::TORPOR_ORB, key: "TORPOR_ORB", name: "Torpor Orb" },
+    CardCatalogEntry { id: ids::UNLICENSED_HEARSE, key: "UNLICENSED_HEARSE", name: "Unlicensed Hearse" },
+    CardCatalogEntry { id: ids::VEXING_BAUBLE, key: "VEXING_BAUBLE", name: "Vexing Bauble" },
+    CardCatalogEntry { id: ids::ABRADE, key: "ABRADE", name: "Abrade" },
+    CardCatalogEntry { id: ids::BOTTLE_CAP_BLAST, key: "BOTTLE_CAP_BLAST", name: "Bottle-Cap Blast" },
+    CardCatalogEntry { id: ids::DEAD_GONE, key: "DEAD_GONE", name: "Dead/Gone" },
+    CardCatalogEntry { id: ids::DEFLECTING_SWAT, key: "DEFLECTING_SWAT", name: "Deflecting Swat" },
+    CardCatalogEntry { id: ids::GALVANIC_BLAST, key: "GALVANIC_BLAST", name: "Galvanic Blast" },
+    CardCatalogEntry { id: ids::JESKAS_WILL, key: "JESKAS_WILL", name: "Jeska's Will" },
+    CardCatalogEntry { id: ids::MOGG_SALVAGE, key: "MOGG_SALVAGE", name: "Mogg Salvage" },
+    CardCatalogEntry { id: ids::PYROBLAST, key: "PYROBLAST", name: "Pyroblast" },
+    CardCatalogEntry { id: ids::RED_ELEMENTAL_BLAST, key: "RED_ELEMENTAL_BLAST", name: "Red Elemental Blast" },
+    CardCatalogEntry { id: ids::REDIRECT_LIGHTNING, key: "REDIRECT_LIGHTNING", name: "Redirect Lightning" },
+    CardCatalogEntry { id: ids::RETURN_THE_FAVOR, key: "RETURN_THE_FAVOR", name: "Return the Favor" },
+    CardCatalogEntry { id: ids::SUNDERING_ERUPTION, key: "SUNDERING_ERUPTION", name: "Sundering Eruption" },
+    CardCatalogEntry { id: ids::TIBALTS_TRICKERY, key: "TIBALTS_TRICKERY", name: "Tibalt's Trickery" },
+    CardCatalogEntry { id: ids::UNTIMELY_MALFUNCTION, key: "UNTIMELY_MALFUNCTION", name: "Untimely Malfunction" },
+    CardCatalogEntry { id: ids::BLOOD_MOON, key: "BLOOD_MOON", name: "Blood Moon" },
+    CardCatalogEntry { id: ids::TEZZERET_CRUEL_CAPTAIN, key: "TEZZERET_CRUEL_CAPTAIN", name: "Tezzeret, Cruel Captain" },
+    CardCatalogEntry { id: ids::BARBARIAN_RING, key: "BARBARIAN_RING", name: "Barbarian Ring" },
+    CardCatalogEntry { id: ids::CAVERN_OF_SOULS, key: "CAVERN_OF_SOULS", name: "Cavern of Souls" },
+    CardCatalogEntry { id: ids::CITY_OF_TRAITORS, key: "CITY_OF_TRAITORS", name: "City of Traitors" },
+    CardCatalogEntry { id: ids::CRYSTAL_VEIN, key: "CRYSTAL_VEIN", name: "Crystal Vein" },
+    CardCatalogEntry { id: ids::FIRDOCH_CORE, key: "FIRDOCH_CORE", name: "Firdoch Core" },
+    CardCatalogEntry { id: ids::GREAT_FURNACE, key: "GREAT_FURNACE", name: "Great Furnace" },
+    CardCatalogEntry { id: ids::HOLDOUT_SETTLEMENT, key: "HOLDOUT_SETTLEMENT", name: "Holdout Settlement" },
+    CardCatalogEntry { id: ids::KAVARON_MEMORIAL_WORLD, key: "KAVARON_MEMORIAL_WORLD", name: "Kavaron, Memorial World" },
+    CardCatalogEntry { id: ids::MUTAVAULT, key: "MUTAVAULT", name: "Mutavault" },
+    CardCatalogEntry { id: ids::SHATTERSKULL_SMASHING, key: "SHATTERSKULL_SMASHING", name: "Shatterskull Smashing" },
+    CardCatalogEntry { id: ids::SURVIVORS_ENCAMPMENT, key: "SURVIVORS_ENCAMPMENT", name: "Survivors' Encampment" },
+    CardCatalogEntry { id: ids::TALON_GATES_OF_MADARA, key: "TALON_GATES_OF_MADARA", name: "Talon Gates of Madara" },
+    CardCatalogEntry { id: ids::URZAS_SAGA, key: "URZAS_SAGA", name: "Urza's Saga" },
+    CardCatalogEntry { id: ids::VOLATILE_FAULT, key: "VOLATILE_FAULT", name: "Volatile Fault" },
 ];
 
 /// Returns catalog entries annotated with whether the card currently has
