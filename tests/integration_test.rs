@@ -4728,10 +4728,11 @@ fn test_commander_snapshot_restore() {
 
 #[test]
 fn test_macro_action_appears_in_legal_actions() {
-    use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -4791,10 +4792,11 @@ fn test_macro_action_not_available_without_registry() {
 
 #[test]
 fn test_macro_action_not_during_combat() {
-    use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -4825,10 +4827,11 @@ fn test_macro_action_not_during_combat() {
 
 #[test]
 fn test_apply_macro_action_adds_mana() {
-    use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -4854,8 +4857,8 @@ fn test_apply_macro_action_adds_mana() {
 
     assert_eq!(
         state.players[0].mana_pool.colorless,
-        before_mana + 100,
-        "Macro should add 100 colorless mana to player's pool"
+        before_mana + mtg_gto::combo::INFINITE_AMOUNT,
+        "Macro should add INFINITE_AMOUNT colorless mana to player's pool"
     );
     assert!(
         state.objects[&monolith].tapped,
@@ -4866,10 +4869,11 @@ fn test_apply_macro_action_adds_mana() {
 #[test]
 fn test_macro_action_canonical_roundtrip() {
     use mtg_gto::action::canonical::{canonicalize, resolve};
-    use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -4900,9 +4904,11 @@ fn test_macro_action_canonical_roundtrip() {
 #[test]
 fn test_combo_proximity_reward_in_heuristic() {
     use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
@@ -4945,11 +4951,12 @@ fn test_combo_proximity_reward_in_heuristic() {
 
 #[test]
 fn test_macro_action_in_goldfish_game() {
-    use mtg_gto::combo;
+    use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 
     // Test that a goldfish game with combos can proceed without hitting action limits
     let db = sample::build_sample_db();
-    let registry = combo::build_default_combos();
+    let cards = vec![sample::ids::BASALT_MONOLITH, sample::ids::KINNAN_BONDER_PRODIGY];
+    let (registry, _) = discover_and_register(&db, &cards, &DiscoveryConfig::default());
 
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));

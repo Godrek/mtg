@@ -2105,6 +2105,37 @@ fn create_token(state: &mut GameState, token_def: &TokenDef, controller: PlayerI
     let _ = flush_triggers(state);
 }
 
+/// Create a token on the battlefield from a combo macro-action.
+///
+/// Lightweight variant of `create_token` that skips ETB triggers and
+/// continuous effect refresh — suitable for batch token creation where
+/// firing triggers per-token would be prohibitively expensive.
+pub(crate) fn create_token_from_combo(
+    state: &mut GameState,
+    token_def: &TokenDef,
+    controller: PlayerIndex,
+) {
+    let card_id = token_card_id(token_def);
+
+    let needs_registration = state.card_db().get(card_id).is_none();
+    if needs_registration {
+        let def = token_to_card_def(token_def, card_id);
+        if let Some(ref mut arc) = state.card_db {
+            let db = Arc::make_mut(arc);
+            if db.get(card_id).is_none() {
+                db.insert(def);
+            }
+        }
+    }
+
+    let obj_id = state.create_card_in_zone(card_id, controller, ZoneType::Battlefield);
+    if let Some(inst) = state.objects.get_mut(&obj_id) {
+        inst.controller = controller;
+        inst.is_token = true;
+        inst.summoning_sick = true;
+    }
+}
+
 /// Check if any creature in combat has first strike or double strike.
 fn has_first_strike_creatures(state: &GameState) -> bool {
     let check = |id: &ObjectId| -> bool {

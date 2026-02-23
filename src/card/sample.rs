@@ -198,6 +198,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(0, 0, 0, 0, 1, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::Buff {
                 power: 1,
                 toughness: 0,
@@ -2773,6 +2774,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
+            sacrifice_cost: None,
             effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Plains".into()), Subtype("Island".into())] },
             description: "{T}, Pay 1 life, Sacrifice Flooded Strand: Search your library for a Plains or Island card, put it onto the battlefield, then shuffle.".into(),
         }],
@@ -2827,6 +2829,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
+            sacrifice_cost: None,
             effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Forest".into()), Subtype("Island".into())] },
             description: "{T}, Pay 1 life, Sacrifice Misty Rainforest: Search your library for a Forest or Island card, put it onto the battlefield, then shuffle.".into(),
         }],
@@ -2940,6 +2943,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::zero(),
             requires_tap: true,
+            sacrifice_cost: None,
             effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![Subtype("Forest".into()), Subtype("Plains".into())] },
             description: "{T}, Pay 1 life, Sacrifice Windswept Heath: Search your library for a Forest or Plains card, put it onto the battlefield, then shuffle.".into(),
         }],
@@ -2978,6 +2982,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(3, 0, 0, 0, 0, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::UntapTarget { target: TargetSpec::Controller },
             description: "{3}: Untap Basalt Monolith.".into(),
         }],
@@ -3015,6 +3020,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(4, 0, 0, 0, 0, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::UntapTarget { target: TargetSpec::Controller },
             description: "{4}: Untap Grim Monolith.".into(),
         }],
@@ -3041,6 +3047,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(4, 0, 0, 0, 0, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::UntapTarget { target: TargetSpec::Controller },
             description: "{4}: Untap Mana Vault.".into(),
         }],
@@ -3140,6 +3147,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(1, 0, 0, 0, 0, 0),
             requires_tap: true,
+            sacrifice_cost: None,
             effect: Effect::DrawCards { count: 1 },
             description: "{1}, {T}: Put a burden counter on The One Ring, then draw a card for each burden counter on The One Ring.".into(),
         }],
@@ -3171,6 +3179,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(5, 0, 1, 0, 0, 1),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::SearchLibrary { destination: ZoneType::Battlefield, subtype_filter: vec![] },
             description: "{5}{G}{U}: Look at the top five cards of your library. You may put a non-Human creature card from among them onto the battlefield. Put the rest on the bottom of your library in a random order.".into(),
         }],
@@ -3341,6 +3350,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(3, 0, 1, 0, 0, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::DrawCards { count: 1 },
             description: "{3}{U}: Each player draws a card.".into(),
         }],
@@ -3472,6 +3482,7 @@ pub fn build_sample_db() -> CardDatabase {
         activated_abilities: vec![ActivatedAbility {
             cost: ManaCost::new(4, 0, 0, 0, 0, 0),
             requires_tap: false,
+            sacrifice_cost: None,
             effect: Effect::DrawCards { count: 1 },
             description: "{4}: Scry 1, then reveal the top card of your library. If it's a land card, put it onto the battlefield tapped. Otherwise, draw a card.".into(),
         }],
@@ -3932,6 +3943,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into()),
                 description: "{1}{B}, Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into(),
             },
@@ -3986,6 +3998,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::DrawCards { count: 1 },
                 description: "{T}, Sacrifice another black creature: Draw a card.".into(),
             },
@@ -4135,6 +4148,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Debuff { power: 2, toughness: 2, until_eot: true },
                 description: "{1}{B}, Sacrifice a creature: Target creature gets -2/-2 until end of turn.".into(),
             },
@@ -4232,6 +4246,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Regenerate Ink-Eyes, Servant of Oni.".into()),
                 description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
             },
@@ -4327,6 +4342,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
+                sacrifice_cost: Some(SacrificeCost::CreatureWithSubtype(Subtype("Rat".into()))),
                 effect: Effect::CreateTokens {
                     token: TokenDef {
                         name: "Rat".into(),
@@ -4410,6 +4426,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(0, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: Some(SacrificeCost::AnyCreature),
                 effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
                 description: "{B}, Sacrifice a creature: Target player discards a card.".into(),
             },
@@ -4450,6 +4467,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into()),
                 description: "{1}{B}: Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into(),
             },
@@ -4474,6 +4492,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::DiscardCards { count: 1, target: TargetSpec::Opponent },
                 description: "{1}{B}, {T}: Target opponent discards a card. Then if that player has no cards in hand, flip Nezumi Shortfang.".into(),
             },
@@ -4498,6 +4517,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(0, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Buff { power: 1, toughness: 1, until_eot: true },
                 description: "{B}: Nirkana Revenant gets +1/+1 until end of turn.".into(),
             },
@@ -4560,6 +4580,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::CreateToken(TokenDef {
                     name: "Rat".into(),
                     power: 0,
@@ -5016,6 +5037,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Copy target triggered ability you control. You may choose new targets for the copy.".into()),
                 description: "{2}, {T}: Copy target triggered ability you control. You may choose new targets for the copy.".into(),
             },
@@ -5281,6 +5303,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Return target creature card from your graveyard to your hand. (Pay 2 life as additional cost.)".into()),
                 description: "{1}{B}, Pay 2 life: Return target creature card from your graveyard to your hand.".into(),
             },
@@ -5306,6 +5329,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::LoseLife { amount: 10, target: TargetSpec::Opponent },
                 description: "{T}, Sacrifice ten nonland permanents: Each opponent loses 10 life.".into(),
             },
@@ -5327,6 +5351,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::SwampsControlled },
                 description: "{2}, {T}: Add {B} for each Swamp you control.".into(),
             },
@@ -5350,6 +5375,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 2, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::Multiple(vec![
                     Effect::DrawCards { count: 1 },
                     Effect::LoseDynamicLife { amount: DynamicValue::CardsInHand, target: TargetSpec::Controller },
@@ -5376,6 +5402,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::CreaturesInGraveyard },
                 description: "{2}, {T}: Add {B} for each black creature card in your graveyard.".into(),
             },
@@ -5398,6 +5425,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::DrawCards { count: 1 },
                 description: "{2}, {T}: Each player draws a card.".into(),
             },
@@ -5421,6 +5449,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(2, 0, 0, 0, 0, 0),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::AddDynamicMana { color: Color::Black, count: DynamicValue::DevotionTo(Color::Black) },
                 description: "{2}, {T}: Choose a color. Add an amount of mana of that color equal to your devotion to that color.".into(),
             },
@@ -5456,6 +5485,7 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::zero(),
                 requires_tap: true,
+                sacrifice_cost: None,
                 effect: Effect::Unimplemented("Regenerate target Insect, Rat, Spider, or Squirrel.".into()),
                 description: "{T}: Regenerate target Insect, Rat, Spider, or Squirrel.".into(),
             },
