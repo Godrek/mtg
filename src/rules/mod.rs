@@ -1166,6 +1166,12 @@ fn resolve_effect(
             }
         }
 
+        Effect::CreateArtifactToken => {
+            // Creates a Treasure-like artifact token. In the full game engine
+            // this would create an actual token object; for now we treat it as
+            // a no-op since the combo discovery engine handles it internally.
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }

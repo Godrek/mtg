@@ -91,6 +91,11 @@ pub struct DiscoveryConfig {
     /// Maximum initial creature tokens to try (default: 5).
     /// Some combos require seed creatures (e.g., Marrow-Gnawer needs rats).
     pub max_startup_creatures: u32,
+
+    /// Maximum initial artifact tokens to try (default: 5).
+    /// Some combos require seed artifacts (e.g., Clock of Omens needs
+    /// untapped artifacts to tap as part of its cost).
+    pub max_startup_artifacts: u32,
 }
 
 impl Default for DiscoveryConfig {
@@ -102,6 +107,7 @@ impl Default for DiscoveryConfig {
             min_net_mana: 1,
             default_reward_weight: 0.2,
             max_startup_creatures: 5,
+            max_startup_artifacts: 5,
         }
     }
 }
@@ -137,6 +143,9 @@ struct ExploreState {
     /// Number of creature tokens on the battlefield.
     /// Includes all creatures that can be sacrificed (non-piece creatures).
     creature_tokens: u32,
+    /// Number of untapped artifact tokens on the battlefield (e.g., Treasures).
+    /// These can be tapped for Clock of Omens costs or sacrificed for mana/effects.
+    artifact_tokens: u32,
     /// Accumulated side effects during this exploration path.
     side_effects: SideEffects,
 }
@@ -168,6 +177,11 @@ enum ComboAction {
         /// which piece to untap. None means the ability doesn't have
         /// a targeted untap, or targets self (Controller).
         untap_target: Option<usize>,
+        /// Which piece indices to tap as part of the artifact cost.
+        /// These are untapped artifact pieces that get tapped to pay
+        /// "tap N untapped artifacts" costs (e.g., Clock of Omens).
+        /// Remaining cost is paid from artifact tokens.
+        tapped_pieces_for_artifact_cost: Vec<usize>,
     },
 }
 
@@ -180,6 +194,8 @@ struct StaticContext {
     /// creature" (UntapTarget { target: Controller }), we untap the
     /// linked creature instead of the equipment itself.
     equipment_links: Vec<(usize, usize)>,
+    /// Whether any piece has a "Dwarf becomes tapped" trigger (Magda).
+    has_dwarf_tapped_trigger: bool,
 }
 
 // =========================================================================
@@ -213,6 +229,8 @@ pub struct DiscoveredCombo {
     pub startup_mana: u32,
     /// Minimum startup creature tokens required.
     pub startup_creatures: u32,
+    /// Minimum startup artifact tokens required.
+    pub startup_artifacts: u32,
 }
 
 impl DiscoveredCombo {
@@ -269,6 +287,9 @@ impl fmt::Display for DiscoveredCombo {
         }
         if self.startup_creatures > 0 {
             writeln!(f, "  Startup creatures: {}", self.startup_creatures)?;
+        }
+        if self.startup_artifacts > 0 {
+            writeln!(f, "  Startup artifacts: {}", self.startup_artifacts)?;
         }
 
         let total_mana = self.net_colorless_per_cycle
@@ -400,6 +421,82 @@ fn needs_creature_tokens(pieces: &[&CardDef]) -> bool {
     false
 }
 
+/// Check if any piece uses artifact tokens (has tap_artifact_cost, AnyArtifact
+/// sacrifice, or creates artifact tokens), meaning artifact tokens are relevant.
+fn needs_artifact_tokens(pieces: &[&CardDef]) -> bool {
+    for piece in pieces {
+        for ability in &piece.activated_abilities {
+            if ability.tap_artifact_cost.is_some() {
+                return true;
+            }
+            if matches!(ability.sacrifice_cost, Some(SacrificeCost::AnyArtifact)) {
+                return true;
+            }
+        }
+        for trigger in &piece.triggered_abilities {
+            if matches!(trigger.effect, Effect::CreateArtifactToken) {
+                return true;
+            }
+            if let Effect::Multiple(ref effects) = trigger.effect {
+                if effects.iter().any(|e| matches!(e, Effect::CreateArtifactToken)) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if any piece has a "Dwarf becomes tapped" trigger.
+fn has_dwarf_tapped_trigger(pieces: &[&CardDef]) -> bool {
+    pieces.iter().any(|p| {
+        p.triggered_abilities.iter().any(|t| {
+            matches!(t.trigger, TriggerCondition::ADwarfYouControlBecomesTapped)
+        })
+    })
+}
+
+/// Check if a piece is a Dwarf (has Dwarf subtype).
+fn is_dwarf(piece: &CardDef) -> bool {
+    piece.subtypes.iter().any(|s| s.0 == "Dwarf")
+}
+
+/// Check if a piece is an Artifact.
+fn is_artifact(piece: &CardDef) -> bool {
+    piece.card_types.contains(&CardType::Artifact)
+}
+
+/// Generate all combinations of `k` elements from `items`.
+/// Each combination is a Vec of the selected items.
+fn generate_index_combinations(items: &[usize], k: usize, result: &mut Vec<Vec<usize>>) {
+    if k == 0 {
+        result.push(vec![]);
+        return;
+    }
+    if k > items.len() {
+        return;
+    }
+    let mut indices: Vec<usize> = (0..k).collect();
+    loop {
+        result.push(indices.iter().map(|&i| items[i]).collect());
+        // Find rightmost index that can be incremented
+        let mut i = k;
+        loop {
+            if i == 0 {
+                return;
+            }
+            i -= 1;
+            if indices[i] < items.len() - k + i {
+                break;
+            }
+        }
+        indices[i] += 1;
+        for j in (i + 1)..k {
+            indices[j] = indices[j - 1] + 1;
+        }
+    }
+}
+
 /// Explore a specific combination of cards for infinite combos.
 fn explore_combination(
     db: &CardDatabase,
@@ -435,55 +532,67 @@ fn explore_combination(
         generate_attachment_configs(&equipment_indices, &creature_indices)
     };
 
-    // Determine if creature tokens are relevant for this combination
+    // Determine if creature/artifact tokens are relevant for this combination
     let uses_creatures = needs_creature_tokens(&pieces);
+    let uses_artifacts = needs_artifact_tokens(&pieces);
+    let dwarf_tapped = has_dwarf_tapped_trigger(&pieces);
 
     // Try each equipment configuration
     for links in &attachment_configs {
         let static_ctx = StaticContext {
             mana_from_nonland_bonus_count: count_mana_bonus(&pieces),
             equipment_links: links.clone(),
+            has_dwarf_tapped_trigger: dwarf_tapped,
         };
 
-        // Determine creature token range to try
+        // Determine creature/artifact token ranges to try
         let max_creatures = if uses_creatures {
             config.max_startup_creatures
         } else {
             0
         };
+        let max_artifacts = if uses_artifacts {
+            config.max_startup_artifacts
+        } else {
+            0
+        };
 
-        let mut visited: HashMap<PieceConfig, (u32, u32)> = HashMap::new();
+        let mut visited: HashMap<PieceConfig, (u32, u32, u32)> = HashMap::new();
 
         // Invariant: iterating from 0 upward and returning on the first
-        // combo found guarantees that the reported startup_mana and
-        // startup_creatures are the minimum values required.
-        for startup_creatures in 0..=max_creatures {
-            for startup_mana in 0..=config.max_startup_mana {
-                let state = ExploreState {
-                    tapped: vec![false; pieces.len()],
-                    mana_pool: ManaPool {
-                        colorless: startup_mana,
-                        ..ManaPool::empty()
-                    },
-                    creature_tokens: startup_creatures,
-                    side_effects: SideEffects::default(),
-                };
+        // combo found guarantees that the reported startup_mana,
+        // startup_creatures, and startup_artifacts are the minimum values required.
+        for startup_artifacts in 0..=max_artifacts {
+            for startup_creatures in 0..=max_creatures {
+                for startup_mana in 0..=config.max_startup_mana {
+                    let state = ExploreState {
+                        tapped: vec![false; pieces.len()],
+                        mana_pool: ManaPool {
+                            colorless: startup_mana,
+                            ..ManaPool::empty()
+                        },
+                        creature_tokens: startup_creatures,
+                        artifact_tokens: startup_artifacts,
+                        side_effects: SideEffects::default(),
+                    };
 
-                let mut path: Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)> =
-                    Vec::new();
+                    let mut path: Vec<(PieceConfig, ManaPool, u32, u32, SideEffects, ComboAction)> =
+                        Vec::new();
 
-                if let Some(result) = dfs(
-                    &state,
-                    &mut path,
-                    &pieces,
-                    &static_ctx,
-                    config,
-                    0,
-                    startup_mana,
-                    startup_creatures,
-                    &mut visited,
-                ) {
-                    return Some(result);
+                    if let Some(result) = dfs(
+                        &state,
+                        &mut path,
+                        &pieces,
+                        &static_ctx,
+                        config,
+                        0,
+                        startup_mana,
+                        startup_creatures,
+                        startup_artifacts,
+                        &mut visited,
+                    ) {
+                        return Some(result);
+                    }
                 }
             }
         }
@@ -543,18 +652,19 @@ fn generate_attachment_configs(
 /// Depth-first search for cycles in the ability activation graph.
 ///
 /// The `visited` map prunes redundant exploration: once we've explored
-/// a configuration with N total mana and M creatures, revisiting with
-/// <= mana and <= creatures can't discover new cycles.
+/// a configuration with N total mana, M creatures, and K artifacts,
+/// revisiting with <= resources can't discover new cycles.
 fn dfs(
     state: &ExploreState,
-    path: &mut Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)>,
+    path: &mut Vec<(PieceConfig, ManaPool, u32, u32, SideEffects, ComboAction)>,
     pieces: &[&CardDef],
     static_ctx: &StaticContext,
     config: &DiscoveryConfig,
     depth: usize,
     startup_mana: u32,
     startup_creatures: u32,
-    visited: &mut HashMap<PieceConfig, (u32, u32)>,
+    startup_artifacts: u32,
+    visited: &mut HashMap<PieceConfig, (u32, u32, u32)>,
 ) -> Option<DiscoveredCombo> {
     if depth > config.max_depth {
         return None;
@@ -563,12 +673,13 @@ fn dfs(
     let current_config = state.config();
 
     // 1. Check for cycles in the current path.
-    for (i, (prev_config, prev_mana, prev_creatures, prev_effects, _)) in
+    for (i, (prev_config, prev_mana, prev_creatures, prev_artifacts, prev_effects, _)) in
         path.iter().enumerate()
     {
         if current_config == *prev_config {
             if mana_pool_ge(&state.mana_pool, prev_mana)
                 && state.creature_tokens >= *prev_creatures
+                && state.artifact_tokens >= *prev_artifacts
             {
                 let net_colorless = state
                     .mana_pool
@@ -576,6 +687,7 @@ fn dfs(
                     .saturating_sub(prev_mana.colorless);
                 let net_total_mana = mana_pool_diff_total(&state.mana_pool, prev_mana);
                 let net_creatures = state.creature_tokens.saturating_sub(*prev_creatures);
+                let net_artifacts = state.artifact_tokens.saturating_sub(*prev_artifacts);
                 let net_damage = state
                     .side_effects
                     .damage_dealt
@@ -589,7 +701,11 @@ fn dfs(
                     .cards_drawn
                     .saturating_sub(prev_effects.cards_drawn);
 
-                let produces_something = net_total_mana >= config.min_net_mana
+                // Treat net artifact tokens as equivalent to net mana for
+                // combo relevance — Treasure tokens are mana sources.
+                let effective_mana = net_total_mana + net_artifacts;
+
+                let produces_something = effective_mana >= config.min_net_mana
                     || net_creatures > 0
                     || net_damage > 0
                     || net_life > 0
@@ -598,7 +714,7 @@ fn dfs(
                 if produces_something {
                     let cycle_actions: Vec<String> = path[i..]
                         .iter()
-                        .map(|(_, _, _, _, action)| describe_action(action, pieces))
+                        .map(|(_, _, _, _, _, action)| describe_action(action, pieces))
                         .collect();
 
                     let mut net_colored = HashMap::new();
@@ -611,8 +727,10 @@ fn dfs(
                     }
 
                     let net_colored_total = net_colored.values().sum::<u32>();
+                    // Include net artifacts in the mana categorization since
+                    // Treasure tokens = mana.
                     let categories = categorize(
-                        net_colorless,
+                        net_colorless + net_artifacts,
                         net_colored_total,
                         net_creatures,
                         net_damage,
@@ -624,7 +742,7 @@ fn dfs(
                         pieces: pieces.iter().map(|p| p.id).collect(),
                         piece_names: pieces.iter().map(|p| p.name.clone()).collect(),
                         categories,
-                        net_colorless_per_cycle: net_colorless,
+                        net_colorless_per_cycle: net_colorless + net_artifacts,
                         net_colored_per_cycle: net_colored,
                         net_creatures_per_cycle: net_creatures,
                         damage_per_cycle: net_damage,
@@ -633,6 +751,7 @@ fn dfs(
                         cycle_actions,
                         startup_mana,
                         startup_creatures,
+                        startup_artifacts,
                     });
                 }
             }
@@ -640,15 +759,16 @@ fn dfs(
     }
 
     // 2. Visited pruning: skip if we've explored this config with
-    //    >= mana AND >= creatures.
+    //    >= mana AND >= creatures AND >= artifacts.
     let total_mana = state.mana_pool.total();
     let tokens = state.creature_tokens;
-    if let Some(&(best_mana, best_creatures)) = visited.get(&current_config) {
-        if total_mana <= best_mana && tokens <= best_creatures {
+    let artifacts = state.artifact_tokens;
+    if let Some(&(best_mana, best_creatures, best_artifacts)) = visited.get(&current_config) {
+        if total_mana <= best_mana && tokens <= best_creatures && artifacts <= best_artifacts {
             return None;
         }
     }
-    visited.insert(current_config.clone(), (total_mana, tokens));
+    visited.insert(current_config.clone(), (total_mana, tokens, artifacts));
 
     // 3. Generate all legal actions and explore each
     let actions = legal_combo_actions(state, pieces);
@@ -661,6 +781,7 @@ fn dfs(
             current_config.clone(),
             state.mana_pool.clone(),
             state.creature_tokens,
+            state.artifact_tokens,
             state.side_effects.clone(),
             action,
         ));
@@ -674,6 +795,7 @@ fn dfs(
             depth + 1,
             startup_mana,
             startup_creatures,
+            startup_artifacts,
             visited,
         );
 
@@ -762,11 +884,76 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
             }
 
             // Only consider abilities with effects we can model
-            if is_combo_relevant_effect(&ability.effect) {
+            if !is_combo_relevant_effect(&ability.effect) {
+                continue;
+            }
+
+            // Determine artifact cost payment options.
+            // "Tap N untapped artifacts" can be paid by tapping untapped
+            // artifact pieces AND/OR consuming artifact tokens.
+            let artifact_payment_options = if let Some(n) = ability.tap_artifact_cost {
+                // Find untapped artifact pieces (excluding the source piece
+                // if it will be tapped by requires_tap — it's tapped AFTER
+                // the cost is paid in MTG, but we exclude it for simplicity
+                // since it can't both be tapped as a cost and as the
+                // requires_tap — actually in MTG you CAN tap the source as
+                // part of an additional cost).
+                let available_artifact_pieces: Vec<usize> = pieces.iter()
+                    .enumerate()
+                    .filter(|(i, p)| {
+                        *i != piece_idx  // not the source
+                        && !state.tapped[*i]  // must be untapped
+                        && is_artifact(p)  // must be an artifact
+                    })
+                    .map(|(i, _)| i)
+                    .collect();
+
+                // Also check if source piece is an untapped artifact that
+                // can be tapped as part of the cost (doesn't have requires_tap,
+                // or the piece itself IS the artifact being tapped).
+                let source_available = !state.tapped[piece_idx]
+                    && is_artifact(piece)
+                    && !ability.requires_tap; // if requires_tap, the source
+                    // will already be tapped for the ability cost
+
+                let mut all_available = available_artifact_pieces;
+                if source_available {
+                    all_available.push(piece_idx);
+                }
+
+                // Total available: piece artifacts + artifact tokens
+                let total_available = all_available.len() as u32 + state.artifact_tokens;
+                if total_available < n {
+                    continue; // Can't pay the cost
+                }
+
+                // Generate all ways to pay: choose k pieces from all_available
+                // (where 0 <= k <= min(n, all_available.len())), rest from tokens.
+                let mut options = Vec::new();
+                let max_pieces_to_tap = (n as usize).min(all_available.len());
+                for k in 0..=max_pieces_to_tap {
+                    let tokens_needed = n - k as u32;
+                    if state.artifact_tokens < tokens_needed {
+                        continue;
+                    }
+                    // Generate all combinations of k pieces from all_available
+                    if k == 0 {
+                        options.push(vec![]);
+                    } else {
+                        let mut combos = Vec::new();
+                        generate_index_combinations(&all_available, k, &mut combos);
+                        options.extend(combos);
+                    }
+                }
+                options
+            } else {
+                // No artifact cost — single option with empty piece list
+                vec![vec![]]
+            };
+
+            // Cross-product: artifact payment options × untap targets
+            for tapped_pieces in &artifact_payment_options {
                 if has_targeted_untap(&ability.effect) {
-                    // Branch on which piece to untap. Generate one action
-                    // per tapped non-source piece, so the DFS explores all
-                    // possibilities instead of greedily picking the first.
                     let mut any_target = false;
                     for i in 0..pieces.len() {
                         if i != piece_idx && state.tapped[i] {
@@ -774,17 +961,17 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
                                 piece_index: piece_idx,
                                 ability_index: ability_idx,
                                 untap_target: Some(i),
+                                tapped_pieces_for_artifact_cost: tapped_pieces.clone(),
                             });
                             any_target = true;
                         }
                     }
-                    // If nothing is tapped, the untap does nothing — still
-                    // allow the action for its other effects (damage, etc.)
                     if !any_target {
                         actions.push(ComboAction::ActivateAbility {
                             piece_index: piece_idx,
                             ability_index: ability_idx,
                             untap_target: None,
+                            tapped_pieces_for_artifact_cost: tapped_pieces.clone(),
                         });
                     }
                 } else {
@@ -792,6 +979,7 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
                         piece_index: piece_idx,
                         ability_index: ability_idx,
                         untap_target: None,
+                        tapped_pieces_for_artifact_cost: tapped_pieces.clone(),
                     });
                 }
             }
@@ -813,6 +1001,10 @@ fn can_pay_sacrifice(state: &ExploreState, sac_cost: &SacrificeCost) -> bool {
             // search over all possible board states, which is the game
             // engine's job, not the discovery engine's.
             state.creature_tokens >= 1
+        }
+        SacrificeCost::AnyArtifact => {
+            // Can sacrifice an artifact token (Treasure, etc.)
+            state.artifact_tokens >= 1
         }
     }
 }
@@ -837,7 +1029,8 @@ fn is_combo_relevant_effect(effect: &Effect) -> bool {
         | Effect::DrawCards { .. }
         | Effect::LoseLife { .. }
         | Effect::CreateToken(_)
-        | Effect::CreateTokens { .. } => true,
+        | Effect::CreateTokens { .. }
+        | Effect::CreateArtifactToken => true,
         Effect::Multiple(effects) => effects.iter().any(is_combo_relevant_effect),
         _ => false,
     }
@@ -886,12 +1079,18 @@ fn apply_combo_action(
             }
 
             state.tapped[*piece_index] = true;
+
+            // Fire "becomes tapped" triggers (e.g., Magda: Dwarf becomes tapped → Treasure)
+            if static_ctx.has_dwarf_tapped_trigger && is_dwarf(piece) {
+                fire_dwarf_tapped_triggers(state, pieces, static_ctx);
+            }
         }
 
         ComboAction::ActivateAbility {
             piece_index,
             ability_index,
             untap_target,
+            tapped_pieces_for_artifact_cost,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
@@ -902,20 +1101,46 @@ fn apply_combo_action(
             // Tap if required
             if ability.requires_tap {
                 state.tapped[*piece_index] = true;
+                // Fire "becomes tapped" triggers (e.g., Magda)
+                if static_ctx.has_dwarf_tapped_trigger && is_dwarf(piece) {
+                    fire_dwarf_tapped_triggers(state, pieces, static_ctx);
+                }
+            }
+
+            // Pay tap-artifact cost: tap designated piece artifacts and
+            // consume remaining cost from artifact tokens.
+            if let Some(n) = ability.tap_artifact_cost {
+                // Tap the designated piece artifacts
+                for &idx in tapped_pieces_for_artifact_cost {
+                    state.tapped[idx] = true;
+                    // Fire "becomes tapped" triggers if the tapped piece is a Dwarf
+                    if static_ctx.has_dwarf_tapped_trigger && is_dwarf(pieces[idx]) {
+                        fire_dwarf_tapped_triggers(state, pieces, static_ctx);
+                    }
+                }
+                // Consume remaining cost from artifact tokens
+                let tokens_needed = n - tapped_pieces_for_artifact_cost.len() as u32;
+                state.artifact_tokens = state.artifact_tokens.saturating_sub(tokens_needed);
             }
 
             // Pay sacrifice cost — this happens BEFORE the effect resolves.
-            // Creature dying fires death triggers.
-            if ability.sacrifice_cost.is_some() {
-                state.creature_tokens = state.creature_tokens.saturating_sub(1);
-                // Fire death triggers on all pieces
-                fire_death_triggers(state, pieces, static_ctx);
+            if let Some(ref sac_cost) = ability.sacrifice_cost {
+                match sac_cost {
+                    SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_) => {
+                        state.creature_tokens = state.creature_tokens.saturating_sub(1);
+                        // Creature dying fires death triggers
+                        fire_death_triggers(state, pieces, static_ctx);
+                    }
+                    SacrificeCost::AnyArtifact => {
+                        state.artifact_tokens = state.artifact_tokens.saturating_sub(1);
+                    }
+                }
             }
 
             // Apply the ability's effect. Any newly created tokens
             // fire ETB triggers (e.g., Ayara drains per entering creature).
             let tokens_before = state.creature_tokens;
-            apply_combo_effect(state, &ability.effect, *piece_index, pieces, *untap_target);
+            apply_combo_effect_inner(state, &ability.effect, *piece_index, pieces, *untap_target);
             let tokens_created = state.creature_tokens.saturating_sub(tokens_before);
             if tokens_created > 0 {
                 fire_etb_triggers(state, pieces, static_ctx, tokens_created);
@@ -966,6 +1191,25 @@ fn fire_etb_triggers(
                 if trigger.trigger == TriggerCondition::ACreatureEnters {
                     apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
                 }
+            }
+        }
+    }
+}
+
+/// Fire all "Dwarf becomes tapped" triggers across all pieces.
+///
+/// Called when a Dwarf piece becomes tapped (via mana ability or activated
+/// ability with requires_tap). Checks each piece for triggered abilities
+/// with `ADwarfYouControlBecomesTapped` and applies their effects.
+fn fire_dwarf_tapped_triggers(
+    state: &mut ExploreState,
+    pieces: &[&CardDef],
+    static_ctx: &StaticContext,
+) {
+    for (piece_idx, piece) in pieces.iter().enumerate() {
+        for trigger in &piece.triggered_abilities {
+            if trigger.trigger == TriggerCondition::ADwarfYouControlBecomesTapped {
+                apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
             }
         }
     }
@@ -1023,6 +1267,9 @@ fn apply_trigger_effect(
                 state.side_effects.damage_dealt += amount;
             }
         }
+        Effect::CreateArtifactToken => {
+            state.artifact_tokens += 1;
+        }
         Effect::Multiple(effects) => {
             for sub in effects {
                 apply_trigger_effect(state, sub, source_piece, pieces, static_ctx);
@@ -1037,7 +1284,7 @@ fn apply_trigger_effect(
 /// `untap_target` specifies which piece to untap for non-Controller
 /// UntapTarget effects. This is chosen during action generation so
 /// the DFS branches on all valid targets.
-fn apply_combo_effect(
+fn apply_combo_effect_inner(
     state: &mut ExploreState,
     effect: &Effect,
     source_piece: usize,
@@ -1085,9 +1332,12 @@ fn apply_combo_effect(
                 state.side_effects.damage_dealt += amount;
             }
         }
+        Effect::CreateArtifactToken => {
+            state.artifact_tokens += 1;
+        }
         Effect::Multiple(effects) => {
             for sub in effects {
-                apply_combo_effect(state, sub, source_piece, pieces, untap_target);
+                apply_combo_effect_inner(state, sub, source_piece, pieces, untap_target);
             }
         }
         _ => {}
@@ -1200,15 +1450,25 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
             piece_index,
             ability_index,
             untap_target,
+            tapped_pieces_for_artifact_cost,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
+            let tap_desc = if !tapped_pieces_for_artifact_cost.is_empty() {
+                let names: Vec<&str> = tapped_pieces_for_artifact_cost
+                    .iter()
+                    .map(|&i| pieces[i].name.as_str())
+                    .collect();
+                format!(" (tapping {})", names.join(", "))
+            } else {
+                String::new()
+            };
             match untap_target {
                 Some(idx) => format!(
-                    "Activate {}: {} (untap {})",
-                    piece.name, ability.description, pieces[*idx].name,
+                    "Activate {}: {} (untap {}){}",
+                    piece.name, ability.description, pieces[*idx].name, tap_desc,
                 ),
-                None => format!("Activate {}: {}", piece.name, ability.description),
+                None => format!("Activate {}: {}{}", piece.name, ability.description, tap_desc),
             }
         }
     }
@@ -1654,5 +1914,118 @@ mod tests {
         assert_eq!(configs.len(), 2);
         assert!(configs.contains(&vec![(0, 1)]));
         assert!(configs.contains(&vec![(0, 2)]));
+    }
+
+    // =====================================================================
+    // Artifact token / becomes-tapped combo tests (Magda)
+    // =====================================================================
+
+    #[test]
+    fn test_magda_clock_three_tree_not_infinite() {
+        // Magda + Clock of Omens + Three Tree Mascot is NOT an infinite combo.
+        //
+        // The math: Each Clock activation taps 2 artifacts to untap 1 piece.
+        // When Mascot (Dwarf) is tapped for mana, Magda creates 1 Treasure.
+        // But untapping Mascot via Clock costs 2 artifact taps. Even when one
+        // of the 2 tapped artifacts is an artifact piece (e.g., Clock itself)
+        // triggering Magda for a bonus Treasure (if it were a Dwarf, which
+        // Clock is not), the net is still -1 artifact per cycle.
+        //
+        // Per cycle: produce 1 Treasure (Mascot tap), consume 2 artifacts
+        // (Clock cost). Net = -1 artifact. This is a finite converter
+        // (artifacts → mana at 1:1) not an infinite generator.
+        let db = sample::build_sample_db();
+        let cards = vec![
+            ids::MAGDA_BRAZEN_OUTLAW,
+            ids::CLOCK_OF_OMENS,
+            ids::THREE_TREE_MASCOT,
+        ];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            combos.is_empty(),
+            "Magda + Clock + Mascot should NOT be infinite (net -1 artifact/cycle), got: {:?}",
+            combos.iter().map(|c| c.name()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_magda_alone_not_infinite() {
+        let db = sample::build_sample_db();
+        let cards = vec![ids::MAGDA_BRAZEN_OUTLAW];
+        let config = DiscoveryConfig {
+            max_combo_pieces: 2,
+            ..Default::default()
+        };
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            combos.is_empty(),
+            "Magda alone should not be an infinite combo"
+        );
+    }
+
+    #[test]
+    fn test_magda_clock_without_dwarf_mana_dork() {
+        // Magda + Clock of Omens without a tappable Dwarf shouldn't combo.
+        // Magda herself is a Dwarf but has no tap ability, so she can't
+        // start the loop.
+        let db = sample::build_sample_db();
+        let cards = vec![ids::MAGDA_BRAZEN_OUTLAW, ids::CLOCK_OF_OMENS];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+        assert!(
+            combos.is_empty(),
+            "Magda + Clock without a tappable Dwarf should not combo"
+        );
+    }
+
+    #[test]
+    fn test_kci_sacrifices_artifact_tokens() {
+        // KCI can sacrifice artifact tokens for mana. With a source of
+        // artifact tokens (e.g., Magda + a tappable Dwarf), this should
+        // be discoverable.
+        let db = sample::build_sample_db();
+        let cards = vec![
+            ids::MAGDA_BRAZEN_OUTLAW,
+            ids::KRARK_CLAN_IRONWORKS,
+            ids::THREE_TREE_MASCOT,
+        ];
+        let config = DiscoveryConfig::default();
+
+        let combos = discover_combos(&db, &cards, &config);
+        // Magda + KCI + Mascot: Tap Mascot → Magda creates Treasure →
+        // KCI sacs Treasure for {C}{C} → but Mascot is still tapped.
+        // No untap mechanism, so this should NOT be infinite.
+        // (Clock of Omens provides the untap.)
+        assert!(
+            combos.is_empty(),
+            "Magda + KCI + Mascot without untap should not combo, got: {:?}",
+            combos.iter().map(|c| c.name()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_artifact_token_tracking() {
+        // Verify that artifact tokens are properly tracked as a resource
+        // distinct from creature tokens.
+        let db = sample::build_sample_db();
+        let pieces: Vec<&CardDef> = vec![
+            db.get(ids::MAGDA_BRAZEN_OUTLAW).unwrap(),
+            db.get(ids::THREE_TREE_MASCOT).unwrap(),
+        ];
+
+        // Three Tree Mascot is a Dwarf, so tapping it should trigger Magda
+        assert!(is_dwarf(pieces[1]), "Three Tree Mascot should be a Dwarf");
+        assert!(
+            has_dwarf_tapped_trigger(&pieces),
+            "Magda should have a dwarf-tapped trigger"
+        );
+        assert!(
+            needs_artifact_tokens(&pieces),
+            "Magda combo should need artifact tokens"
+        );
     }
 }

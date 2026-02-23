@@ -88,6 +88,10 @@ pub struct ActivatedAbility {
     /// Additional cost: sacrifice a permanent as part of activating this ability.
     #[serde(default)]
     pub sacrifice_cost: Option<SacrificeCost>,
+    /// Additional cost: tap N untapped artifact tokens you control
+    /// (e.g., Clock of Omens: "Tap two untapped artifacts you control").
+    #[serde(default)]
+    pub tap_artifact_cost: Option<u32>,
     pub effect: Effect,
     pub description: String,
 }
@@ -99,6 +103,8 @@ pub enum SacrificeCost {
     AnyCreature,
     /// Sacrifice a creature with a specific subtype (e.g., Marrow-Gnawer: "Sacrifice a Rat").
     CreatureWithSubtype(Subtype),
+    /// Sacrifice any artifact you control (e.g., Krark-Clan Ironworks).
+    AnyArtifact,
 }
 
 /// A triggered ability.
@@ -144,6 +150,8 @@ pub enum TriggerCondition {
     OpponentCastsSpell,
     /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
     OpponentDrawsCard,
+    /// Whenever a Dwarf you control becomes tapped (e.g., Magda, Brazen Outlaw).
+    ADwarfYouControlBecomesTapped,
 }
 
 /// A dynamic value that can be computed at runtime from the game state.
@@ -397,6 +405,9 @@ pub enum Effect {
     UntapTarget {
         target: TargetSpec,
     },
+    /// Create an artifact token (e.g., Treasure). Tracked as a fungible
+    /// resource in the combo discovery engine — not a creature token.
+    CreateArtifactToken,
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
