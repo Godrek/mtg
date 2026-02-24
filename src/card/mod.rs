@@ -1,4 +1,7 @@
 pub mod catalog;
+pub mod database;
+pub mod effects;
+pub mod keywords;
 pub mod sample;
 
 use serde::{Deserialize, Serialize};
@@ -6,6 +9,11 @@ use std::fmt;
 
 use crate::layers::StaticAbility;
 use crate::mana::{Color, ManaCost};
+
+// Re-export from submodules so external code can use `crate::card::KeywordAbility` etc.
+pub use database::CardDatabase;
+pub use effects::{DynamicContext, DynamicValue, Effect, TargetSpec, TokenDef};
+pub use keywords::KeywordAbility;
 
 /// Unique identifier for a card definition (template).
 pub type CardId = u64;
@@ -36,33 +44,6 @@ pub enum Supertype {
     Basic,
     Legendary,
     Snow,
-}
-
-/// Keyword abilities that affect game rules directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum KeywordAbility {
-    Flying,
-    FirstStrike,
-    DoubleStrike,
-    Deathtouch,
-    Haste,
-    Hexproof,
-    Indestructible,
-    Lifelink,
-    Menace,
-    Reach,
-    Trample,
-    Vigilance,
-    Defender,
-    Flash,
-    Fear,
-    Intimidate,
-    Shroud,
-    Protection, // simplified — full protection needs a parameter
-    /// This creature must attack each combat if able (e.g., Juggernaut).
-    MustAttack,
-    /// This creature can't block (e.g., Goblin Guide).
-    CantBlock,
 }
 
 /// What kind of mana a land can produce.
@@ -114,16 +95,12 @@ pub struct TriggeredAbility {
 pub enum TriggerCondition {
     EntersBattlefield,
     /// "Whenever a creature enters the battlefield" — watcher trigger (e.g., Soul Warden).
-    /// Unlike EntersBattlefield (self-ETB), this fires for ANY creature entering.
     ACreatureEnters,
     LeavesBattlefield,
     Dies,
     /// "Whenever a creature dies" — watcher trigger (e.g., Blood Artist).
-    /// Fires for ANY creature dying regardless of controller.
     ACreatureDies,
-    /// "Whenever a creature you control dies" — filtered watcher trigger
-    /// (e.g., Dictate of Erebos, Grave Pact). Only fires when the
-    /// controller of the trigger source loses a creature.
+    /// "Whenever a creature you control dies" — filtered watcher trigger.
     ACreatureYouControlDies,
     AttacksAlone,
     Attacks,
@@ -146,310 +123,6 @@ pub enum TriggerCondition {
     OpponentDrawsCard,
 }
 
-/// A dynamic value that can be computed at runtime from the game state.
-/// Used for creatures with variable power/toughness like Tarmogoyf
-/// ("*/1+* where * is the number of card types in all graveyards")
-/// or Maro ("*/*, where * is the number of cards in your hand").
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DynamicValue {
-    /// Number of cards in the controller's hand (e.g., Maro).
-    CardsInHand,
-    /// Number of creatures the controller controls (e.g., Coat of Arms).
-    CreaturesControlled,
-    /// Number of card types among all graveyards (e.g., Tarmogoyf).
-    CardTypesInGraveyards,
-    /// Total power among creatures the controller controls.
-    TotalPowerControlled,
-    /// Number of Swamps the controller controls (e.g., Cabal Coffers).
-    SwampsControlled,
-    /// Devotion to a color — count of mana symbols of that color among
-    /// permanents the controller controls (e.g., Nykthos, Shrine to Nyx).
-    DevotionTo(Color),
-    /// Number of creature cards in the controller's graveyard (e.g., Crypt of Agadeem).
-    CreaturesInGraveyard,
-    /// A fixed value (for testing / compatibility).
-    Fixed(i32),
-}
-
-/// Extra context from the game state for evaluating `DynamicValue` variants
-/// that need data beyond the battlefield (hand size, graveyards).
-pub struct DynamicContext {
-    /// Number of cards in the controller's hand.
-    pub hand_size: usize,
-    /// All card type sets across all graveyards, flattened for counting
-    /// distinct types. Each inner Vec is one card's types.
-    pub graveyard_card_types: Vec<Vec<CardType>>,
-    /// Number of creature cards in the controller's graveyard.
-    pub creatures_in_graveyard: usize,
-}
-
-impl DynamicValue {
-    /// Evaluate this dynamic value in context.
-    /// `controller` is the controlling player index, `objects` is the full
-    /// object map, `battlefield` the set of object IDs on the battlefield,
-    /// `card_db` looks up card definitions by ID, and `ctx` provides
-    /// player hand/graveyard data needed by some variants.
-    pub fn evaluate<'a, F>(
-        &self,
-        controller: usize,
-        objects: &std::collections::HashMap<ObjectId, CardInstance>,
-        battlefield: &[ObjectId],
-        card_db: &'a F,
-        ctx: Option<&DynamicContext>,
-    ) -> i32
-    where
-        F: Fn(u64) -> Option<&'a CardDef>,
-    {
-        match self {
-            DynamicValue::CardsInHand => ctx.map(|c| c.hand_size as i32).unwrap_or(0),
-            DynamicValue::CreaturesControlled => battlefield
-                .iter()
-                .filter(|&&id| {
-                    if let Some(inst) = objects.get(&id) {
-                        if inst.controller != controller {
-                            return false;
-                        }
-                        if let Some(def) = card_db(inst.card_def_id) {
-                            return def.is_creature();
-                        }
-                    }
-                    false
-                })
-                .count() as i32,
-            DynamicValue::CardTypesInGraveyards => {
-                if let Some(c) = ctx {
-                    let mut seen = std::collections::HashSet::new();
-                    for types in &c.graveyard_card_types {
-                        for ct in types {
-                            seen.insert(*ct);
-                        }
-                    }
-                    seen.len() as i32
-                } else {
-                    0
-                }
-            }
-            DynamicValue::TotalPowerControlled => battlefield
-                .iter()
-                .filter_map(|&id| {
-                    let inst = objects.get(&id)?;
-                    if inst.controller != controller {
-                        return None;
-                    }
-                    let def = card_db(inst.card_def_id)?;
-                    if def.is_creature() {
-                        def.power
-                    } else {
-                        None
-                    }
-                })
-                .sum(),
-            DynamicValue::SwampsControlled => {
-                battlefield
-                    .iter()
-                    .filter(|&&id| {
-                        if let Some(inst) = objects.get(&id) {
-                            if inst.controller != controller {
-                                return false;
-                            }
-                            if let Some(def) = card_db(inst.card_def_id) {
-                                return def.is_land()
-                                    && def.subtypes.iter().any(|s| s.0 == "Swamp");
-                            }
-                        }
-                        false
-                    })
-                    .count() as i32
-            }
-            DynamicValue::DevotionTo(color) => {
-                battlefield
-                    .iter()
-                    .filter_map(|&id| {
-                        let inst = objects.get(&id)?;
-                        if inst.controller != controller {
-                            return None;
-                        }
-                        let def = card_db(inst.card_def_id)?;
-                        def.mana_cost.as_ref().map(|cost| cost.color_amount(*color))
-                    })
-                    .sum::<u32>() as i32
-            }
-            DynamicValue::CreaturesInGraveyard => {
-                ctx.map(|c| c.creatures_in_graveyard as i32).unwrap_or(0)
-            }
-            DynamicValue::Fixed(val) => *val,
-        }
-    }
-}
-
-/// Effects that abilities and spells can produce.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Effect {
-    DealDamage {
-        amount: u32,
-        target: TargetSpec,
-    },
-    GainLife {
-        amount: u32,
-    },
-    LoseLife {
-        amount: u32,
-        target: TargetSpec,
-    },
-    DrawCards {
-        count: u32,
-    },
-    DestroyTarget {
-        target: TargetSpec,
-    },
-    /// Exile target (e.g., Swords to Plowshares, Path to Exile).
-    ExileTarget {
-        target: TargetSpec,
-    },
-    /// Destroy all creatures (e.g., Wrath of God, Day of Judgment).
-    DestroyAll,
-    BounceTo {
-        zone: ZoneType,
-        target: TargetSpec,
-    },
-    Buff {
-        power: i32,
-        toughness: i32,
-        until_eot: bool,
-    },
-    /// Debuff: target creature gets -N/-N until end of turn.
-    Debuff {
-        power: i32,
-        toughness: i32,
-        until_eot: bool,
-    },
-    DiscardCards {
-        count: u32,
-        target: TargetSpec,
-    },
-    CreateToken(TokenDef),
-    /// Create N tokens where N is determined by a dynamic value at runtime.
-    /// Used for effects like Marrow-Gnawer ("Create X 1/1 Rat tokens, where
-    /// X is the number of Rats you control").
-    CreateTokens {
-        token: TokenDef,
-        count: DynamicValue,
-    },
-    Counter {
-        target: TargetSpec,
-    },
-    /// Put +1/+1 counters on target creature.
-    PutCounters {
-        count: i32,
-        target: TargetSpec,
-    },
-    /// Each player mills N cards.
-    MillCards {
-        count: u32,
-        target: TargetSpec,
-    },
-    /// Each player sacrifices N creatures.
-    SacrificeCreatures {
-        count: u32,
-        target: TargetSpec,
-    },
-    /// Prevent all combat damage this turn.
-    PreventCombatDamage,
-    /// Add mana to the controller's mana pool.
-    AddMana {
-        color: Option<Color>,
-        amount: u32,
-    },
-    /// Add mana where the amount is determined dynamically at runtime
-    /// (e.g., Cabal Coffers: "{B} for each Swamp you control").
-    AddDynamicMana {
-        color: Color,
-        count: DynamicValue,
-    },
-    /// Lose life where the amount is determined dynamically
-    /// (e.g., Castle Locthwain: "lose life equal to cards in hand").
-    LoseDynamicLife {
-        amount: DynamicValue,
-        target: TargetSpec,
-    },
-    /// Take an extra turn after this one (e.g., Time Walk, Temporal Manipulation).
-    ExtraTurn,
-    /// Skip a phase of the controller's next turn (e.g., Stasis skipping untap).
-    SkipPhase(crate::game::Phase),
-    Multiple(Vec<Effect>),
-    /// Search the controller's library and put a card into the destination zone.
-    /// Simplified tutor — in practice the strategy chooses; the engine just moves
-    /// the top matching card.
-    ///
-    /// When `subtype_filter` is non-empty, only cards with at least one matching
-    /// subtype are valid targets (e.g., fetch lands searching for Forest/Plains).
-    SearchLibrary {
-        destination: ZoneType,
-        subtype_filter: Vec<Subtype>,
-    },
-    /// Bounce all nonland permanents opponents control (e.g., Cyclonic Rift overload).
-    BounceAllNonlandOpponents,
-    /// Put a card from a graveyard on top of its owner's library.
-    ReturnToTopOfLibrary {
-        target: TargetSpec,
-    },
-    /// Untap target permanent.
-    UntapTarget {
-        target: TargetSpec,
-    },
-    /// For effects we haven't modeled yet — described textually.
-    Unimplemented(String),
-}
-
-/// What a targeting restriction looks like.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TargetSpec {
-    /// Target any creature.
-    AnyCreature,
-    /// Target any player.
-    AnyPlayer,
-    /// Target creature or player.
-    CreatureOrPlayer,
-    /// Target creature or planeswalker.
-    CreatureOrPlaneswalker,
-    /// Target opponent.
-    Opponent,
-    /// Target the controller (self).
-    Controller,
-    /// Target any nonland permanent.
-    AnyNonlandPermanent,
-    /// Target any permanent.
-    AnyPermanent,
-    /// Target any spell on the stack.
-    AnySpell,
-    /// No target (e.g., "each opponent").
-    NoTarget,
-    /// Each creature on the battlefield (no targeting — affects all).
-    EachCreature,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ZoneType {
-    Library,
-    Hand,
-    Battlefield,
-    Graveyard,
-    Exile,
-    Stack,
-    Command,
-}
-
-/// Token creature definition.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TokenDef {
-    pub name: String,
-    pub power: u32,
-    pub toughness: u32,
-    pub colors: Vec<Color>,
-    pub subtypes: Vec<Subtype>,
-    pub keywords: Vec<KeywordAbility>,
-}
-
 /// What spells a cost reduction applies to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CostReductionTarget {
@@ -466,6 +139,17 @@ pub struct CostReduction {
     pub generic_reduction: u32,
     /// What spells the reduction applies to.
     pub applies_to: CostReductionTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ZoneType {
+    Library,
+    Hand,
+    Battlefield,
+    Graveyard,
+    Exile,
+    Stack,
+    Command,
 }
 
 /// The card definition — the "template" from which game objects are created.
@@ -507,7 +191,6 @@ pub struct CardDef {
 
     /// Dynamic power formula — if set, the creature's base power is computed
     /// at runtime from the game state (e.g., Tarmogoyf, Maro).
-    /// Takes precedence over the `power` field when present.
     #[serde(default)]
     pub dynamic_power: Option<DynamicValue>,
 
@@ -515,8 +198,7 @@ pub struct CardDef {
     #[serde(default)]
     pub dynamic_toughness: Option<DynamicValue>,
 
-    /// Cost reduction this permanent provides while on the battlefield
-    /// (e.g., Jet Medallion: black spells cost {1} less).
+    /// Cost reduction this permanent provides while on the battlefield.
     #[serde(default)]
     pub cost_reduction: Option<CostReduction>,
 }
@@ -556,10 +238,6 @@ impl CardDef {
     }
 
     /// Color identity of this card (CR 903.4).
-    ///
-    /// Includes colors from the mana cost and from mana abilities (basic land
-    /// subtypes, dual lands, etc.). Full rules text scanning for mana symbols
-    /// is not yet implemented.
     pub fn color_identity(&self) -> Vec<Color> {
         let mut colors = std::collections::HashSet::new();
         // Mana cost contributes to color identity
@@ -649,13 +327,10 @@ pub struct CardInstance {
     pub attached_to: Option<ObjectId>,
     pub attachments: Vec<ObjectId>,
 
-    /// Whether this is a token (CR 111.6). Tokens cease to exist when
-    /// they leave the battlefield (CR 111.7).
+    /// Whether this is a token (CR 111.6).
     pub is_token: bool,
 
     /// Zone-change counter — incremented each time this object changes zones.
-    /// Used to detect stale references (e.g., targeting a creature that has left
-    /// and re-entered the battlefield is a different game object per CR 400.7).
     pub zone_change_count: u32,
 }
 
@@ -726,13 +401,7 @@ pub struct Decklist {
     /// Commander cards (for Commander format decks).
     #[serde(default)]
     pub commanders: Vec<DeckEntry>,
-    /// Cards that tutors can search for. When a tutor effect resolves and this
-    /// list is non-empty, the player chooses from this restricted set (intersected
-    /// with cards actually in their library). MCCFR learns which target is optimal
-    /// in each game state.
-    ///
-    /// If empty, tutors fall back to taking the top card of the library (legacy
-    /// behavior), keeping backward compatibility with existing tests/configs.
+    /// Cards that tutors can search for.
     #[serde(default)]
     pub tutor_targets: Vec<CardId>,
 }

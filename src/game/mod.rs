@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use crate::card::{CardDef, CardId, CardInstance, ObjectId, ZoneType};
+use crate::card::{CardId, CardInstance, ObjectId, ZoneType};
+
+// Re-export CardDatabase from its new home in card::database for backward compatibility.
+pub use crate::card::CardDatabase;
 use crate::combo::ComboRegistry;
 use crate::events::GameEvent;
 use crate::layers::{ComputedCharacteristics, ContinuousEffect};
@@ -448,35 +451,7 @@ pub struct PendingTutor {
     pub subtype_filter: Vec<crate::card::Subtype>,
 }
 
-/// A simple card database that maps CardId -> CardDef.
-#[derive(Debug, Clone, Default)]
-pub struct CardDatabase {
-    pub cards: HashMap<CardId, CardDef>,
-}
-
-impl CardDatabase {
-    pub fn new() -> Self {
-        CardDatabase {
-            cards: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, card: CardDef) {
-        self.cards.insert(card.id, card);
-    }
-
-    pub fn get(&self, id: CardId) -> Option<&CardDef> {
-        self.cards.get(&id)
-    }
-
-    pub fn find_by_name(&self, name: &str) -> Option<CardId> {
-        let target = name.trim();
-        self.cards
-            .values()
-            .find(|card| card.name.eq_ignore_ascii_case(target))
-            .map(|card| card.id)
-    }
-}
+// CardDatabase has been moved to crate::card::database and is re-exported above.
 
 // ---------------------------------------------------------------------------
 // Phase 3A — GameStateSnapshot for optimized copy/restore
