@@ -5527,6 +5527,1013 @@ pub fn build_sample_db() -> CardDatabase {
         ..Default::default()
     });
 
+    // =====================================================================
+    // Magda, Brazen Outlaw Commander Deck
+    // =====================================================================
+
+    // --- Commander ---
+    // Magda, Brazen Outlaw {1}{R}
+    // Legendary Creature — Dwarf Berserker 2/1
+    // Other Dwarves you control get +1/+0.
+    // Whenever a Dwarf you control becomes tapped, create a Treasure token.
+    // Sacrifice five Treasures: Search your library for an artifact or Dragon card,
+    // put it onto the battlefield, then shuffle.
+    db.insert(CardDef {
+        id: ids::MAGDA_BRAZEN_OUTLAW,
+        name: "Magda, Brazen Outlaw".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Dwarf".into()), Subtype("Berserker".into())],
+        power: Some(2),
+        toughness: Some(1),
+        static_abilities: vec![StaticAbility::Anthem {
+            power: 1,
+            toughness: 0,
+            affected: AffectedObjects::OtherCreatures, // simplified: Other Dwarves you control get +1/+0
+        }],
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::ACreatureEnters, // simplified: "Whenever a Dwarf you control becomes tapped" → modeled as treasure generation
+            effect: Effect::CreateToken(TokenDef {
+                name: "Treasure".into(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Treasure".into())],
+                keywords: vec![],
+            }),
+            description: "Whenever a Dwarf you control becomes tapped, create a Treasure token.".into(),
+        }],
+        oracle_text: "Other Dwarves you control get +1/+0. Whenever a Dwarf you control becomes tapped, create a Treasure token. Sacrifice five Treasures: Search your library for an artifact or Dragon card, put it onto the battlefield, then shuffle.".into(),
+        ..Default::default()
+    });
+
+    // --- Creatures ---
+
+    // Adaptive Automaton {3}
+    // Artifact Creature — Construct 2/2
+    db.insert(CardDef {
+        id: ids::ADAPTIVE_AUTOMATON,
+        name: "Adaptive Automaton".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Construct".into()), Subtype("Dwarf".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "As Adaptive Automaton enters, choose a creature type. Adaptive Automaton is the chosen type in addition to its other types. Other creatures you control of the chosen type get +1/+1.".into(),
+        ..Default::default()
+    });
+
+    // Barkform Harvester {2}
+    // Artifact Creature — Shapeshifter 2/1
+    // Changeling
+    db.insert(CardDef {
+        id: ids::BARKFORM_HARVESTER,
+        name: "Barkform Harvester".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Dwarf".into())],
+        power: Some(2),
+        toughness: Some(1),
+        oracle_text: "Changeling".into(),
+        ..Default::default()
+    });
+
+    // Bloodfire Dwarf {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::BLOODFIRE_DWARF,
+        name: "Bloodfire Dwarf".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "{R}, Sacrifice Bloodfire Dwarf: It deals 1 damage to each creature without flying.".into(),
+        ..Default::default()
+    });
+
+    // Dwarven Armorer {R}
+    // Creature — Dwarf 0/2
+    db.insert(CardDef {
+        id: ids::DWARVEN_ARMORER,
+        name: "Dwarven Armorer".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(0),
+        toughness: Some(2),
+        oracle_text: "{R}, {T}, Discard a card: Put a +0/+1 counter or a +1/+0 counter on target creature.".into(),
+        ..Default::default()
+    });
+
+    // Dwarven Grunt {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::DWARVEN_GRUNT,
+        name: "Dwarven Grunt".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Mountainwalk".into(),
+        ..Default::default()
+    });
+
+    // Dwarven Scorcher {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::DWARVEN_SCORCHER,
+        name: "Dwarven Scorcher".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Sacrifice Dwarven Scorcher: It deals 1 damage to target creature or player.".into(),
+        ..Default::default()
+    });
+
+    // Dwarven Trader {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::DWARVEN_TRADER,
+        name: "Dwarven Trader".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "".into(),
+        ..Default::default()
+    });
+
+    // Enslaved Dwarf {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::ENSLAVED_DWARF,
+        name: "Enslaved Dwarf".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "{R}, Sacrifice Enslaved Dwarf: Target black creature gets +1/+0 and gains first strike until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Flywheel Racer {2}
+    // Artifact Creature — Construct 2/2
+    db.insert(CardDef {
+        id: ids::FLYWHEEL_RACER,
+        name: "Flywheel Racer".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Construct".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "Crew 1".into(),
+        ..Default::default()
+    });
+
+    // Knuckles the Echidna {2}{R}
+    // Legendary Creature — Echidna Warrior 3/3
+    db.insert(CardDef {
+        id: ids::KNUCKLES_THE_ECHIDNA,
+        name: "Knuckles the Echidna".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Echidna".into()), Subtype("Warrior".into())],
+        keywords: vec![KeywordAbility::Trample, KeywordAbility::Haste],
+        power: Some(3),
+        toughness: Some(3),
+        oracle_text: "Trample, haste. Whenever Knuckles the Echidna deals combat damage to a player, you may sacrifice an artifact. If you do, Knuckles deals damage equal to that artifact's mana value to any target.".into(),
+        ..Default::default()
+    });
+
+    // Liberated Dwarf {R}
+    // Creature — Dwarf 1/1
+    db.insert(CardDef {
+        id: ids::LIBERATED_DWARF,
+        name: "Liberated Dwarf".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "{R}, Sacrifice Liberated Dwarf: Target green creature gets +1/+0 and gains first strike until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Magda, the Hoardmaster {2}{R}
+    // Legendary Creature — Dwarf Berserker 3/3
+    db.insert(CardDef {
+        id: ids::MAGDA_THE_HOARDMASTER,
+        name: "Magda, the Hoardmaster".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Dwarf".into()), Subtype("Berserker".into())],
+        power: Some(3),
+        toughness: Some(3),
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            sacrifice_cost: Some(SacrificeCost::AnyCreature),
+            effect: Effect::CreateToken(TokenDef {
+                name: "Dragon".into(),
+                power: 4,
+                toughness: 4,
+                colors: vec![Color::Red],
+                subtypes: vec![Subtype("Dragon".into())],
+                keywords: vec![KeywordAbility::Flying],
+            }),
+            description: "{T}, Sacrifice two artifacts: Create a 4/4 red Dragon creature token with flying.".into(),
+        }],
+        oracle_text: "Whenever one or more tokens you control are put into a graveyard from the battlefield, exile the top card of your library face down. {T}, Sacrifice two artifacts: Create a 4/4 red Dragon creature token with flying.".into(),
+        ..Default::default()
+    });
+
+    // Magus of the Moon {2}{R}
+    // Creature — Human Wizard 2/2
+    db.insert(CardDef {
+        id: ids::MAGUS_OF_THE_MOON,
+        name: "Magus of the Moon".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Wizard".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "Nonbasic lands are Mountains.".into(),
+        ..Default::default()
+    });
+
+    // Metallic Mimic {2}
+    // Artifact Creature — Shapeshifter 2/1
+    db.insert(CardDef {
+        id: ids::METALLIC_MIMIC,
+        name: "Metallic Mimic".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Dwarf".into())],
+        power: Some(2),
+        toughness: Some(1),
+        oracle_text: "As Metallic Mimic enters, choose a creature type. Metallic Mimic is the chosen type in addition to its other types. Each other creature you control of the chosen type enters with an additional +1/+1 counter on it.".into(),
+        ..Default::default()
+    });
+
+    // Pinnacle Monk {3}{R}
+    // Creature — Dwarf Monk 3/2
+    db.insert(CardDef {
+        id: ids::PINNACLE_MONK,
+        name: "Pinnacle Monk".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into()), Subtype("Monk".into())],
+        power: Some(3),
+        toughness: Some(2),
+        oracle_text: "Prowess".into(),
+        ..Default::default()
+    });
+
+    // Professional Face-Breaker {2}{R}
+    // Creature — Human Warrior 2/3
+    db.insert(CardDef {
+        id: ids::PROFESSIONAL_FACE_BREAKER,
+        name: "Professional Face-Breaker".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Human".into()), Subtype("Warrior".into())],
+        keywords: vec![KeywordAbility::Menace],
+        power: Some(2),
+        toughness: Some(3),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::DealsCombatDamageToPlayer,
+            effect: Effect::CreateToken(TokenDef {
+                name: "Treasure".into(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Treasure".into())],
+                keywords: vec![],
+            }),
+            description: "Whenever one or more creatures you control deal combat damage to a player, create a Treasure token.".into(),
+        }],
+        oracle_text: "Menace. Whenever one or more creatures you control deal combat damage to a player, create a Treasure token.".into(),
+        ..Default::default()
+    });
+
+    // Ragavan, Nimble Pilferer {R}
+    // Legendary Creature — Monkey Pirate 2/1
+    db.insert(CardDef {
+        id: ids::RAGAVAN_NIMBLE_PILFERER,
+        name: "Ragavan, Nimble Pilferer".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Monkey".into()), Subtype("Pirate".into())],
+        power: Some(2),
+        toughness: Some(1),
+        triggered_abilities: vec![TriggeredAbility {
+            trigger: TriggerCondition::DealsCombatDamageToPlayer,
+            effect: Effect::CreateToken(TokenDef {
+                name: "Treasure".into(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Treasure".into())],
+                keywords: vec![],
+            }),
+            description: "Whenever Ragavan deals combat damage to a player, create a Treasure token.".into(),
+        }],
+        oracle_text: "Whenever Ragavan deals combat damage to a player, create a Treasure token and exile the top card of that player's library. Dash {1}{R}".into(),
+        ..Default::default()
+    });
+
+    // Simian Spirit Guide {2}{R}
+    // Creature — Ape Spirit 2/2
+    db.insert(CardDef {
+        id: ids::SIMIAN_SPIRIT_GUIDE,
+        name: "Simian Spirit Guide".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Ape".into()), Subtype("Spirit".into())],
+        power: Some(2),
+        toughness: Some(2),
+        oracle_text: "Exile Simian Spirit Guide from your hand: Add {R}.".into(),
+        ..Default::default()
+    });
+
+    // Spark Mage {R}
+    // Creature — Dwarf Wizard 1/1
+    db.insert(CardDef {
+        id: ids::SPARK_MAGE,
+        name: "Spark Mage".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dwarf".into()), Subtype("Wizard".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "When Spark Mage deals combat damage to a player, you may have it deal 1 damage to target creature that player controls.".into(),
+        ..Default::default()
+    });
+
+    // Three Tree Mascot {3}
+    // Artifact Creature — Shapeshifter 1/1
+    // Changeling. {T}: Add one mana of any color.
+    db.insert(CardDef {
+        id: ids::THREE_TREE_MASCOT,
+        name: "Three Tree Mascot".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "Changeling. {T}: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Twinshot Sniper {3}{R}
+    // Creature — Goblin Archer 2/3
+    db.insert(CardDef {
+        id: ids::TWINSHOT_SNIPER,
+        name: "Twinshot Sniper".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Goblin".into()), Subtype("Archer".into())],
+        keywords: vec![KeywordAbility::Reach],
+        power: Some(2),
+        toughness: Some(3),
+        spell_effect: Some(Effect::DealDamage { amount: 2, target: TargetSpec::CreatureOrPlayer }),
+        oracle_text: "Reach. When Twinshot Sniper enters, it deals 2 damage to any target.".into(),
+        ..Default::default()
+    });
+
+    // Universal Automaton {1}
+    // Artifact Creature — Shapeshifter 1/1
+    // Changeling
+    db.insert(CardDef {
+        id: ids::UNIVERSAL_AUTOMATON,
+        name: "Universal Automaton".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Shapeshifter".into()), Subtype("Dwarf".into())],
+        power: Some(1),
+        toughness: Some(1),
+        oracle_text: "Changeling".into(),
+        ..Default::default()
+    });
+
+    // Tezzeret, Cruel Captain {U}{B}
+    // Legendary Creature — Human Artificer 2/3
+    db.insert(CardDef {
+        id: ids::TEZZERET_CRUEL_CAPTAIN,
+        name: "Tezzeret, Cruel Captain".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 1, 0, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into()), Subtype("Artificer".into())],
+        power: Some(2),
+        toughness: Some(3),
+        oracle_text: "Whenever you cast an artifact spell, create a Treasure token. {3}, {T}: Draw a card for each artifact you control that entered this turn.".into(),
+        ..Default::default()
+    });
+
+    // Lifecraft Engine {5}
+    // Artifact Creature — Construct 4/4
+    db.insert(CardDef {
+        id: ids::LIFECRAFT_ENGINE,
+        name: "Lifecraft Engine".into(),
+        mana_cost: Some(ManaCost::new(5, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Construct".into())],
+        keywords: vec![KeywordAbility::Trample],
+        power: Some(4),
+        toughness: Some(4),
+        oracle_text: "Trample. Whenever Lifecraft Engine attacks, create a 1/1 colorless Servo artifact creature token.".into(),
+        ..Default::default()
+    });
+
+    // --- Artifacts ---
+
+    // Academy Manufactor {3}
+    // Artifact Creature — Assembly-Worker 1/3
+    db.insert(CardDef {
+        id: ids::ACADEMY_MANUFACTOR,
+        name: "Academy Manufactor".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact, CardType::Creature],
+        subtypes: vec![Subtype("Assembly-Worker".into())],
+        power: Some(1),
+        toughness: Some(3),
+        oracle_text: "If you would create a Clue, Food, or Treasure token, instead create one of each.".into(),
+        ..Default::default()
+    });
+
+    // Chalice of the Void {X}{X}
+    // Artifact
+    db.insert(CardDef {
+        id: ids::CHALICE_OF_THE_VOID,
+        name: "Chalice of the Void".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Chalice of the Void enters with X charge counters on it. Whenever a player casts a spell with mana value equal to the number of charge counters on Chalice of the Void, counter that spell.".into(),
+        ..Default::default()
+    });
+
+    // Clock of Omens {4}
+    // Artifact
+    // Tap two untapped artifacts you control: Untap target artifact.
+    db.insert(CardDef {
+        id: ids::CLOCK_OF_OMENS,
+        name: "Clock of Omens".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: false,
+            sacrifice_cost: None,
+            effect: Effect::UntapTarget { target: TargetSpec::AnyPermanent },
+            description: "Tap two untapped artifacts you control: Untap target artifact.".into(),
+        }],
+        oracle_text: "Tap two untapped artifacts you control: Untap target artifact.".into(),
+        ..Default::default()
+    });
+
+    // Clown Car {0}
+    // Artifact — Vehicle 1/1
+    db.insert(CardDef {
+        id: ids::CLOWN_CAR,
+        name: "Clown Car".into(),
+        mana_cost: Some(ManaCost::zero()),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Vehicle".into())],
+        oracle_text: "When Clown Car enters, roll X six-sided dice. For each result of 3 or less, create a 1/1 white Clown Robot artifact creature token. Crew 2".into(),
+        ..Default::default()
+    });
+
+    // Damping Sphere {2}
+    db.insert(CardDef {
+        id: ids::DAMPING_SPHERE,
+        name: "Damping Sphere".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "If a land is tapped for two or more mana, it produces {C} instead. Each spell costs {1} more for each other spell that player has cast this turn.".into(),
+        ..Default::default()
+    });
+
+    // Disruptor Flute {3}
+    db.insert(CardDef {
+        id: ids::DISRUPTOR_FLUTE,
+        name: "Disruptor Flute".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "As Disruptor Flute enters, choose a card name. Activated abilities of sources with the chosen name can't be activated unless they're mana abilities.".into(),
+        ..Default::default()
+    });
+
+    // Grafdigger's Cage {1}
+    db.insert(CardDef {
+        id: ids::GRAFDIGGERS_CAGE,
+        name: "Grafdigger's Cage".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Creature cards in graveyards and libraries can't enter the battlefield. Players can't cast spells from graveyards or libraries.".into(),
+        ..Default::default()
+    });
+
+    // Idol of Oblivion {2}
+    db.insert(CardDef {
+        id: ids::IDOL_OF_OBLIVION,
+        name: "Idol of Oblivion".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: true,
+            sacrifice_cost: None,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{T}: Draw a card. Activate only if you created a token this turn.".into(),
+        }],
+        oracle_text: "{T}: Draw a card. Activate only if you created a token this turn.".into(),
+        ..Default::default()
+    });
+
+    // Krark-Clan Ironworks {4}
+    // Artifact
+    // Sacrifice an artifact: Add {C}{C}.
+    db.insert(CardDef {
+        id: ids::KRARK_CLAN_IRONWORKS,
+        name: "Krark-Clan Ironworks".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::zero(),
+            requires_tap: false,
+            sacrifice_cost: Some(SacrificeCost::AnyCreature),
+            effect: Effect::AddMana { color: None, amount: 2 },
+            description: "Sacrifice an artifact: Add {C}{C}.".into(),
+        }],
+        oracle_text: "Sacrifice an artifact: Add {C}{C}.".into(),
+        ..Default::default()
+    });
+
+    // Liquimetal Torque {2}
+    db.insert(CardDef {
+        id: ids::LIQUIMETAL_TORQUE,
+        name: "Liquimetal Torque".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {T}: Target nonland permanent becomes an artifact in addition to its other types until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Nuka-Cola Vending Machine {4}
+    db.insert(CardDef {
+        id: ids::NUKA_COLA_VENDING_MACHINE,
+        name: "Nuka-Cola Vending Machine".into(),
+        mana_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(2, 0, 0, 0, 0, 0),
+            requires_tap: true,
+            sacrifice_cost: None,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{2}, {T}, Sacrifice a Food: Draw a card.".into(),
+        }],
+        oracle_text: "When Nuka-Cola Vending Machine enters, create two Food tokens. {2}, {T}, Sacrifice a Food: Draw a card.".into(),
+        ..Default::default()
+    });
+
+    // Pithing Needle {1}
+    db.insert(CardDef {
+        id: ids::PITHING_NEEDLE,
+        name: "Pithing Needle".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "As Pithing Needle enters, choose a card name. Activated abilities of sources with the chosen name can't be activated unless they're mana abilities.".into(),
+        ..Default::default()
+    });
+
+    // Portal to Phyrexia {9}
+    db.insert(CardDef {
+        id: ids::PORTAL_TO_PHYREXIA,
+        name: "Portal to Phyrexia".into(),
+        mana_cost: Some(ManaCost::new(9, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        spell_effect: Some(Effect::SacrificeCreatures { count: 3, target: TargetSpec::Opponent }),
+        oracle_text: "When Portal to Phyrexia enters, each opponent sacrifices three creatures.".into(),
+        ..Default::default()
+    });
+
+    // Relic of Legends {3}
+    db.insert(CardDef {
+        id: ids::RELIC_OF_LEGENDS,
+        name: "Relic of Legends".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add one mana of any color. Tap an untapped legendary creature you control: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Smuggler's Copter {2}
+    db.insert(CardDef {
+        id: ids::SMUGGLERS_COPTER,
+        name: "Smuggler's Copter".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Vehicle".into())],
+        keywords: vec![KeywordAbility::Flying],
+        power: Some(3),
+        toughness: Some(3),
+        oracle_text: "Flying. Whenever Smuggler's Copter attacks or blocks, you may draw a card. If you do, discard a card. Crew 1.".into(),
+        ..Default::default()
+    });
+
+    // Staff of Compleation {3}
+    db.insert(CardDef {
+        id: ids::STAFF_OF_COMPLEATION,
+        name: "Staff of Compleation".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}, Pay 1 life: Add one mana of any color. {T}, Pay 1 life: Proliferate. {T}, Pay 1 life: You gain 1 life.".into(),
+        ..Default::default()
+    });
+
+    // Stalactite Dagger {1}
+    // Artifact — Equipment
+    db.insert(CardDef {
+        id: ids::STALACTITE_DAGGER,
+        name: "Stalactite Dagger".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        oracle_text: "Equipped creature gets +1/+0 and is every creature type. Equip {1}.".into(),
+        ..Default::default()
+    });
+
+    // Torpor Orb {2}
+    db.insert(CardDef {
+        id: ids::TORPOR_ORB,
+        name: "Torpor Orb".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Creatures entering the battlefield don't cause abilities to trigger.".into(),
+        ..Default::default()
+    });
+
+    // Unlicensed Hearse {2}
+    db.insert(CardDef {
+        id: ids::UNLICENSED_HEARSE,
+        name: "Unlicensed Hearse".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Vehicle".into())],
+        oracle_text: "{T}: Exile up to two target cards from a single graveyard. Crew 2.".into(),
+        ..Default::default()
+    });
+
+    // Vexing Bauble {1}
+    db.insert(CardDef {
+        id: ids::VEXING_BAUBLE,
+        name: "Vexing Bauble".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![ActivatedAbility {
+            cost: ManaCost::new(1, 0, 0, 0, 0, 0),
+            requires_tap: true,
+            sacrifice_cost: None,
+            effect: Effect::DrawCards { count: 1 },
+            description: "{1}, {T}, Sacrifice Vexing Bauble: Draw a card.".into(),
+        }],
+        oracle_text: "Whenever a player casts a spell, if no mana was spent to cast it, counter that spell. {1}, {T}, Sacrifice Vexing Bauble: Draw a card.".into(),
+        ..Default::default()
+    });
+
+    // --- Enchantments ---
+
+    // Blood Moon {2}{R}
+    db.insert(CardDef {
+        id: ids::BLOOD_MOON,
+        name: "Blood Moon".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Enchantment],
+        oracle_text: "Nonbasic lands are Mountains.".into(),
+        ..Default::default()
+    });
+
+    // --- Lands ---
+
+    // Barbarian Ring
+    db.insert(CardDef {
+        id: ids::BARBARIAN_RING,
+        name: "Barbarian Ring".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Red)],
+        oracle_text: "{T}: Add {R}. Barbarian Ring deals 1 damage to you.".into(),
+        ..Default::default()
+    });
+
+    // Cavern of Souls
+    db.insert(CardDef {
+        id: ids::CAVERN_OF_SOULS,
+        name: "Cavern of Souls".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "As Cavern of Souls enters, choose a creature type. {T}: Add {C}. {T}: Add one mana of any color. Spend this mana only to cast a creature spell of the chosen type.".into(),
+        ..Default::default()
+    });
+
+    // City of Traitors
+    db.insert(CardDef {
+        id: ids::CITY_OF_TRAITORS,
+        name: "City of Traitors".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorlessAmount(2)],
+        oracle_text: "When you play another land, sacrifice City of Traitors. {T}: Add {C}{C}.".into(),
+        ..Default::default()
+    });
+
+    // Crystal Vein
+    db.insert(CardDef {
+        id: ids::CRYSTAL_VEIN,
+        name: "Crystal Vein".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {T}, Sacrifice Crystal Vein: Add {C}{C}.".into(),
+        ..Default::default()
+    });
+
+    // Great Furnace
+    db.insert(CardDef {
+        id: ids::GREAT_FURNACE,
+        name: "Great Furnace".into(),
+        card_types: vec![CardType::Artifact, CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Red)],
+        oracle_text: "{T}: Add {R}.".into(),
+        ..Default::default()
+    });
+
+    // Holdout Settlement
+    db.insert(CardDef {
+        id: ids::HOLDOUT_SETTLEMENT,
+        name: "Holdout Settlement".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add {C}. {T}, Tap an untapped creature you control: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Kavaron, Memorial World
+    db.insert(CardDef {
+        id: ids::KAVARON_MEMORIAL_WORLD,
+        name: "Kavaron, Memorial World".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}.".into(),
+        ..Default::default()
+    });
+
+    // Mutavault
+    db.insert(CardDef {
+        id: ids::MUTAVAULT,
+        name: "Mutavault".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {1}: Mutavault becomes a 2/2 creature with all creature types until end of turn. It's still a land.".into(),
+        ..Default::default()
+    });
+
+    // Shatterskull Smashing // Shatterskull, the Hammer Pass
+    db.insert(CardDef {
+        id: ids::SHATTERSKULL_SMASHING,
+        name: "Shatterskull Smashing".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Red)],
+        enters_tapped: true,
+        oracle_text: "Shatterskull, the Hammer Pass enters tapped. {T}: Add {R}.".into(),
+        ..Default::default()
+    });
+
+    // Survivors' Encampment
+    db.insert(CardDef {
+        id: ids::SURVIVORS_ENCAMPMENT,
+        name: "Survivors' Encampment".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "{T}: Add {C}. {T}, Tap an untapped creature you control: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Talon Gates of Madara
+    db.insert(CardDef {
+        id: ids::TALON_GATES_OF_MADARA,
+        name: "Talon Gates of Madara".into(),
+        card_types: vec![CardType::Land],
+        subtypes: vec![Subtype("Gate".into())],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        enters_tapped: true,
+        oracle_text: "Talon Gates of Madara enters tapped. {T}: Add {C}.".into(),
+        ..Default::default()
+    });
+
+    // Urza's Saga
+    db.insert(CardDef {
+        id: ids::URZAS_SAGA,
+        name: "Urza's Saga".into(),
+        card_types: vec![CardType::Enchantment, CardType::Land],
+        subtypes: vec![Subtype("Urza's".into()), Subtype("Saga".into())],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "I — {T}: Add {C}. II — Create a Construct token. III — Search for a 0-1 cost artifact.".into(),
+        ..Default::default()
+    });
+
+    // Volatile Fault
+    db.insert(CardDef {
+        id: ids::VOLATILE_FAULT,
+        name: "Volatile Fault".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {1}, {T}, Sacrifice Volatile Fault: Destroy target nonbasic land.".into(),
+        ..Default::default()
+    });
+
+    // Firdoch Core
+    db.insert(CardDef {
+        id: ids::FIRDOCH_CORE,
+        name: "Firdoch Core".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}.".into(),
+        ..Default::default()
+    });
+
+    // --- Instants / Sorceries ---
+
+    // Abrade {1}{R}
+    db.insert(CardDef {
+        id: ids::ABRADE,
+        name: "Abrade".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DealDamage { amount: 3, target: TargetSpec::AnyCreature }),
+        oracle_text: "Choose one — Abrade deals 3 damage to target creature. / Destroy target artifact.".into(),
+        ..Default::default()
+    });
+
+    // Bottle-Cap Blast {2}{R}
+    db.insert(CardDef {
+        id: ids::BOTTLE_CAP_BLAST,
+        name: "Bottle-Cap Blast".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DealDamage { amount: 5, target: TargetSpec::CreatureOrPlayer }),
+        oracle_text: "As an additional cost, sacrifice a Treasure. Bottle-Cap Blast deals 5 damage to any target.".into(),
+        ..Default::default()
+    });
+
+    // Dead // Gone
+    db.insert(CardDef {
+        id: ids::DEAD_GONE,
+        name: "Dead // Gone".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DealDamage { amount: 2, target: TargetSpec::AnyCreature }),
+        oracle_text: "Dead {R} — Dead deals 2 damage to target creature. // Gone {2}{R} — Return target creature you don't control to its owner's hand.".into(),
+        ..Default::default()
+    });
+
+    // Deflecting Swat {2}{R}
+    db.insert(CardDef {
+        id: ids::DEFLECTING_SWAT,
+        name: "Deflecting Swat".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Unimplemented("You may choose new targets for target spell or ability.".into())),
+        oracle_text: "If you control a commander, you may cast this spell without paying its mana cost. You may choose new targets for target spell or ability.".into(),
+        ..Default::default()
+    });
+
+    // Galvanic Blast {R}
+    db.insert(CardDef {
+        id: ids::GALVANIC_BLAST,
+        name: "Galvanic Blast".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DealDamage { amount: 4, target: TargetSpec::CreatureOrPlayer }),
+        oracle_text: "Galvanic Blast deals 2 damage to any target. Metalcraft — deals 4 instead.".into(),
+        ..Default::default()
+    });
+
+    // Jeska's Will {2}{R}
+    db.insert(CardDef {
+        id: ids::JESKAS_WILL,
+        name: "Jeska's Will".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::AddMana { color: Some(Color::Red), amount: 7 }),
+        oracle_text: "Choose one. If you control a commander, you may choose both. * Add {R} for each card in target opponent's hand. * Exile the top three cards of your library.".into(),
+        ..Default::default()
+    });
+
+    // Mogg Salvage {2}{R}
+    db.insert(CardDef {
+        id: ids::MOGG_SALVAGE,
+        name: "Mogg Salvage".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DestroyTarget { target: TargetSpec::AnyPermanent }),
+        oracle_text: "If an opponent controls an Island, you may cast this without paying its mana cost. Destroy target artifact.".into(),
+        ..Default::default()
+    });
+
+    // Pyroblast {R}
+    db.insert(CardDef {
+        id: ids::PYROBLAST,
+        name: "Pyroblast".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Choose one — Counter target spell if it's blue. / Destroy target permanent if it's blue.".into(),
+        ..Default::default()
+    });
+
+    // Red Elemental Blast {R}
+    db.insert(CardDef {
+        id: ids::RED_ELEMENTAL_BLAST,
+        name: "Red Elemental Blast".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Choose one — Counter target blue spell. / Destroy target blue permanent.".into(),
+        ..Default::default()
+    });
+
+    // Redirect Lightning {2}{R}
+    db.insert(CardDef {
+        id: ids::REDIRECT_LIGHTNING,
+        name: "Redirect Lightning".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::DealDamage { amount: 4, target: TargetSpec::CreatureOrPlaneswalker }),
+        oracle_text: "Redirect Lightning deals 4 damage to target creature or planeswalker.".into(),
+        ..Default::default()
+    });
+
+    // Return the Favor {1}{R}
+    db.insert(CardDef {
+        id: ids::RETURN_THE_FAVOR,
+        name: "Return the Favor".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Unimplemented("Copy target spell or ability.".into())),
+        oracle_text: "Copy target spell or ability that targets only a single permanent or player. You may choose new targets for the copy.".into(),
+        ..Default::default()
+    });
+
+    // Sundering Eruption {3}{R}
+    db.insert(CardDef {
+        id: ids::SUNDERING_ERUPTION,
+        name: "Sundering Eruption".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::Multiple(vec![
+            Effect::DestroyTarget { target: TargetSpec::AnyPermanent },
+            Effect::DealDamage { amount: 3, target: TargetSpec::Opponent },
+        ])),
+        oracle_text: "Destroy target artifact or land. Sundering Eruption deals 3 damage to that permanent's controller.".into(),
+        ..Default::default()
+    });
+
+    // Tibalt's Trickery {1}{R}
+    db.insert(CardDef {
+        id: ids::TIBALTS_TRICKERY,
+        name: "Tibalt's Trickery".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target spell. Choose 1, 2, or 3 at random. Its controller mills that many cards, then exiles cards from the top of their library until they exile a nonland card with a different name. They may cast that card without paying its mana cost.".into(),
+        ..Default::default()
+    });
+
+    // Untimely Malfunction {1}{U}
+    db.insert(CardDef {
+        id: ids::UNTIMELY_MALFUNCTION,
+        name: "Untimely Malfunction".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target artifact or creature spell.".into(),
+        ..Default::default()
+    });
+
     db
 }
 
@@ -6032,6 +7039,125 @@ pub fn ashcoat_commander_deck() -> (Vec<CardId>, CardId) {
     // 29 Swamps
     for _ in 0..29 {
         deck.push(ids::SWAMP);
+    }
+
+    assert_eq!(deck.len(), 100);
+    (deck, commander)
+}
+
+/// Build the Magda, Brazen Outlaw Commander deck (100-card singleton).
+/// Mono-red Dwarf tribal with artifact combo lines.
+///
+/// Returns (deck, commander_id).
+pub fn magda_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::MAGDA_BRAZEN_OUTLAW;
+    let mut deck = Vec::new();
+
+    // Commander
+    deck.push(commander);
+
+    // Creatures (26 total including commander)
+    deck.push(ids::ADAPTIVE_AUTOMATON);
+    deck.push(ids::BARKFORM_HARVESTER);
+    deck.push(ids::BLOODFIRE_DWARF);
+    deck.push(ids::DWARVEN_ARMORER);
+    deck.push(ids::DWARVEN_GRUNT);
+    deck.push(ids::DWARVEN_SCORCHER);
+    deck.push(ids::DWARVEN_TRADER);
+    deck.push(ids::ENSLAVED_DWARF);
+    deck.push(ids::FLYWHEEL_RACER);
+    deck.push(ids::KNUCKLES_THE_ECHIDNA);
+    deck.push(ids::LIBERATED_DWARF);
+    deck.push(ids::LIFECRAFT_ENGINE);
+    deck.push(ids::MAGDA_THE_HOARDMASTER);
+    deck.push(ids::MAGUS_OF_THE_MOON);
+    deck.push(ids::METALLIC_MIMIC);
+    deck.push(ids::PINNACLE_MONK);
+    deck.push(ids::PROFESSIONAL_FACE_BREAKER);
+    deck.push(ids::RAGAVAN_NIMBLE_PILFERER);
+    deck.push(ids::SIMIAN_SPIRIT_GUIDE);
+    deck.push(ids::SPARK_MAGE);
+    deck.push(ids::TEZZERET_CRUEL_CAPTAIN);
+    deck.push(ids::THREE_TREE_MASCOT);
+    deck.push(ids::TWINSHOT_SNIPER);
+    deck.push(ids::UNIVERSAL_AUTOMATON);
+    deck.push(ids::ROAMING_THRONE);
+    deck.push(ids::ACADEMY_MANUFACTOR);
+
+    // Artifacts (29 total)
+    deck.push(ids::AGATHAS_SOUL_CAULDRON);
+    deck.push(ids::CHALICE_OF_THE_VOID);
+    deck.push(ids::CHROME_MOX);
+    deck.push(ids::CLOCK_OF_OMENS);
+    deck.push(ids::CLOWN_CAR);
+    deck.push(ids::DAMPING_SPHERE);
+    deck.push(ids::DISRUPTOR_FLUTE);
+    deck.push(ids::GRAFDIGGERS_CAGE);
+    deck.push(ids::IDOL_OF_OBLIVION);
+    deck.push(ids::KRARK_CLAN_IRONWORKS);
+    deck.push(ids::LIQUIMETAL_TORQUE);
+    deck.push(ids::LOTUS_PETAL);
+    deck.push(ids::MANA_VAULT);
+    deck.push(ids::MOX_AMBER);
+    deck.push(ids::MOX_DIAMOND);
+    deck.push(ids::MOX_OPAL);
+    deck.push(ids::NUKA_COLA_VENDING_MACHINE);
+    deck.push(ids::PITHING_NEEDLE);
+    deck.push(ids::PORTAL_TO_PHYREXIA);
+    deck.push(ids::RELIC_OF_LEGENDS);
+    deck.push(ids::SMUGGLERS_COPTER);
+    deck.push(ids::SOL_RING);
+    deck.push(ids::SPRINGLEAF_DRUM);
+    deck.push(ids::STAFF_OF_COMPLEATION);
+    deck.push(ids::STALACTITE_DAGGER);
+    deck.push(ids::THE_ONE_RING);
+    deck.push(ids::TORPOR_ORB);
+    deck.push(ids::UNLICENSED_HEARSE);
+    deck.push(ids::VEXING_BAUBLE);
+
+    // Enchantment
+    deck.push(ids::BLOOD_MOON);
+
+    // Lands (18 nonbasic)
+    deck.push(ids::ANCIENT_TOMB);
+    deck.push(ids::BARBARIAN_RING);
+    deck.push(ids::CAVERN_OF_SOULS);
+    deck.push(ids::CITY_OF_TRAITORS);
+    deck.push(ids::CRYSTAL_VEIN);
+    deck.push(ids::FIRDOCH_CORE);
+    deck.push(ids::GEMSTONE_CAVERNS);
+    deck.push(ids::GREAT_FURNACE);
+    deck.push(ids::HOLDOUT_SETTLEMENT);
+    deck.push(ids::INVENTORS_FAIR);
+    deck.push(ids::KAVARON_MEMORIAL_WORLD);
+    deck.push(ids::MUTAVAULT);
+    deck.push(ids::SHATTERSKULL_SMASHING);
+    deck.push(ids::SURVIVORS_ENCAMPMENT);
+    deck.push(ids::TALON_GATES_OF_MADARA);
+    deck.push(ids::TREASURE_VAULT);
+    deck.push(ids::URZAS_SAGA);
+    deck.push(ids::VOLATILE_FAULT);
+
+    // Instants / Sorceries (15 total)
+    deck.push(ids::ABRADE);
+    deck.push(ids::BOTTLE_CAP_BLAST);
+    deck.push(ids::DEAD_GONE);
+    deck.push(ids::DEFLECTING_SWAT);
+    deck.push(ids::GALVANIC_BLAST);
+    deck.push(ids::JESKAS_WILL);
+    deck.push(ids::LIGHTNING_BOLT);
+    deck.push(ids::MOGG_SALVAGE);
+    deck.push(ids::PYROBLAST);
+    deck.push(ids::RED_ELEMENTAL_BLAST);
+    deck.push(ids::REDIRECT_LIGHTNING);
+    deck.push(ids::RETURN_THE_FAVOR);
+    deck.push(ids::SUNDERING_ERUPTION);
+    deck.push(ids::TIBALTS_TRICKERY);
+    deck.push(ids::UNTIMELY_MALFUNCTION);
+
+    // 10 Mountains
+    for _ in 0..10 {
+        deck.push(ids::MOUNTAIN);
     }
 
     assert_eq!(deck.len(), 100);
