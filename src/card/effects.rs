@@ -242,8 +242,262 @@ pub enum Effect {
     UntapTarget {
         target: TargetSpec,
     },
+    // --- Zone manipulation effects ---
+
+    /// Return target card from graveyard to battlefield (e.g., Reanimate, Animate Dead).
+    ReturnFromGraveyardToBattlefield {
+        target: TargetSpec,
+    },
+    /// Return target card from graveyard to hand (e.g., Regrowth, Eternal Witness).
+    ReturnFromGraveyardToHand {
+        target: TargetSpec,
+    },
+    /// Exile target card from a graveyard (e.g., Bojuka Bog, Tormod's Crypt).
+    ExileFromGraveyard {
+        target: TargetSpec,
+    },
+    /// Shuffle target(s) into their owner's library.
+    ShuffleIntoLibrary {
+        target: TargetSpec,
+    },
+    /// Put a card on the bottom of its owner's library (e.g., Terminus, Hinder).
+    PutOnBottomOfLibrary {
+        target: TargetSpec,
+    },
+
+    // --- Creature/permanent manipulation ---
+
+    /// Target creature gains a keyword ability until end of turn.
+    GainKeywordUntilEOT {
+        keyword: KeywordAbility,
+        target: TargetSpec,
+    },
+    /// Set target creature's base power and toughness (e.g., Turn to Frog, Humility).
+    SetPowerToughness {
+        power: i32,
+        toughness: i32,
+        until_eot: bool,
+        target: TargetSpec,
+    },
+    /// Gain control of target permanent until end of turn (e.g., Act of Treason).
+    GainControlUntilEOT {
+        target: TargetSpec,
+    },
+    /// Target creature fights another target creature (e.g., Prey Upon, Domri Rade).
+    Fight {
+        target: TargetSpec,
+    },
+    /// Tap target permanent (e.g., Frost Breath, Icy Manipulator).
+    TapTarget {
+        target: TargetSpec,
+    },
+
+    // --- Player-targeted effects ---
+
+    /// Each opponent loses N life (e.g., Blood Artist, Gray Merchant of Asphodel).
+    EachOpponentLosesLife {
+        amount: u32,
+    },
+    /// Each opponent discards N cards (e.g., Sire of Insanity, Bottomless Pit).
+    EachOpponentDiscards {
+        count: u32,
+    },
+    /// Each opponent sacrifices N creatures (e.g., Fleshbag Marauder, Dictate of Erebos).
+    EachOpponentSacrifices {
+        count: u32,
+    },
+    /// Target player draws N cards then discards M cards (e.g., Faithless Looting).
+    DrawThenDiscard {
+        draw: u32,
+        discard: u32,
+        target: TargetSpec,
+    },
+    /// Gain life equal to a dynamic value (e.g., Gray Merchant drains for devotion).
+    GainDynamicLife {
+        amount: DynamicValue,
+    },
+
+    // --- Conditional/modal effects ---
+
+    /// Choose one (or more) from a list of effects.
+    Modal {
+        choices: Vec<Effect>,
+        choose_count: u32,
+    },
+    /// Execute an effect only if a condition is true; otherwise execute the else branch.
+    Conditional {
+        condition: Condition,
+        if_true: Box<Effect>,
+        if_false: Option<Box<Effect>>,
+    },
+    /// Repeat an effect for each of a variable (e.g., "for each creature you control").
+    ForEach {
+        count: DynamicValue,
+        effect: Box<Effect>,
+    },
+
+    // --- Predefined token shortcuts ---
+
+    /// Create a predefined token type (Treasure, Food, Clue, Blood, etc.).
+    CreatePredefinedToken {
+        token_type: PredefinedToken,
+        count: u32,
+    },
+
+    // --- Scry / library manipulation ---
+
+    /// Scry N — look at top N cards, put any on bottom in any order, rest on top.
+    Scry {
+        count: u32,
+    },
+
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
+}
+
+/// Conditions that can be checked at runtime for conditional effects.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Condition {
+    /// Controller controls at least one creature.
+    ControlCreatures,
+    /// Controller's life is at or above N.
+    LifeAtOrAbove(i32),
+    /// Controller's life is at or below N.
+    LifeAtOrBelow(i32),
+    /// It is the controller's turn.
+    IsYourTurn,
+    /// The source permanent has +1/+1 counters.
+    SourceHasCounters,
+    /// Controller controls N or more permanents of a type.
+    ControlNOrMore {
+        count: u32,
+        card_type: CardType,
+    },
+    /// Always true (for testing / default).
+    Always,
+}
+
+/// Predefined token types used across many cards.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PredefinedToken {
+    /// 0/0 artifact — sacrifice, add one mana of any color (simplified: adds colorless).
+    Treasure,
+    /// 0/0 artifact — sacrifice, gain 3 life.
+    Food,
+    /// 0/0 artifact — sacrifice, draw a card.
+    Clue,
+    /// 0/0 artifact — sacrifice, discard a card then draw a card.
+    Blood,
+    /// 1/1 white Soldier creature.
+    Soldier,
+    /// 1/1 white Spirit creature with flying.
+    Spirit,
+    /// 2/2 black Zombie creature.
+    Zombie,
+    /// 1/1 green Saproling creature.
+    Saproling,
+    /// 1/1 red Goblin creature.
+    Goblin,
+    /// 1/1 white Human creature.
+    Human,
+    /// 3/3 green Beast creature.
+    Beast,
+}
+
+impl PredefinedToken {
+    /// Convert a predefined token type into a concrete TokenDef.
+    pub fn to_token_def(&self) -> TokenDef {
+        match self {
+            PredefinedToken::Treasure => TokenDef {
+                name: "Treasure".to_string(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Treasure".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Food => TokenDef {
+                name: "Food".to_string(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Food".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Clue => TokenDef {
+                name: "Clue".to_string(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Clue".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Blood => TokenDef {
+                name: "Blood".to_string(),
+                power: 0,
+                toughness: 0,
+                colors: vec![],
+                subtypes: vec![Subtype("Blood".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Soldier => TokenDef {
+                name: "Soldier".to_string(),
+                power: 1,
+                toughness: 1,
+                colors: vec![Color::White],
+                subtypes: vec![Subtype("Soldier".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Spirit => TokenDef {
+                name: "Spirit".to_string(),
+                power: 1,
+                toughness: 1,
+                colors: vec![Color::White],
+                subtypes: vec![Subtype("Spirit".to_string())],
+                keywords: vec![KeywordAbility::Flying],
+            },
+            PredefinedToken::Zombie => TokenDef {
+                name: "Zombie".to_string(),
+                power: 2,
+                toughness: 2,
+                colors: vec![Color::Black],
+                subtypes: vec![Subtype("Zombie".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Saproling => TokenDef {
+                name: "Saproling".to_string(),
+                power: 1,
+                toughness: 1,
+                colors: vec![Color::Green],
+                subtypes: vec![Subtype("Saproling".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Goblin => TokenDef {
+                name: "Goblin".to_string(),
+                power: 1,
+                toughness: 1,
+                colors: vec![Color::Red],
+                subtypes: vec![Subtype("Goblin".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Human => TokenDef {
+                name: "Human".to_string(),
+                power: 1,
+                toughness: 1,
+                colors: vec![Color::White],
+                subtypes: vec![Subtype("Human".to_string())],
+                keywords: vec![],
+            },
+            PredefinedToken::Beast => TokenDef {
+                name: "Beast".to_string(),
+                power: 3,
+                toughness: 3,
+                colors: vec![Color::Green],
+                subtypes: vec![Subtype("Beast".to_string())],
+                keywords: vec![],
+            },
+        }
+    }
 }
 
 /// What a targeting restriction looks like.

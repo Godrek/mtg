@@ -513,8 +513,320 @@ pub(super) fn resolve_effect(
             }
         }
 
+        // --- Zone manipulation effects ---
+
+        Effect::ReturnFromGraveyardToBattlefield { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.players.iter().any(|p| p.graveyard.contains(id)) {
+                        state.move_object(*id, ZoneType::Graveyard, ZoneType::Battlefield);
+                        if let Some(inst) = state.objects.get_mut(id) {
+                            inst.controller = controller;
+                        }
+                        state.refresh_continuous_effects();
+                        let _ = super::triggers::fire_triggers(state, TriggerCondition::EntersBattlefield, Some(*id));
+                    }
+                }
+            }
+        }
+
+        Effect::ReturnFromGraveyardToHand { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.players.iter().any(|p| p.graveyard.contains(id)) {
+                        state.move_object(*id, ZoneType::Graveyard, ZoneType::Hand);
+                    }
+                }
+            }
+        }
+
+        Effect::ExileFromGraveyard { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.players.iter().any(|p| p.graveyard.contains(id)) {
+                        state.move_object(*id, ZoneType::Graveyard, ZoneType::Exile);
+                    }
+                }
+            }
+        }
+
+        Effect::ShuffleIntoLibrary { .. } => {
+            use rand::seq::SliceRandom;
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.battlefield.contains(id) {
+                        let owner = state.objects.get(id).map(|i| i.owner).unwrap_or(0);
+                        state.move_object(*id, ZoneType::Battlefield, ZoneType::Library);
+                        let mut rng = rand::thread_rng();
+                        state.players[owner].library.shuffle(&mut rng);
+                    }
+                }
+            }
+        }
+
+        Effect::PutOnBottomOfLibrary { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if state.battlefield.contains(id) {
+                        let owner = state.objects.get(id).map(|i| i.owner).unwrap_or(0);
+                        state.move_object(*id, ZoneType::Battlefield, ZoneType::Library);
+                        // move_object puts it at the end (bottom) by default via push, which is correct
+                        // but we need to ensure it's at the end, not the front
+                        if let Some(pos) = state.players[owner].library.iter().position(|&x| x == *id) {
+                            let removed = state.players[owner].library.remove(pos);
+                            state.players[owner].library.push(removed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- Creature/permanent manipulation ---
+
+        Effect::GainKeywordUntilEOT { keyword, .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if let Some(inst) = state.objects.get_mut(id) {
+                        if !inst.temp_keywords.contains(keyword) {
+                            inst.temp_keywords.push(*keyword);
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::SetPowerToughness { power, toughness, until_eot, .. } => {
+            use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
+            for target in targets {
+                if let Target::Object(id) = target {
+                    let duration = if *until_eot {
+                        Duration::UntilEndOfTurn
+                    } else {
+                        Duration::Permanent
+                    };
+                    let ts = state.new_timestamp();
+                    state.continuous_effects.push(ContinuousEffect {
+                        source_id: *id,
+                        controller,
+                        timestamp: ts,
+                        duration,
+                        affected: AffectedObjects::Specific(*id),
+                        modification: LayerModification::SetPT(*power, *toughness),
+                    });
+                }
+            }
+            state.invalidate_characteristics_cache();
+        }
+
+        Effect::GainControlUntilEOT { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if let Some(inst) = state.objects.get_mut(id) {
+                        inst.controller = controller;
+                        // Grant haste so the creature can attack/tap this turn
+                        if !inst.temp_keywords.contains(&KeywordAbility::Haste) {
+                            inst.temp_keywords.push(KeywordAbility::Haste);
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::Fight { .. } => {
+            // Both targets deal damage equal to their power to each other
+            if targets.len() >= 2 {
+                if let (Target::Object(a), Target::Object(b)) = (&targets[0], &targets[1]) {
+                    let power_a = state.effective_power(*a).max(0) as u32;
+                    let power_b = state.effective_power(*b).max(0) as u32;
+                    if let Some(inst) = state.objects.get_mut(b) {
+                        inst.damage_marked += power_a;
+                    }
+                    if let Some(inst) = state.objects.get_mut(a) {
+                        inst.damage_marked += power_b;
+                    }
+                }
+            }
+        }
+
+        Effect::TapTarget { .. } => {
+            for target in targets {
+                if let Target::Object(id) = target {
+                    if let Some(inst) = state.objects.get_mut(id) {
+                        inst.tapped = true;
+                    }
+                }
+            }
+        }
+
+        // --- Player-targeted effects ---
+
+        Effect::EachOpponentLosesLife { amount } => {
+            let opponents: Vec<usize> = (0..state.players.len())
+                .filter(|&i| i != controller)
+                .collect();
+            for opp in opponents {
+                let old_life = state.players[opp].life;
+                state.players[opp].life -= *amount as i32;
+                state.emit_event(GameEvent::LifeChanged {
+                    player: opp,
+                    old: old_life,
+                    new: state.players[opp].life,
+                });
+            }
+        }
+
+        Effect::EachOpponentDiscards { count } => {
+            let opponents: Vec<usize> = (0..state.players.len())
+                .filter(|&i| i != controller)
+                .collect();
+            for opp in opponents {
+                super::discard_random(state, opp, *count as usize);
+            }
+        }
+
+        Effect::EachOpponentSacrifices { count } => {
+            let opponents: Vec<usize> = (0..state.players.len())
+                .filter(|&i| i != controller)
+                .collect();
+            for opp in opponents {
+                let mut creatures = state.creatures_controlled_by(opp);
+                creatures.sort_by_key(|&id| state.effective_power(id));
+                for &id in creatures.iter().take(*count as usize) {
+                    state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                }
+            }
+            state.refresh_continuous_effects();
+        }
+
+        Effect::DrawThenDiscard { draw, discard, .. } => {
+            // Apply to the targeted player, or controller if no target
+            let player = targets.iter().find_map(|t| {
+                if let Target::Player(p) = t { Some(*p) } else { None }
+            }).unwrap_or(controller);
+            super::draw_cards(state, player, *draw as usize);
+            super::discard_random(state, player, *discard as usize);
+        }
+
+        Effect::GainDynamicLife { amount } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let ctx = super::tokens::build_dynamic_context(state, controller);
+            let n = amount.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                Some(&ctx),
+            );
+            if n > 0 {
+                let old_life = state.players[controller].life;
+                state.players[controller].life += n;
+                state.emit_event(GameEvent::LifeChanged {
+                    player: controller,
+                    old: old_life,
+                    new: state.players[controller].life,
+                });
+            }
+        }
+
+        // --- Conditional/modal effects ---
+
+        Effect::Modal { choices, choose_count } => {
+            // Simplified: for goldfish/AI, always choose the first N choices
+            for effect in choices.iter().take(*choose_count as usize) {
+                resolve_effect(state, effect, controller, targets);
+            }
+        }
+
+        Effect::Conditional { condition, if_true, if_false } => {
+            let met = evaluate_condition(state, condition, controller);
+            if met {
+                resolve_effect(state, if_true, controller, targets);
+            } else if let Some(else_effect) = if_false {
+                resolve_effect(state, else_effect, controller, targets);
+            }
+        }
+
+        Effect::ForEach { count, effect } => {
+            let db_ref = state.card_db.clone();
+            let db = db_ref.as_ref().expect("card_db required");
+            let ctx = super::tokens::build_dynamic_context(state, controller);
+            let n = count.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| db.get(id),
+                Some(&ctx),
+            );
+            for _ in 0..n.max(0) {
+                resolve_effect(state, effect, controller, targets);
+            }
+        }
+
+        // --- Predefined tokens ---
+
+        Effect::CreatePredefinedToken { token_type, count } => {
+            let token_def = token_type.to_token_def();
+            for _ in 0..*count {
+                super::tokens::create_token(state, &token_def, controller);
+            }
+        }
+
+        // --- Library manipulation ---
+
+        Effect::Scry { count } => {
+            // Simplified scry: for now, leave top cards in place (proper implementation
+            // would need player choices about which to put on bottom).
+            // In goldfish mode this is a no-op since the player can't make informed
+            // choices without seeing the cards.
+            let _ = count;
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
+    }
+}
+
+/// Evaluate a condition in the current game state.
+fn evaluate_condition(
+    state: &GameState,
+    condition: &crate::card::effects::Condition,
+    controller: PlayerIndex,
+) -> bool {
+    use crate::card::effects::Condition;
+    match condition {
+        Condition::ControlCreatures => {
+            !state.creatures_controlled_by(controller).is_empty()
+        }
+        Condition::LifeAtOrAbove(n) => {
+            state.players[controller].life >= *n
+        }
+        Condition::LifeAtOrBelow(n) => {
+            state.players[controller].life <= *n
+        }
+        Condition::IsYourTurn => {
+            state.active_player == controller
+        }
+        Condition::SourceHasCounters => {
+            // Check if any target has +1/+1 counters (simplified)
+            false
+        }
+        Condition::ControlNOrMore { count, card_type } => {
+            let db = state.card_db();
+            let matching = state.battlefield.iter().filter(|&&id| {
+                if let Some(inst) = state.objects.get(&id) {
+                    if inst.controller != controller {
+                        return false;
+                    }
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        return def.card_types.contains(card_type);
+                    }
+                }
+                false
+            }).count();
+            matching >= *count as usize
+        }
+        Condition::Always => true,
     }
 }
