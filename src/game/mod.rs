@@ -1038,6 +1038,24 @@ impl GameState {
             .collect()
     }
 
+    /// Get all untapped permanents with mana abilities controlled by a player
+    /// (lands, mana rocks, mana dorks, etc.).
+    pub fn untapped_mana_sources(&self, player: PlayerIndex) -> Vec<ObjectId> {
+        let db = self.card_db();
+        self.battlefield
+            .iter()
+            .copied()
+            .filter(|&id| {
+                let inst = &self.objects[&id];
+                inst.controller == player
+                    && !inst.tapped
+                    && db
+                        .get(inst.card_def_id)
+                        .map_or(false, |d| !d.mana_abilities.is_empty())
+            })
+            .collect()
+    }
+
     /// The opponent of the given player (two-player only).
     pub fn opponent(&self, player: PlayerIndex) -> PlayerIndex {
         1 - player

@@ -1,4 +1,4 @@
-use crate::card::{ManaAbility, ObjectId};
+use crate::card::{CardType, ManaAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex};
 
 /// Compute the total generic cost reduction for a spell being cast by `player`.
@@ -36,15 +36,54 @@ pub fn apply_cost_reduction(cost: &crate::mana::ManaCost, reduction: u32) -> cra
     reduced
 }
 
-/// A tap decision: which land to tap and what mana it produces.
+/// A tap decision: which permanent to tap and what mana it produces.
 enum TapDecision {
     Color(ObjectId, crate::mana::Color),
     Colorless(ObjectId, u32),
 }
 
-/// Auto-tap lands to pay a mana cost.
-/// Simple greedy: tap colored sources first for colored requirements, then any for generic.
-/// Uses a two-phase approach: collect tap decisions (read-only), then apply them (mutate).
+/// Compute a "constraint score" for a mana source: lower = more constrained.
+/// More constrained sources should be tapped first (for their specific color)
+/// so that flexible sources remain available for other requirements.
+fn constraint_score(abilities: &[ManaAbility]) -> u32 {
+    let mut colors_possible = std::collections::HashSet::new();
+    let mut has_any = false;
+    for ma in abilities {
+        match ma {
+            ManaAbility::TapForColor(c) => {
+                colors_possible.insert(*c);
+            }
+            ManaAbility::TapForChoice(colors) => {
+                for c in colors {
+                    colors_possible.insert(*c);
+                }
+            }
+            ManaAbility::TapForAny => {
+                has_any = true;
+            }
+            ManaAbility::TapForColorless | ManaAbility::TapForColorlessAmount(_) => {}
+        }
+    }
+    if has_any {
+        100 // Very flexible — tap last
+    } else if colors_possible.is_empty() {
+        50 // Colorless only — moderately flexible
+    } else {
+        colors_possible.len() as u32 // 1 = single color, 2 = dual, etc.
+    }
+}
+
+/// Auto-tap mana sources (lands, artifacts, creatures) to pay a mana cost.
+///
+/// Uses a most-constrained-first strategy:
+/// 1. Sort all mana sources by constraint score (single-color first, then dual, then any)
+/// 2. Tap sources for colored requirements first, preferring single-color sources
+/// 3. Tap remaining sources for generic requirements, preferring colorless-only sources
+/// 4. Handle TapForAny by producing the actually needed color
+/// 5. Handle TapForChoice by choosing the most needed color
+/// 6. Apply Kinnan-style mana bonuses for nonland sources
+///
+/// Two-phase approach: collect tap decisions (read-only), then apply them (mutate).
 pub fn auto_tap_lands(
     state: &mut GameState,
     player: PlayerIndex,
@@ -57,10 +96,35 @@ pub fn auto_tap_lands(
     // Phase 1: Collect tap decisions (immutable borrow)
     {
         let db = state.card_db();
-        let untapped = state.untapped_lands(player);
+        let sources = state.untapped_mana_sources(player);
+
+        // Build a list of (object_id, mana_abilities, is_land, constraint_score)
+        struct SourceInfo {
+            id: ObjectId,
+            abilities: Vec<ManaAbility>,
+            score: u32,
+        }
+
+        let mut source_infos: Vec<SourceInfo> = sources
+            .iter()
+            .filter_map(|&id| {
+                let inst = state.objects.get(&id)?;
+                let def = db.get(inst.card_def_id)?;
+                Some(SourceInfo {
+                    id,
+                    abilities: def.mana_abilities.clone(),
+                    score: constraint_score(&def.mana_abilities),
+                })
+            })
+            .collect();
+
+        // Sort by constraint score: most constrained (lowest) first
+        source_infos.sort_by_key(|s| s.score);
+
         let mut tapped_set = std::collections::HashSet::new();
 
-        // Pay colored costs first
+        // --- Pass 1: Pay colored costs ---
+        // For each color needed, find the most constrained source that can produce it.
         for &color in &Color::ALL {
             let needed = cost.color_amount(color);
             let already_have = state.players[player].mana_pool.get(color);
@@ -69,108 +133,188 @@ pub fn auto_tap_lands(
             }
             let mut still_need = needed - already_have;
 
-            for &land_id in &untapped {
+            // First pass: prefer single-color sources that make exactly this color
+            for info in &source_infos {
                 if still_need == 0 {
                     break;
                 }
-                if tapped_set.contains(&land_id) {
+                if tapped_set.contains(&info.id) {
                     continue;
                 }
-                let inst = &state.objects[&land_id];
-                if inst.tapped {
+                // Only use the most constrained sources for colored costs
+                // (score == 1 means single-color, which is ideal for colored payment)
+                if info.score > 1 {
                     continue;
                 }
-                let def = match db.get(inst.card_def_id) {
-                    Some(d) => d,
-                    None => continue,
-                };
+                let produces = info.abilities.iter().any(|ma| matches!(ma, ManaAbility::TapForColor(c) if *c == color));
+                if produces {
+                    decisions.push(TapDecision::Color(info.id, color));
+                    tapped_set.insert(info.id);
+                    still_need -= 1;
+                }
+            }
 
-                for ma in &def.mana_abilities {
-                    let produces_color = match ma {
-                        ManaAbility::TapForColor(c) => *c == color,
-                        ManaAbility::TapForChoice(colors) => colors.contains(&color),
-                        ManaAbility::TapForAny => true,
-                        _ => false,
-                    };
-                    if produces_color {
-                        decisions.push(TapDecision::Color(land_id, color));
-                        tapped_set.insert(land_id);
-                        still_need -= 1;
-                        break;
-                    }
+            // Second pass: use multi-color / any sources if single-color wasn't enough
+            for info in &source_infos {
+                if still_need == 0 {
+                    break;
+                }
+                if tapped_set.contains(&info.id) {
+                    continue;
+                }
+                let produces_color = info.abilities.iter().any(|ma| match ma {
+                    ManaAbility::TapForColor(c) => *c == color,
+                    ManaAbility::TapForChoice(colors) => colors.contains(&color),
+                    ManaAbility::TapForAny => true,
+                    _ => false,
+                });
+                if produces_color {
+                    decisions.push(TapDecision::Color(info.id, color));
+                    tapped_set.insert(info.id);
+                    still_need -= 1;
                 }
             }
         }
 
-        // Pay generic costs from remaining untapped lands
-        let colored_from_decisions = decisions.len() as u32;
+        // --- Pass 2: Pay generic costs ---
+        let colored_from_decisions: u32 = decisions.len() as u32;
+        // Count total mana already accounted for (pool + decisions)
         let pool_total = state.players[player].mana_pool.total() + colored_from_decisions;
         let colored_total: u32 = Color::ALL.iter().map(|&c| cost.color_amount(c)).sum();
-        if pool_total < colored_total + cost.generic {
-            let mut still_need = (colored_total + cost.generic).saturating_sub(pool_total);
+        let total_needed = colored_total + cost.generic;
 
-            for &land_id in &untapped {
+        if pool_total < total_needed {
+            let mut still_need = total_needed.saturating_sub(pool_total);
+
+            // Track remaining color needs for smart color choice
+            let _remaining_color_needs: [u32; 5] = [0; 5]; // future use
+
+            // Prefer colorless-only sources for generic costs (save colored for later)
+            // Sort remaining by: colorless-only first, then by constraint score desc
+            // (most flexible last = we keep them available)
+            let mut remaining: Vec<&SourceInfo> = source_infos
+                .iter()
+                .filter(|s| !tapped_set.contains(&s.id))
+                .collect();
+
+            // Partition: colorless-only sources first, then colored sources
+            // Within each group, sort by amount produced (descending) to minimize taps
+            remaining.sort_by_key(|s| {
+                let is_colorless_only = s.abilities.iter().all(|ma| {
+                    matches!(
+                        ma,
+                        ManaAbility::TapForColorless | ManaAbility::TapForColorlessAmount(_)
+                    )
+                });
+                let amount = mana_amount(&s.abilities);
+                if is_colorless_only {
+                    (0, std::cmp::Reverse(amount)) // colorless first, most mana first
+                } else {
+                    (1, std::cmp::Reverse(amount)) // colored later
+                }
+            });
+
+            for info in &remaining {
                 if still_need == 0 {
                     break;
                 }
-                if tapped_set.contains(&land_id) {
+                if tapped_set.contains(&info.id) {
                     continue;
                 }
-                let inst = &state.objects[&land_id];
-                if inst.tapped {
-                    continue;
-                }
-                let def = match db.get(inst.card_def_id) {
-                    Some(d) => d,
-                    None => continue,
-                };
 
-                if let Some(ma) = def.mana_abilities.first() {
+                if let Some(ma) = info.abilities.first() {
                     let produced = match ma {
                         ManaAbility::TapForColor(c) => {
-                            decisions.push(TapDecision::Color(land_id, *c));
+                            decisions.push(TapDecision::Color(info.id, *c));
                             1
                         }
-                        ManaAbility::TapForColorless
-                        | ManaAbility::TapForAny => {
-                            decisions.push(TapDecision::Colorless(land_id, 1));
+                        ManaAbility::TapForColorless => {
+                            decisions.push(TapDecision::Colorless(info.id, 1));
+                            1
+                        }
+                        ManaAbility::TapForAny => {
+                            // For generic, produce colorless
+                            decisions.push(TapDecision::Colorless(info.id, 1));
                             1
                         }
                         ManaAbility::TapForColorlessAmount(n) => {
-                            decisions.push(TapDecision::Colorless(land_id, *n));
+                            decisions.push(TapDecision::Colorless(info.id, *n));
                             *n
                         }
                         ManaAbility::TapForChoice(colors) => {
                             if let Some(&c) = colors.first() {
-                                decisions.push(TapDecision::Color(land_id, c));
+                                decisions.push(TapDecision::Color(info.id, c));
                             } else {
-                                decisions.push(TapDecision::Colorless(land_id, 1));
+                                decisions.push(TapDecision::Colorless(info.id, 1));
                             }
                             1
                         }
                     };
-                    tapped_set.insert(land_id);
+                    tapped_set.insert(info.id);
                     still_need = still_need.saturating_sub(produced);
                 }
             }
         }
     }
 
+    // Check for Kinnan-style mana bonus (nonland sources produce extra)
+    let bonus_count = super::triggers::mana_from_nonland_bonus_count(state, player);
+
     // Phase 2: Apply decisions (mutable borrow)
-    for decision in decisions {
+    for decision in &decisions {
         match decision {
-            TapDecision::Color(land_id, color) => {
-                state.players[player].mana_pool.add_color(color, 1);
-                if let Some(inst) = state.objects.get_mut(&land_id) {
+            TapDecision::Color(source_id, color) => {
+                state.players[player].mana_pool.add_color(*color, 1);
+                if let Some(inst) = state.objects.get_mut(source_id) {
                     inst.tapped = true;
                 }
+                // Apply Kinnan bonus for nonland sources
+                if bonus_count > 0 {
+                    let is_nonland = {
+                        let db = state.card_db();
+                        state
+                            .objects
+                            .get(source_id)
+                            .and_then(|inst| db.get(inst.card_def_id))
+                            .map_or(false, |def| !def.card_types.contains(&CardType::Land))
+                    };
+                    if is_nonland {
+                        // Add bonus colorless mana (simplified: any type → colorless)
+                        state.players[player].mana_pool.colorless += bonus_count;
+                    }
+                }
             }
-            TapDecision::Colorless(land_id, amount) => {
+            TapDecision::Colorless(source_id, amount) => {
                 state.players[player].mana_pool.colorless += amount;
-                if let Some(inst) = state.objects.get_mut(&land_id) {
+                if let Some(inst) = state.objects.get_mut(source_id) {
                     inst.tapped = true;
+                }
+                // Apply Kinnan bonus for nonland sources
+                if bonus_count > 0 {
+                    let is_nonland = {
+                        let db = state.card_db();
+                        state
+                            .objects
+                            .get(source_id)
+                            .and_then(|inst| db.get(inst.card_def_id))
+                            .map_or(false, |def| !def.card_types.contains(&CardType::Land))
+                    };
+                    if is_nonland {
+                        state.players[player].mana_pool.colorless += bonus_count;
+                    }
                 }
             }
         }
     }
+}
+
+/// How much total mana a source produces from its first ability.
+fn mana_amount(abilities: &[ManaAbility]) -> u32 {
+    abilities
+        .first()
+        .map(|ma| match ma {
+            ManaAbility::TapForColorlessAmount(n) => *n,
+            _ => 1,
+        })
+        .unwrap_or(0)
 }

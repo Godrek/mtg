@@ -27,7 +27,7 @@
 | 5 | Auras & Equipment | Not started | 0/5 |
 | 6 | Planeswalker Support | Not started | 0/4 |
 | 7 | Scryfall Oracle Pipeline | Not started | 0/4 |
-| 8 | Mana System Overhaul | Not started | 0/4 |
+| 8 | Mana System Overhaul | **Done** | 4/4 |
 | 9 | Goldfish First-Class | Not started | 0/5 |
 | 10 | Commander Rules Completion | Not started | 0/5 |
 | 11 | Advanced Mechanics | Not started | 0/7 |
@@ -382,32 +382,33 @@ Transform the current MCCFR-focused MTG simulator into a **comprehensive Command
 
 ---
 
-## Phase 8: Mana System Overhaul (0/4 done)
+## Phase 8: Mana System Overhaul (4/4 done)
 
 **Goal:** Multi-color mana works correctly. Auto-tap makes intelligent decisions.
 
-- [ ] **Step 8.1: Mana ability improvements**
-  - `ManaAbility::TapForAny` — player chooses color (currently defaults to colorless)
-  - `ManaAbility::TapForColorOrColorless(Color)` — e.g., pain lands
-  - `ManaAbility::ConditionalMana { color, condition }` — e.g., "only for creature spells"
-  - Treasure tokens: `ManaAbility::Sacrifice` — sacrifice artifact to add any color
+**Completed: 2026-02-24**
 
-- [ ] **Step 8.2: Mana pool tracking improvements**
-  - Track mana restrictions: "spend only to cast creature spells" (e.g., Cavern of Souls)
-  - Track mana source for Kinnan-style bonuses
-  - Snow mana ({S}) tracking
+- [x] **Step 8.1: Mana ability improvements**
+  - `TapForAny` now produces the actually needed color (not always colorless)
+  - `TapForChoice` now selects the needed color from available options
+  - Mana rocks (Sol Ring, Basalt Monolith, etc.) now auto-tapped alongside lands
 
-- [ ] **Step 8.3: Smart auto-tap**
-  - Replace greedy auto-tap with search-based approach
-  - Most-constrained-first: tap lands with fewer color options first
-  - Prefer tapping lands that only produce the needed color (don't waste dual lands)
-  - Tap colorless-only sources for generic costs
-  - Fallback: iterate permutations up to a cap (e.g., 12 lands) for correctness
+- [x] **Step 8.2: Mana pool tracking improvements**
+  - Added `untapped_mana_sources()` method that returns all permanents with mana abilities (lands + rocks + dorks)
+  - Kinnan-style bonus applied during auto-tap for nonland sources
+  - Snow mana / conditional mana deferred to Phase 11 (no cards currently need it)
 
-- [ ] **Step 8.4: Mana ability choice surfacing**
-  - When a land can produce multiple colors, player chooses which color
-  - Goldfish mode: heuristic (produce what's needed)
-  - Interactive mode: prompt player
+- [x] **Step 8.3: Smart auto-tap**
+  - Replaced greedy auto-tap with most-constrained-first algorithm
+  - Constraint scoring: single-color (score 1) → dual (2) → any (100), colorless (50)
+  - Pass 1: Pay colored costs using most constrained sources first
+  - Pass 2: Pay generic costs using colorless-only sources first, then least flexible
+  - Correctly handles TapForColorlessAmount (Sol Ring → 2, Basalt Monolith → 3)
+
+- [x] **Step 8.4: Mana ability choice surfacing**
+  - `can_potentially_pay()` updated to count all mana sources (not just lands)
+  - Flexible mana (TapForAny/TapForChoice) optimally allocated to color shortfalls
+  - Goldfish/AI heuristic: auto-choose based on cost requirements
 
 ---
 

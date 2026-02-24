@@ -506,27 +506,34 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
     actions
 }
 
-/// Check if a player can potentially pay a mana cost by tapping untapped lands.
+/// Check if a player can potentially pay a mana cost by tapping untapped mana sources
+/// (lands, mana rocks, mana dorks, etc.).
 fn can_potentially_pay(
     state: &GameState,
     player: PlayerIndex,
     cost: &crate::mana::ManaCost,
 ) -> bool {
     use crate::card::ManaAbility;
+    use crate::mana::Color;
 
     // Start with current pool
     let mut pool = state.players[player].mana_pool.clone();
 
-    // Add mana from untapped lands
+    // Add mana from all untapped mana sources (not just lands)
     let db = state.card_db();
-    let untapped = state.untapped_lands(player);
-    for &land_id in &untapped {
-        let inst = &state.objects[&land_id];
+    let sources = state.untapped_mana_sources(player);
+
+    // First pass: count how much of each specific color is available
+    // and how much flexible mana (TapForAny / TapForChoice) we have.
+    let mut flexible_count: u32 = 0;
+    let mut flexible_colors: Vec<Vec<Color>> = Vec::new();
+
+    for &source_id in &sources {
+        let inst = &state.objects[&source_id];
         let def = match db.get(inst.card_def_id) {
             Some(d) => d,
             None => continue,
         };
-        // Assume best-case: each land contributes its first ability
         if let Some(ma) = def.mana_abilities.first() {
             match ma {
                 ManaAbility::TapForColor(color) => {
@@ -536,14 +543,15 @@ fn can_potentially_pay(
                     pool.colorless += 1;
                 }
                 ManaAbility::TapForAny => {
-                    // Optimistically add to whichever color is most needed
-                    // For simplicity, add colorless (covers generic)
-                    pool.colorless += 1;
+                    // TapForAny can produce any color — optimistically assume it covers
+                    // whatever we need most. Track as flexible mana.
+                    flexible_count += 1;
+                    flexible_colors.push(Color::ALL.to_vec());
                 }
                 ManaAbility::TapForChoice(colors) => {
-                    if let Some(&color) = colors.first() {
-                        pool.add_color(color, 1);
-                    }
+                    // Can produce any of the listed colors
+                    flexible_count += 1;
+                    flexible_colors.push(colors.clone());
                 }
                 ManaAbility::TapForColorlessAmount(n) => {
                     pool.colorless += n;
@@ -551,6 +559,25 @@ fn can_potentially_pay(
             }
         }
     }
+
+    // Check if we can pay with the fixed mana + flexible mana optimally allocated.
+    // For each color shortfall, try to use flexible sources.
+    let mut remaining_flexible = flexible_count;
+    for &color in &Color::ALL {
+        let needed = cost.color_amount(color);
+        let have = pool.get(color);
+        if needed > have {
+            let shortfall = needed - have;
+            if shortfall > remaining_flexible {
+                return false;
+            }
+            remaining_flexible -= shortfall;
+            // Account for it
+            pool.add_color(color, shortfall);
+        }
+    }
+    // Add remaining flexible as colorless (covers generic)
+    pool.colorless += remaining_flexible;
 
     pool.can_pay(cost)
 }
