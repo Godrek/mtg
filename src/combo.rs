@@ -426,6 +426,7 @@ fn apply_effect_recursive(
             let actual_count = (*count).min(100);
             let token_def = TokenDef {
                 name: "Creature Token".into(),
+                card_types: vec![crate::card::CardType::Creature],
                 power: 1,
                 toughness: 1,
                 colors: vec![],

@@ -14,6 +14,7 @@
 //!   MAX_DEPTH=20      DFS search depth (default: 20)
 //!   MAX_MANA=10       Max startup mana to try (default: 10)
 //!   MAX_CREATURES=5   Max startup creature tokens to try (default: 5)
+//!   MAX_ARTIFACTS=5   Max startup artifact tokens to try (default: 5)
 
 use std::time::Instant;
 
@@ -36,6 +37,10 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(10);
     let max_creatures: u32 = std::env::var("MAX_CREATURES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
+    let max_artifacts: u32 = std::env::var("MAX_ARTIFACTS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5);
@@ -88,6 +93,7 @@ fn main() {
         max_depth,
         max_startup_mana: max_mana,
         max_startup_creatures: max_creatures,
+        max_startup_artifacts: max_artifacts,
         ..Default::default()
     };
 
@@ -96,7 +102,7 @@ fn main() {
     println!("Deck:           {} ({} cards, {} unique)", deck_label, deck_cards.len(), unique_cards.len());
     println!("Max pieces:     {}", max_pieces);
     println!("Max DFS depth:  {}", max_depth);
-    println!("Max startup:    {} mana, {} creatures", max_mana, max_creatures);
+    println!("Max startup:    {} mana, {} creatures, {} artifacts", max_mana, max_creatures, max_artifacts);
     println!();
 
     let t0 = Instant::now();

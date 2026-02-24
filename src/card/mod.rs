@@ -88,6 +88,10 @@ pub struct ActivatedAbility {
     /// Additional cost: sacrifice a permanent as part of activating this ability.
     #[serde(default)]
     pub sacrifice_cost: Option<SacrificeCost>,
+    /// Additional cost: tap N untapped artifacts you control (e.g., Clock of Omens).
+    /// The tapped artifacts are separate from the source and from any tap cost.
+    #[serde(default)]
+    pub tap_artifacts_cost: Option<u32>,
     pub effect: Effect,
     pub description: String,
 }
@@ -99,6 +103,8 @@ pub enum SacrificeCost {
     AnyCreature,
     /// Sacrifice a creature with a specific subtype (e.g., Marrow-Gnawer: "Sacrifice a Rat").
     CreatureWithSubtype(Subtype),
+    /// Sacrifice N artifacts you control (e.g., Krark-Clan Ironworks: 1, Magda Hoardmaster: 2).
+    Artifacts(u32),
 }
 
 /// A triggered ability.
@@ -144,6 +150,9 @@ pub enum TriggerCondition {
     OpponentCastsSpell,
     /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
     OpponentDrawsCard,
+    /// Whenever a permanent with the given subtype becomes tapped
+    /// (e.g., Magda, Brazen Outlaw: "Whenever a Dwarf you control becomes tapped").
+    APermanentWithSubtypeBecomesTapped(Subtype),
 }
 
 /// A dynamic value that can be computed at runtime from the game state.
@@ -439,10 +448,15 @@ pub enum ZoneType {
     Command,
 }
 
-/// Token creature definition.
+/// Token definition (creature, artifact, or other token types).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenDef {
     pub name: String,
+    /// Card types for this token (e.g., [Creature] for creature tokens,
+    /// [Artifact] for Treasure tokens). Empty defaults to Creature in the
+    /// combo discovery engine.
+    #[serde(default)]
+    pub card_types: Vec<CardType>,
     pub power: u32,
     pub toughness: u32,
     pub colors: Vec<Color>,

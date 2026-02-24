@@ -54,7 +54,7 @@ use std::fmt;
 
 use crate::card::{
     CardDef, CardId, CardType, DynamicValue, Effect, ManaAbility, SacrificeCost, TargetSpec,
-    TriggerCondition,
+    TokenDef, TriggerCondition,
 };
 use crate::combo::{
     ComboDef, ComboCategory, ComboPrecondition, ComboRegistry,
@@ -91,6 +91,10 @@ pub struct DiscoveryConfig {
     /// Maximum initial creature tokens to try (default: 5).
     /// Some combos require seed creatures (e.g., Marrow-Gnawer needs rats).
     pub max_startup_creatures: u32,
+
+    /// Maximum initial artifact tokens to try (default: 5).
+    /// Some combos require seed artifacts (e.g., Clock of Omens needs tappable artifacts).
+    pub max_startup_artifacts: u32,
 }
 
 impl Default for DiscoveryConfig {
@@ -102,6 +106,7 @@ impl Default for DiscoveryConfig {
             min_net_mana: 1,
             default_reward_weight: 0.2,
             max_startup_creatures: 5,
+            max_startup_artifacts: 5,
         }
     }
 }
@@ -137,6 +142,10 @@ struct ExploreState {
     /// Number of creature tokens on the battlefield.
     /// Includes all creatures that can be sacrificed (non-piece creatures).
     creature_tokens: u32,
+    /// Number of untapped artifact tokens on the battlefield.
+    /// Used to pay tap-artifact costs (e.g., Clock of Omens) and
+    /// artifact sacrifice costs (e.g., Krark-Clan Ironworks).
+    artifact_tokens: u32,
     /// Accumulated side effects during this exploration path.
     side_effects: SideEffects,
 }
@@ -168,6 +177,9 @@ enum ComboAction {
         /// which piece to untap. None means the ability doesn't have
         /// a targeted untap, or targets self (Controller).
         untap_target: Option<usize>,
+        /// Piece indices tapped to pay a tap-artifacts cost (e.g., Clock of Omens).
+        /// The remaining cost (tap_artifacts_cost - pieces.len()) is paid from artifact_tokens.
+        tapped_pieces_for_cost: Vec<usize>,
     },
 }
 
@@ -213,6 +225,8 @@ pub struct DiscoveredCombo {
     pub startup_mana: u32,
     /// Minimum startup creature tokens required.
     pub startup_creatures: u32,
+    /// Minimum startup artifact tokens required.
+    pub startup_artifacts: u32,
 }
 
 impl DiscoveredCombo {
@@ -269,6 +283,9 @@ impl fmt::Display for DiscoveredCombo {
         }
         if self.startup_creatures > 0 {
             writeln!(f, "  Startup creatures: {}", self.startup_creatures)?;
+        }
+        if self.startup_artifacts > 0 {
+            writeln!(f, "  Startup artifacts: {}", self.startup_artifacts)?;
         }
 
         let total_mana = self.net_colorless_per_cycle
@@ -387,12 +404,35 @@ fn is_creature(piece: &CardDef) -> bool {
     piece.card_types.contains(&CardType::Creature)
 }
 
+/// Check if a piece is an artifact.
+fn is_artifact(piece: &CardDef) -> bool {
+    piece.card_types.contains(&CardType::Artifact)
+}
+
 /// Check if any piece has a sacrifice-cost ability or a death trigger,
 /// meaning creature tokens are relevant for this combination.
 fn needs_creature_tokens(pieces: &[&CardDef]) -> bool {
     for piece in pieces {
         for ability in &piece.activated_abilities {
-            if ability.sacrifice_cost.is_some() {
+            if let Some(ref sac) = ability.sacrifice_cost {
+                if matches!(sac, SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_)) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if any piece has a tap-artifacts cost, artifact sacrifice cost,
+/// or creates artifact tokens, meaning artifact tokens are relevant.
+fn needs_artifact_tokens(pieces: &[&CardDef]) -> bool {
+    for piece in pieces {
+        for ability in &piece.activated_abilities {
+            if ability.tap_artifacts_cost.is_some() {
+                return true;
+            }
+            if let Some(SacrificeCost::Artifacts(_)) = ability.sacrifice_cost {
                 return true;
             }
         }
@@ -435,8 +475,9 @@ fn explore_combination(
         generate_attachment_configs(&equipment_indices, &creature_indices)
     };
 
-    // Determine if creature tokens are relevant for this combination
+    // Determine if creature/artifact tokens are relevant for this combination
     let uses_creatures = needs_creature_tokens(&pieces);
+    let uses_artifacts = needs_artifact_tokens(&pieces);
 
     // Try each equipment configuration
     for links in &attachment_configs {
@@ -445,45 +486,54 @@ fn explore_combination(
             equipment_links: links.clone(),
         };
 
-        // Determine creature token range to try
+        // Determine creature and artifact token ranges to try
         let max_creatures = if uses_creatures {
             config.max_startup_creatures
         } else {
             0
         };
+        let max_artifacts = if uses_artifacts {
+            config.max_startup_artifacts
+        } else {
+            0
+        };
 
-        let mut visited: HashMap<PieceConfig, (u32, u32)> = HashMap::new();
+        let mut visited: HashMap<PieceConfig, (u32, u32, u32)> = HashMap::new();
 
         // Invariant: iterating from 0 upward and returning on the first
-        // combo found guarantees that the reported startup_mana and
-        // startup_creatures are the minimum values required.
-        for startup_creatures in 0..=max_creatures {
-            for startup_mana in 0..=config.max_startup_mana {
-                let state = ExploreState {
-                    tapped: vec![false; pieces.len()],
-                    mana_pool: ManaPool {
-                        colorless: startup_mana,
-                        ..ManaPool::empty()
-                    },
-                    creature_tokens: startup_creatures,
-                    side_effects: SideEffects::default(),
-                };
+        // combo found guarantees that the reported startup_mana,
+        // startup_creatures, and startup_artifacts are the minimum values required.
+        for startup_artifacts in 0..=max_artifacts {
+            for startup_creatures in 0..=max_creatures {
+                for startup_mana in 0..=config.max_startup_mana {
+                    let state = ExploreState {
+                        tapped: vec![false; pieces.len()],
+                        mana_pool: ManaPool {
+                            colorless: startup_mana,
+                            ..ManaPool::empty()
+                        },
+                        creature_tokens: startup_creatures,
+                        artifact_tokens: startup_artifacts,
+                        side_effects: SideEffects::default(),
+                    };
 
-                let mut path: Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)> =
-                    Vec::new();
+                    let mut path: Vec<(PieceConfig, ManaPool, u32, u32, SideEffects, ComboAction)> =
+                        Vec::new();
 
-                if let Some(result) = dfs(
-                    &state,
-                    &mut path,
-                    &pieces,
-                    &static_ctx,
-                    config,
-                    0,
-                    startup_mana,
-                    startup_creatures,
-                    &mut visited,
-                ) {
-                    return Some(result);
+                    if let Some(result) = dfs(
+                        &state,
+                        &mut path,
+                        &pieces,
+                        &static_ctx,
+                        config,
+                        0,
+                        startup_mana,
+                        startup_creatures,
+                        startup_artifacts,
+                        &mut visited,
+                    ) {
+                        return Some(result);
+                    }
                 }
             }
         }
@@ -543,18 +593,19 @@ fn generate_attachment_configs(
 /// Depth-first search for cycles in the ability activation graph.
 ///
 /// The `visited` map prunes redundant exploration: once we've explored
-/// a configuration with N total mana and M creatures, revisiting with
-/// <= mana and <= creatures can't discover new cycles.
+/// a configuration with N total mana, M creatures, and K artifacts,
+/// revisiting with <= mana, <= creatures, and <= artifacts can't discover new cycles.
 fn dfs(
     state: &ExploreState,
-    path: &mut Vec<(PieceConfig, ManaPool, u32, SideEffects, ComboAction)>,
+    path: &mut Vec<(PieceConfig, ManaPool, u32, u32, SideEffects, ComboAction)>,
     pieces: &[&CardDef],
     static_ctx: &StaticContext,
     config: &DiscoveryConfig,
     depth: usize,
     startup_mana: u32,
     startup_creatures: u32,
-    visited: &mut HashMap<PieceConfig, (u32, u32)>,
+    startup_artifacts: u32,
+    visited: &mut HashMap<PieceConfig, (u32, u32, u32)>,
 ) -> Option<DiscoveredCombo> {
     if depth > config.max_depth {
         return None;
@@ -563,12 +614,13 @@ fn dfs(
     let current_config = state.config();
 
     // 1. Check for cycles in the current path.
-    for (i, (prev_config, prev_mana, prev_creatures, prev_effects, _)) in
+    for (i, (prev_config, prev_mana, prev_creatures, prev_artifacts, prev_effects, _)) in
         path.iter().enumerate()
     {
         if current_config == *prev_config {
             if mana_pool_ge(&state.mana_pool, prev_mana)
                 && state.creature_tokens >= *prev_creatures
+                && state.artifact_tokens >= *prev_artifacts
             {
                 let net_colorless = state
                     .mana_pool
@@ -598,7 +650,7 @@ fn dfs(
                 if produces_something {
                     let cycle_actions: Vec<String> = path[i..]
                         .iter()
-                        .map(|(_, _, _, _, action)| describe_action(action, pieces))
+                        .map(|(_, _, _, _, _, action)| describe_action(action, pieces))
                         .collect();
 
                     let mut net_colored = HashMap::new();
@@ -633,6 +685,7 @@ fn dfs(
                         cycle_actions,
                         startup_mana,
                         startup_creatures,
+                        startup_artifacts,
                     });
                 }
             }
@@ -640,15 +693,16 @@ fn dfs(
     }
 
     // 2. Visited pruning: skip if we've explored this config with
-    //    >= mana AND >= creatures.
+    //    >= mana AND >= creatures AND >= artifacts.
     let total_mana = state.mana_pool.total();
-    let tokens = state.creature_tokens;
-    if let Some(&(best_mana, best_creatures)) = visited.get(&current_config) {
-        if total_mana <= best_mana && tokens <= best_creatures {
+    let creatures = state.creature_tokens;
+    let artifacts = state.artifact_tokens;
+    if let Some(&(best_mana, best_creatures, best_artifacts)) = visited.get(&current_config) {
+        if total_mana <= best_mana && creatures <= best_creatures && artifacts <= best_artifacts {
             return None;
         }
     }
-    visited.insert(current_config.clone(), (total_mana, tokens));
+    visited.insert(current_config.clone(), (total_mana, creatures, artifacts));
 
     // 3. Generate all legal actions and explore each
     let actions = legal_combo_actions(state, pieces);
@@ -661,6 +715,7 @@ fn dfs(
             current_config.clone(),
             state.mana_pool.clone(),
             state.creature_tokens,
+            state.artifact_tokens,
             state.side_effects.clone(),
             action,
         ));
@@ -674,6 +729,7 @@ fn dfs(
             depth + 1,
             startup_mana,
             startup_creatures,
+            startup_artifacts,
             visited,
         );
 
@@ -762,36 +818,74 @@ fn legal_combo_actions(state: &ExploreState, pieces: &[&CardDef]) -> Vec<ComboAc
             }
 
             // Only consider abilities with effects we can model
-            if is_combo_relevant_effect(&ability.effect) {
-                if has_targeted_untap(&ability.effect) {
-                    // Branch on which piece to untap. Generate one action
-                    // per tapped non-source piece, so the DFS explores all
-                    // possibilities instead of greedily picking the first.
-                    let mut any_target = false;
+            if !is_combo_relevant_effect(&ability.effect) {
+                continue;
+            }
+
+            // Determine tap-artifact cost options (branching axis 1).
+            // Each option is a list of piece indices to tap + number of tokens to consume.
+            let tap_cost_options: Vec<Vec<usize>> = if let Some(cost) = ability.tap_artifacts_cost {
+                // Identify untapped artifact pieces available for tapping.
+                // Exclude the source piece if it's also being tapped (requires_tap).
+                let candidate_pieces: Vec<usize> = (0..pieces.len())
+                    .filter(|&i| {
+                        !state.tapped[i]
+                            && is_artifact(pieces[i])
+                            && !(ability.requires_tap && i == piece_idx)
+                    })
+                    .collect();
+
+                let mut options = Vec::new();
+                // Enumerate: k pieces tapped + (cost - k) tokens consumed
+                for k in 0..=std::cmp::min(cost as usize, candidate_pieces.len()) {
+                    let tokens_needed = cost - k as u32;
+                    if tokens_needed > state.artifact_tokens {
+                        continue;
+                    }
+                    // Generate all k-element subsets of candidate_pieces
+                    for_each_combination_indices(&candidate_pieces, k, |subset| {
+                        options.push(subset.to_vec());
+                    });
+                }
+
+                if options.is_empty() {
+                    continue; // Can't pay tap-artifact cost
+                }
+                options
+            } else {
+                vec![vec![]] // No tap cost — single option with empty tapped set
+            };
+
+            // For each tap-cost option, determine valid untap targets.
+            // Untap targets depend on which pieces will be tapped:
+            // pieces already tapped + pieces tapped by requires_tap + pieces
+            // tapped for the artifact cost are all valid targets.
+            for tapped_pieces in &tap_cost_options {
+                let untap_targets: Vec<Option<usize>> = if has_targeted_untap(&ability.effect) {
+                    let mut targets: Vec<Option<usize>> = Vec::new();
                     for i in 0..pieces.len() {
-                        if i != piece_idx && state.tapped[i] {
-                            actions.push(ComboAction::ActivateAbility {
-                                piece_index: piece_idx,
-                                ability_index: ability_idx,
-                                untap_target: Some(i),
-                            });
-                            any_target = true;
+                        let will_be_tapped = state.tapped[i]
+                            || tapped_pieces.contains(&i)
+                            || (ability.requires_tap && i == piece_idx);
+                        if will_be_tapped {
+                            targets.push(Some(i));
                         }
                     }
-                    // If nothing is tapped, the untap does nothing — still
-                    // allow the action for its other effects (damage, etc.)
-                    if !any_target {
-                        actions.push(ComboAction::ActivateAbility {
-                            piece_index: piece_idx,
-                            ability_index: ability_idx,
-                            untap_target: None,
-                        });
+                    if targets.is_empty() {
+                        vec![None]
+                    } else {
+                        targets
                     }
                 } else {
+                    vec![None]
+                };
+
+                for &untap_target in &untap_targets {
                     actions.push(ComboAction::ActivateAbility {
                         piece_index: piece_idx,
                         ability_index: ability_idx,
-                        untap_target: None,
+                        untap_target,
+                        tapped_pieces_for_cost: tapped_pieces.clone(),
                     });
                 }
             }
@@ -813,6 +907,9 @@ fn can_pay_sacrifice(state: &ExploreState, sac_cost: &SacrificeCost) -> bool {
             // search over all possible board states, which is the game
             // engine's job, not the discovery engine's.
             state.creature_tokens >= 1
+        }
+        SacrificeCost::Artifacts(n) => {
+            state.artifact_tokens >= *n
         }
     }
 }
@@ -886,12 +983,15 @@ fn apply_combo_action(
             }
 
             state.tapped[*piece_index] = true;
+            // Fire tap triggers (e.g., Magda: "Whenever a Dwarf becomes tapped")
+            fire_tap_triggers(state, pieces, static_ctx, *piece_index);
         }
 
         ComboAction::ActivateAbility {
             piece_index,
             ability_index,
             untap_target,
+            tapped_pieces_for_cost,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
@@ -902,14 +1002,30 @@ fn apply_combo_action(
             // Tap if required
             if ability.requires_tap {
                 state.tapped[*piece_index] = true;
+                fire_tap_triggers(state, pieces, static_ctx, *piece_index);
+            }
+
+            // Pay tap-artifacts cost: tap specified pieces and consume tokens
+            if let Some(cost) = ability.tap_artifacts_cost {
+                for &idx in tapped_pieces_for_cost {
+                    state.tapped[idx] = true;
+                    fire_tap_triggers(state, pieces, static_ctx, idx);
+                }
+                let tokens_to_consume = cost - tapped_pieces_for_cost.len() as u32;
+                state.artifact_tokens = state.artifact_tokens.saturating_sub(tokens_to_consume);
             }
 
             // Pay sacrifice cost — this happens BEFORE the effect resolves.
-            // Creature dying fires death triggers.
-            if ability.sacrifice_cost.is_some() {
-                state.creature_tokens = state.creature_tokens.saturating_sub(1);
-                // Fire death triggers on all pieces
-                fire_death_triggers(state, pieces, static_ctx);
+            if let Some(ref sac_cost) = ability.sacrifice_cost {
+                match sac_cost {
+                    SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_) => {
+                        state.creature_tokens = state.creature_tokens.saturating_sub(1);
+                        fire_death_triggers(state, pieces, static_ctx);
+                    }
+                    SacrificeCost::Artifacts(n) => {
+                        state.artifact_tokens = state.artifact_tokens.saturating_sub(*n);
+                    }
+                }
             }
 
             // Apply the ability's effect. Any newly created tokens
@@ -971,6 +1087,34 @@ fn fire_etb_triggers(
     }
 }
 
+/// Fire tap triggers when a piece becomes tapped.
+///
+/// Checks all pieces for `APermanentWithSubtypeBecomesTapped` triggers and
+/// fires them if the tapped piece has the matching subtype (e.g., Magda
+/// creates a Treasure when a Dwarf becomes tapped).
+fn fire_tap_triggers(
+    state: &mut ExploreState,
+    pieces: &[&CardDef],
+    static_ctx: &StaticContext,
+    tapped_piece_idx: usize,
+) {
+    let tapped_piece = pieces[tapped_piece_idx];
+    for (piece_idx, piece) in pieces.iter().enumerate() {
+        for trigger in &piece.triggered_abilities {
+            if let TriggerCondition::APermanentWithSubtypeBecomesTapped(ref subtype) = trigger.trigger {
+                if tapped_piece.subtypes.contains(subtype) {
+                    let creatures_before = state.creature_tokens;
+                    apply_trigger_effect(state, &trigger.effect, piece_idx, pieces, static_ctx);
+                    let creatures_created = state.creature_tokens.saturating_sub(creatures_before);
+                    if creatures_created > 0 {
+                        fire_etb_triggers(state, pieces, static_ctx, creatures_created);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Apply a triggered ability effect.
 ///
 /// For equipment pieces, `UntapTarget { target: Controller }` means
@@ -1000,12 +1144,12 @@ fn apply_trigger_effect(
                 }
             }
         }
-        Effect::CreateToken(_) => {
-            state.creature_tokens += 1;
+        Effect::CreateToken(token) => {
+            apply_token_creation(state, token, 1);
         }
-        Effect::CreateTokens { count, .. } => {
+        Effect::CreateTokens { token, count } => {
             let n = evaluate_dynamic_value(count, state, pieces);
-            state.creature_tokens += n;
+            apply_token_creation(state, token, n);
         }
         Effect::DealDamage { amount, target } => {
             if matches!(target, TargetSpec::Opponent | TargetSpec::AnyPlayer) {
@@ -1062,12 +1206,12 @@ fn apply_combo_effect(
             Some(c) => state.mana_pool.add_color(*c, *amount),
             None => state.mana_pool.colorless += amount,
         },
-        Effect::CreateToken(_) => {
-            state.creature_tokens += 1;
+        Effect::CreateToken(token) => {
+            apply_token_creation(state, token, 1);
         }
-        Effect::CreateTokens { count, .. } => {
+        Effect::CreateTokens { token, count } => {
             let n = evaluate_dynamic_value(count, state, pieces);
-            state.creature_tokens += n;
+            apply_token_creation(state, token, n);
         }
         Effect::DealDamage { amount, target } => {
             if matches!(target, TargetSpec::Opponent | TargetSpec::AnyPlayer) {
@@ -1091,6 +1235,22 @@ fn apply_combo_effect(
             }
         }
         _ => {}
+    }
+}
+
+/// Route token creation to the appropriate counter based on card types.
+///
+/// Artifact tokens (e.g., Treasure) go to artifact_tokens.
+/// Creature tokens (e.g., Rats, Dragons) go to creature_tokens.
+/// Tokens with no card_types default to creature_tokens for backward compatibility.
+fn apply_token_creation(state: &mut ExploreState, token: &TokenDef, count: u32) {
+    let is_artifact = token.card_types.contains(&CardType::Artifact);
+    let is_creature = token.card_types.contains(&CardType::Creature) || token.card_types.is_empty();
+    if is_artifact {
+        state.artifact_tokens += count;
+    }
+    if is_creature {
+        state.creature_tokens += count;
     }
 }
 
@@ -1200,16 +1360,22 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
             piece_index,
             ability_index,
             untap_target,
+            tapped_pieces_for_cost,
         } => {
             let piece = pieces[*piece_index];
             let ability = &piece.activated_abilities[*ability_index];
-            match untap_target {
-                Some(idx) => format!(
-                    "Activate {}: {} (untap {})",
-                    piece.name, ability.description, pieces[*idx].name,
-                ),
-                None => format!("Activate {}: {}", piece.name, ability.description),
+            let mut desc = format!("Activate {}: {}", piece.name, ability.description);
+            if !tapped_pieces_for_cost.is_empty() {
+                let tapped_names: Vec<&str> = tapped_pieces_for_cost
+                    .iter()
+                    .map(|&i| pieces[i].name.as_str())
+                    .collect();
+                desc.push_str(&format!(" (tapping {})", tapped_names.join(", ")));
             }
+            if let Some(idx) = untap_target {
+                desc.push_str(&format!(" (untap {})", pieces[*idx].name));
+            }
+            desc
         }
     }
 }
@@ -1253,6 +1419,44 @@ fn for_each_combination<T: Clone>(items: &[T], size: usize, mut callback: impl F
 
         for (k, &idx) in indices.iter().enumerate() {
             buffer[k] = items[idx].clone();
+        }
+    }
+}
+
+/// Iterate over all combinations of `size` elements from `items` (by index).
+/// Calls `callback` with each subset. When size is 0, calls callback once with empty slice.
+fn for_each_combination_indices(items: &[usize], size: usize, mut callback: impl FnMut(&[usize])) {
+    if size == 0 {
+        callback(&[]);
+        return;
+    }
+    if size > items.len() {
+        return;
+    }
+    let mut indices: Vec<usize> = (0..size).collect();
+    let mut buffer: Vec<usize> = indices.iter().map(|&i| items[i]).collect();
+
+    loop {
+        callback(&buffer);
+
+        let mut i = size;
+        loop {
+            if i == 0 {
+                return;
+            }
+            i -= 1;
+            if indices[i] < items.len() - size + i {
+                break;
+            }
+        }
+
+        indices[i] += 1;
+        for j in (i + 1)..size {
+            indices[j] = indices[j - 1] + 1;
+        }
+
+        for (k, &idx) in indices.iter().enumerate() {
+            buffer[k] = items[idx];
         }
     }
 }
