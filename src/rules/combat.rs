@@ -21,12 +21,23 @@ struct DamageEvent {
     target_player: Option<PlayerIndex>,
     amount: u32,
     lifelink_for: Option<PlayerIndex>,
+    /// Whether this damage should be applied as -1/-1 counters (Wither/Infect).
+    wither: bool,
+    /// Whether this damage to a player should be applied as poison counters (Infect).
+    infect: bool,
 }
 
 /// Resolve combat damage. Collects all damage events first (read phase), then applies them.
 pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
     let defending_player = state.opponent(state.active_player);
     let mut damage_events: Vec<DamageEvent> = Vec::new();
+
+    // Apply flanking before damage (when blockers are declared, creatures blocking
+    // a creature with flanking that don't have flanking get -1/-1 until EOT).
+    // We apply this in the first damage step only.
+    if first_strike_only || !has_first_strike_creatures(state) {
+        apply_flanking(state);
+    }
 
     // Phase 1: Collect all damage events (immutable — uses layer engine)
     {
@@ -61,6 +72,9 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                 None
             };
 
+            let has_wither = state.has_keyword(attacker_id, KeywordAbility::Wither);
+            let has_infect = state.has_keyword(attacker_id, KeywordAbility::Infect);
+
             let blockers = state
                 .combat
                 .attacker_blockers
@@ -76,6 +90,8 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                     target_player: Some(defending_player),
                     amount: power,
                     lifelink_for: lifelink,
+                    wither: false, // wither only affects creatures
+                    infect: has_infect,
                 });
             } else {
                 let has_trample = state.has_keyword(attacker_id, KeywordAbility::Trample);
@@ -107,6 +123,8 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                         target_player: None,
                         amount: damage,
                         lifelink_for: lifelink,
+                        wither: has_wither || has_infect,
+                        infect: false,
                     });
                     remaining -= damage;
                 }
@@ -119,6 +137,8 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                         target_player: Some(defending_player),
                         amount: remaining,
                         lifelink_for: lifelink,
+                        wither: false,
+                        infect: has_infect,
                     });
                 }
 
@@ -148,6 +168,8 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                             } else {
                                 None
                             };
+                        let blocker_wither = state.has_keyword(blocker_id, KeywordAbility::Wither)
+                            || state.has_keyword(blocker_id, KeywordAbility::Infect);
 
                         damage_events.push(DamageEvent {
                             source_id: blocker_id,
@@ -155,6 +177,8 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                             target_player: None,
                             amount: blocker_power,
                             lifelink_for: blocker_lifelink,
+                            wither: blocker_wither,
+                            infect: false,
                         });
                     }
                 }
@@ -165,8 +189,16 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
     // Phase 2: Apply all damage events (mutable)
     for event in damage_events {
         if let Some(obj_id) = event.target_object {
-            if let Some(inst) = state.objects.get_mut(&obj_id) {
-                inst.damage_marked += event.amount;
+            if event.wither {
+                // Wither/Infect: damage to creatures as -1/-1 counters
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    inst.minus_counters += event.amount as i32;
+                }
+            } else {
+                // Normal damage
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    inst.damage_marked += event.amount;
+                }
             }
             state.emit_event(GameEvent::DamageDealt {
                 source: event.source_id,
@@ -176,19 +208,40 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
             });
         }
         if let Some(player) = event.target_player {
-            let old_life = state.players[player].life;
-            state.players[player].life -= event.amount as i32;
+            if event.infect {
+                // Infect: damage to players as poison counters
+                state.players[player].poison_counters += event.amount;
+            } else {
+                let old_life = state.players[player].life;
+                state.players[player].life -= event.amount as i32;
 
-            // Commander damage tracking (CR 903.10a)
-            if state.is_commander(event.source_id) {
-                let source_owner = state.objects.get(&event.source_id)
-                    .map(|i| i.owner)
-                    .unwrap_or(0);
-                if player < state.players.len()
-                    && source_owner < state.players[player].commander_damage_received.len()
-                {
-                    state.players[player].commander_damage_received[source_owner] +=
-                        event.amount as i32;
+                // Commander damage tracking (CR 903.10a)
+                if state.is_commander(event.source_id) {
+                    let source_owner = state.objects.get(&event.source_id)
+                        .map(|i| i.owner)
+                        .unwrap_or(0);
+                    if player < state.players.len()
+                        && source_owner < state.players[player].commander_damage_received.len()
+                    {
+                        state.players[player].commander_damage_received[source_owner] +=
+                            event.amount as i32;
+                    }
+                }
+
+                state.emit_event(GameEvent::LifeChanged {
+                    player,
+                    old: old_life,
+                    new: state.players[player].life,
+                });
+            }
+
+            // Toxic: when this creature deals combat damage to a player, add poison counters
+            // (regardless of infect — toxic and infect are separate mechanics)
+            if !event.infect {
+                // Check toxic on the source creature
+                // Toxic N gives N poison counters (simplified: we treat Toxic as giving 1 poison)
+                if state.has_keyword(event.source_id, KeywordAbility::Toxic) {
+                    state.players[player].poison_counters += 1;
                 }
             }
 
@@ -197,11 +250,6 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
                 target: Target::Player(player),
                 amount: event.amount,
                 is_combat: true,
-            });
-            state.emit_event(GameEvent::LifeChanged {
-                player,
-                old: old_life,
-                new: state.players[player].life,
             });
         }
         if let Some(lifelink_player) = event.lifelink_for {
@@ -214,4 +262,42 @@ pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bo
             });
         }
     }
+}
+
+/// Apply flanking: when a creature with flanking becomes blocked by a creature
+/// without flanking, the blocking creature gets -1/-1 until end of turn.
+fn apply_flanking(state: &mut GameState) {
+    use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
+
+    let mut debuffs: Vec<(ObjectId, PlayerIndex)> = Vec::new();
+
+    for &attacker_id in &state.combat.attackers {
+        if !state.has_keyword(attacker_id, KeywordAbility::Flanking) {
+            continue;
+        }
+        let controller = match state.objects.get(&attacker_id) {
+            Some(inst) => inst.controller,
+            None => continue,
+        };
+        if let Some(blocker_ids) = state.combat.attacker_blockers.get(&attacker_id) {
+            for &blocker_id in blocker_ids {
+                if !state.has_keyword(blocker_id, KeywordAbility::Flanking) {
+                    debuffs.push((blocker_id, controller));
+                }
+            }
+        }
+    }
+
+    for (blocker_id, controller) in debuffs {
+        let ts = state.new_timestamp();
+        state.continuous_effects.push(ContinuousEffect {
+            source_id: blocker_id,
+            controller,
+            timestamp: ts,
+            duration: Duration::UntilEndOfTurn,
+            affected: AffectedObjects::Specific(blocker_id),
+            modification: LayerModification::ModifyPT(-1, -1),
+        });
+    }
+    state.invalidate_characteristics_cache();
 }

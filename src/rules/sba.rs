@@ -68,6 +68,14 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 }
             }
 
+            // CR 704.5c: Player with 10+ poison counters loses
+            for i in 0..state.players.len() {
+                if state.players[i].poison_counters >= 10 && !state.players[i].has_lost {
+                    state.players[i].has_lost = true;
+                    any_action = true;
+                }
+            }
+
             // CR 903.10a (Commander): Player with 21+ commander damage from
             // a single commander loses the game.
             if state.is_commander_format() {
@@ -203,6 +211,9 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 .collect();
             super::triggers::check_your_creature_dies_triggers(state, &dying_controllers);
         }
+        // Check Undying/Persist for creatures that died this round
+        super::triggers::check_undying_persist(state, &died_this_round);
+
         let triggers_queued = state.pending_triggers.len() > triggers_before;
 
         // --- CR 704.3 exit condition ---

@@ -203,6 +203,10 @@ pub struct PlayerState {
     /// A player loses if any entry reaches 21.
     pub commander_damage_received: Vec<i32>,
 
+    /// Poison counters on this player (10+ = lose the game via SBA).
+    #[serde(default)]
+    pub poison_counters: u32,
+
     // ---- Mulligan fields ----
     /// Number of times this player has mulliganed (London Mulligan).
     /// After keeping, the player puts this many cards on the bottom of their library.
@@ -235,6 +239,7 @@ impl PlayerState {
             commander_object_id: None,
             commander_tax: 0,
             commander_damage_received: Vec::new(),
+            poison_counters: 0,
             mulligan_count: 0,
             mulligan_decided: false,
             tutor_targets: Vec::new(),

@@ -563,6 +563,18 @@ fn parse_keywords(keywords: &[String]) -> Vec<KeywordAbility> {
             "Intimidate" => Some(KeywordAbility::Intimidate),
             "Shroud" => Some(KeywordAbility::Shroud),
             "Protection" => Some(KeywordAbility::Protection),
+            "Shadow" => Some(KeywordAbility::Shadow),
+            "Horsemanship" => Some(KeywordAbility::Horsemanship),
+            "Skulk" => Some(KeywordAbility::Skulk),
+            "Wither" => Some(KeywordAbility::Wither),
+            "Infect" => Some(KeywordAbility::Infect),
+            "Toxic" => Some(KeywordAbility::Toxic),
+            "Undying" => Some(KeywordAbility::Undying),
+            "Persist" => Some(KeywordAbility::Persist),
+            "Prowess" => Some(KeywordAbility::Prowess),
+            "Changeling" => Some(KeywordAbility::Changeling),
+            "Flanking" => Some(KeywordAbility::Flanking),
+            "Ward" => Some(KeywordAbility::Ward),
             _ => None, // Unrecognized keywords silently ignored
         } {
             result.push(ability);

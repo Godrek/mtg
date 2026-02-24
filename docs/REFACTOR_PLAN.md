@@ -22,7 +22,7 @@
 | 0 | Split the Monolith | **Done** | 4/4 |
 | 1 | Token Creation | **Done** (pre-existing) | 4/4 |
 | 2 | Multiplayer (4-Player) | Not started (deferred) | 0/6 |
-| 3 | Comprehensive Keywords | Not started | 0/5 |
+| 3 | Comprehensive Keywords | In progress | 1/5 |
 | 4 | Comprehensive Effects | **Done** | 4/4 |
 | 5 | Auras & Equipment | Not started | 0/5 |
 | 6 | Planeswalker Support | Not started | 0/4 |
@@ -194,7 +194,7 @@ Transform the current MCCFR-focused MTG simulator into a **comprehensive Command
 
 **Goal:** Implement all ~180 MTG keyword abilities. Organized by complexity.
 
-- [ ] **Step 3.1: Simple keywords (no parameters, affect combat/targeting/SBA)**
+- [x] **Step 3.1: Simple keywords (no parameters, affect combat/targeting/SBA)**
   - **Combat keywords:**
     - `Unblockable` — can't be blocked (skip blocker assignment)
     - `Shadow` — can only block/be blocked by shadow

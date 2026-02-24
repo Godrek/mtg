@@ -1060,12 +1060,46 @@ fn can_block(
 ) -> bool {
     use crate::card::KeywordAbility;
 
+    // Unblockable: can't be blocked at all
+    if state.has_keyword(attacker_id, KeywordAbility::Unblockable) {
+        return false;
+    }
+
     // Flying: only flying/reach creatures can block flyers
     if state.has_keyword(attacker_id, KeywordAbility::Flying)
         && !state.has_keyword(blocker_id, KeywordAbility::Flying)
         && !state.has_keyword(blocker_id, KeywordAbility::Reach)
     {
         return false;
+    }
+
+    // Shadow: can only be blocked by creatures with shadow
+    if state.has_keyword(attacker_id, KeywordAbility::Shadow)
+        && !state.has_keyword(blocker_id, KeywordAbility::Shadow)
+    {
+        return false;
+    }
+    // Creatures without shadow can't block creatures with shadow
+    if !state.has_keyword(attacker_id, KeywordAbility::Shadow)
+        && state.has_keyword(blocker_id, KeywordAbility::Shadow)
+    {
+        return false;
+    }
+
+    // Horsemanship: can only be blocked by creatures with horsemanship
+    if state.has_keyword(attacker_id, KeywordAbility::Horsemanship)
+        && !state.has_keyword(blocker_id, KeywordAbility::Horsemanship)
+    {
+        return false;
+    }
+
+    // Skulk: can't be blocked by creatures with greater power
+    if state.has_keyword(attacker_id, KeywordAbility::Skulk) {
+        let attacker_power = state.effective_power(attacker_id);
+        let blocker_power = state.effective_power(blocker_id);
+        if blocker_power > attacker_power {
+            return false;
+        }
     }
 
     // Fear: can only be blocked by artifact creatures or black creatures
