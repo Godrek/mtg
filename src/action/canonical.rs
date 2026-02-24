@@ -131,6 +131,14 @@ pub enum CanonicalAction {
 
     Concede,
 
+    /// Equip an equipment to a target creature.
+    Equip {
+        equipment_card_id: CardId,
+        equipment_instance_index: usize,
+        target_card_id: CardId,
+        target_instance_index: usize,
+    },
+
     /// Activate a pre-defined combo as a single macro-action.
     /// Combo ID is stable across game states (it's a registry index, not
     /// dependent on ObjectIds), so this is already canonical.
@@ -312,6 +320,21 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::MulliganBottomCard { object_id } => {
             let inst = &state.objects[object_id];
             CanonicalAction::MulliganBottomCard { card_id: inst.card_def_id }
+        }
+
+        Action::Equip { equipment_id, target_id } => {
+            let eq_inst = &state.objects[equipment_id];
+            let eq_card_id = eq_inst.card_def_id;
+            let eq_idx = battlefield_instance_index(state, *equipment_id);
+            let tgt_inst = &state.objects[target_id];
+            let tgt_card_id = tgt_inst.card_def_id;
+            let tgt_idx = battlefield_instance_index(state, *target_id);
+            CanonicalAction::Equip {
+                equipment_card_id: eq_card_id,
+                equipment_instance_index: eq_idx,
+                target_card_id: tgt_card_id,
+                target_instance_index: tgt_idx,
+            }
         }
 
         Action::ActivateMacro { combo_id } => {
@@ -505,6 +528,17 @@ pub fn resolve(
             // Match first instance — strategically equivalent for duplicates
             let obj_id = find_in_hand_by_index(state, player, *card_id, 0)?;
             Some(Action::MulliganBottomCard { object_id: obj_id })
+        }
+
+        CanonicalAction::Equip {
+            equipment_card_id,
+            equipment_instance_index,
+            target_card_id,
+            target_instance_index,
+        } => {
+            let equipment_id = find_on_battlefield_by_index(state, *equipment_card_id, *equipment_instance_index)?;
+            let target_id = find_on_battlefield_by_index(state, *target_card_id, *target_instance_index)?;
+            Some(Action::Equip { equipment_id, target_id })
         }
 
         CanonicalAction::ActivateMacro { combo_id } => {

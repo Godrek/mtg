@@ -201,6 +201,10 @@ pub struct CardDef {
     /// Cost reduction this permanent provides while on the battlefield.
     #[serde(default)]
     pub cost_reduction: Option<CostReduction>,
+
+    /// Equipment: mana cost to equip to a creature you control (sorcery speed).
+    #[serde(default)]
+    pub equip_cost: Option<ManaCost>,
 }
 
 impl CardDef {
@@ -226,6 +230,22 @@ impl CardDef {
 
     pub fn is_basic_land(&self) -> bool {
         self.is_land() && self.supertypes.contains(&Supertype::Basic)
+    }
+
+    pub fn is_enchantment(&self) -> bool {
+        self.card_types.contains(&CardType::Enchantment)
+    }
+
+    pub fn is_artifact(&self) -> bool {
+        self.card_types.contains(&CardType::Artifact)
+    }
+
+    pub fn is_equipment(&self) -> bool {
+        self.subtypes.iter().any(|s| s.0 == "Equipment")
+    }
+
+    pub fn is_aura(&self) -> bool {
+        self.is_enchantment() && self.subtypes.iter().any(|s| s.0 == "Aura")
     }
 
     pub fn cmc(&self) -> u32 {
@@ -289,6 +309,7 @@ impl Default for CardDef {
             dynamic_power: None,
             dynamic_toughness: None,
             cost_reduction: None,
+            equip_cost: None,
         }
     }
 }

@@ -139,6 +139,74 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 died_this_round.extend(pw_dupes);
             }
 
+            // CR 704.5n: Aura not attached to a legal permanent goes to graveyard
+            {
+                let db = state.card_db();
+                let aura_to_remove: Vec<ObjectId> = state
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&id| {
+                        let inst = match state.objects.get(&id) {
+                            Some(i) => i,
+                            None => return false,
+                        };
+                        let def = match db.get(inst.card_def_id) {
+                            Some(d) => d,
+                            None => return false,
+                        };
+                        if !def.is_aura() {
+                            return false;
+                        }
+                        // Aura must be attached to something on the battlefield
+                        match inst.attached_to {
+                            None => true, // not attached → remove
+                            Some(target_id) => !state.battlefield.contains(&target_id), // target left → remove
+                        }
+                    })
+                    .collect();
+                for &id in &aura_to_remove {
+                    state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                    any_action = true;
+                }
+                if !aura_to_remove.is_empty() {
+                    state.refresh_continuous_effects();
+                }
+            }
+
+            // Equipment that loses its equipped creature stays on the battlefield (unattached)
+            {
+                let db = state.card_db();
+                let orphaned_equipment: Vec<ObjectId> = state
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&id| {
+                        let inst = match state.objects.get(&id) {
+                            Some(i) => i,
+                            None => return false,
+                        };
+                        let def = match db.get(inst.card_def_id) {
+                            Some(d) => d,
+                            None => return false,
+                        };
+                        if !def.is_equipment() {
+                            return false;
+                        }
+                        match inst.attached_to {
+                            None => false,
+                            Some(target_id) => !state.battlefield.contains(&target_id),
+                        }
+                    })
+                    .collect();
+                for &id in &orphaned_equipment {
+                    if let Some(inst) = state.objects.get_mut(&id) {
+                        inst.attached_to = None;
+                        any_action = true;
+                    }
+                }
+            }
+
             // CR 704.5f/g: Creature with toughness <= 0 or lethal damage
             let to_die: Vec<ObjectId> = {
                 state

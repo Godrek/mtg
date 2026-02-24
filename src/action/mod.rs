@@ -108,6 +108,12 @@ pub enum Action {
     /// Concede the game.
     Concede,
 
+    /// Equip an equipment to a target creature you control (sorcery speed).
+    Equip {
+        equipment_id: ObjectId,
+        target_id: ObjectId,
+    },
+
     /// Activate a pre-defined combo as a single macro-action.
     /// The combo_id indexes into the ComboRegistry attached to GameState.
     /// This collapses an infinite loop (e.g., Basalt Monolith + Kinnan
@@ -152,6 +158,9 @@ impl fmt::Display for Action {
             }
             Action::ChooseTutorTarget { card_id } => {
                 write!(f, "Tutor for card {}", card_id)
+            }
+            Action::Equip { equipment_id, target_id } => {
+                write!(f, "Equip (obj {} -> obj {})", equipment_id, target_id)
             }
             Action::Concede => write!(f, "Concede"),
             Action::ActivateMacro { combo_id } => {
@@ -486,6 +495,25 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             object_id: obj_id,
                             ability_index: i,
                         });
+                    }
+                }
+
+                // Equip abilities (sorcery speed, main phase, empty stack)
+                if is_main && state.stack.is_empty() {
+                    if let Some(ref equip_cost) = def.equip_cost {
+                        if can_potentially_pay(state, player, equip_cost) {
+                            // Find all creatures we control that we could equip to
+                            let creatures = state.creatures_controlled_by(player);
+                            for &creature_id in &creatures {
+                                // Can't equip to itself; can equip to any creature we control
+                                if creature_id != obj_id {
+                                    actions.push(Action::Equip {
+                                        equipment_id: obj_id,
+                                        target_id: creature_id,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -24,7 +24,7 @@
 | 2 | Multiplayer (4-Player) | Not started (deferred) | 0/6 |
 | 3 | Comprehensive Keywords | In progress | 1/5 |
 | 4 | Comprehensive Effects | **Done** | 4/4 |
-| 5 | Auras & Equipment | Not started | 0/5 |
+| 5 | Auras & Equipment | **Done** | 3/5 (2 deferred) |
 | 6 | Planeswalker Support | Not started | 0/4 |
 | 7 | Scryfall Oracle Pipeline | Not started | 0/4 |
 | 8 | Mana System Overhaul | **Done** | 4/4 |
@@ -301,35 +301,32 @@ Transform the current MCCFR-focused MTG simulator into a **comprehensive Command
 
 ---
 
-## Phase 5: Auras, Equipment, and Attachments (0/5 done)
+## Phase 5: Auras, Equipment, and Attachments (3/5 done) **Completed: 2026-02-24**
 
 **Goal:** Implement the attachment system so Auras and Equipment work.
 
-- [ ] **Step 5.1: Aura implementation**
-  - When an Aura spell resolves, it must target a legal permanent
-  - Attach the Aura to the target: set `attached_to` on the Aura, add to `attachments` on the target
-  - If the enchanted permanent leaves the battlefield, the Aura goes to graveyard (SBA)
-  - Aura's static abilities generate continuous effects on the attached permanent
-  - Auras that lose their legal target fall off (SBA)
+- [x] **Step 5.1: Aura implementation**
+  - When an Aura spell resolves, it targets a legal permanent and attaches
+  - Set `attached_to` on the Aura, add to `attachments` on the target (in resolution.rs)
+  - If the enchanted permanent leaves the battlefield, the Aura goes to graveyard (SBA CR 704.5n)
+  - Aura's static abilities generate continuous effects on the attached permanent via `AffectedObjects::AttachedTo`
 
-- [ ] **Step 5.2: Equipment implementation**
+- [x] **Step 5.2: Equipment implementation**
   - Equipment enters as a regular artifact
-  - "Equip {N}" is an activated ability (sorcery speed) that attaches it to a creature you control
-  - Equipped creature gains the listed abilities/buffs via continuous effects
-  - If creature leaves, equipment stays on battlefield (unattached)
-  - If equipment leaves, it detaches
+  - `Action::Equip { equipment_id, target_id }` — sorcery speed, pays `equip_cost`
+  - Equipped creature gains buffs via `StaticAbility::Anthem` with `AffectedObjects::AttachedTo`
+  - If creature leaves, equipment stays on battlefield (unattached) — SBA clears `attached_to`
+  - Sample equipment cards (Skullclamp, Nim Deathmantle, Cranial Plating, Thornbite Staff) have `equip_cost` set
+  - Canonical action mapping and interactive display support added
 
-- [ ] **Step 5.3: Fortification**
-  - Same as Equipment but for lands (rare but covers the pattern)
+- [~] **Step 5.3: Fortification** — Deferred (extremely rare mechanic, only 1 card exists)
 
-- [ ] **Step 5.4: Reconfigure**
-  - Equipment that can be a creature or equipment (living weapons)
+- [~] **Step 5.4: Reconfigure** — Deferred (niche mechanic, can be added when specific cards need it)
 
-- [ ] **Step 5.5: Add attachment-related SBAs**
-  - Aura enchanting illegal permanent → graveyard
-  - Aura enchanting nothing → graveyard
-  - Equipment not attached to creature → just stays (no SBA needed)
-  - Token attachment cleanup
+- [x] **Step 5.5: Add attachment-related SBAs**
+  - Aura enchanting illegal/missing permanent → graveyard (CR 704.5n)
+  - Orphaned equipment stays on battlefield, `attached_to` cleared
+  - Integrated with SBA loop in sba.rs
 
 ---
 

@@ -368,6 +368,46 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.consecutive_passes = 0;
         }
 
+        Action::Equip { equipment_id, target_id } => {
+            let eq_id = *equipment_id;
+            let tgt_id = *target_id;
+            let player = state.priority_player;
+
+            // Pay equip cost
+            let equip_cost = {
+                let db = state.card_db();
+                let inst = &state.objects[&eq_id];
+                let def = db.get(inst.card_def_id).unwrap();
+                def.equip_cost.clone()
+            };
+            if let Some(cost) = equip_cost {
+                mana::auto_tap_lands(state, player, &cost);
+                if !state.players[player].mana_pool.pay(&cost) {
+                    return;
+                }
+            }
+
+            // Detach from previous creature (if any)
+            if let Some(old_target) = state.objects.get(&eq_id).and_then(|i| i.attached_to) {
+                if let Some(old_inst) = state.objects.get_mut(&old_target) {
+                    old_inst.attachments.retain(|&id| id != eq_id);
+                }
+            }
+
+            // Attach to new creature
+            if let Some(eq_inst) = state.objects.get_mut(&eq_id) {
+                eq_inst.attached_to = Some(tgt_id);
+            }
+            if let Some(tgt_inst) = state.objects.get_mut(&tgt_id) {
+                if !tgt_inst.attachments.contains(&eq_id) {
+                    tgt_inst.attachments.push(eq_id);
+                }
+            }
+
+            state.refresh_continuous_effects();
+            state.consecutive_passes = 0;
+        }
+
         Action::ChooseReplacementOrder { ordering } => {
             let _ = ordering;
             state.consecutive_passes = 0;

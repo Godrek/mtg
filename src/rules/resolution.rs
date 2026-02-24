@@ -53,6 +53,21 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
+        // Aura attachment: when an aura spell resolves, attach it to its target
+        if def.is_aura() {
+            if let Some(Target::Object(target_id)) = targets.first() {
+                // Set attachment relationship
+                if let Some(aura_inst) = state.objects.get_mut(&obj_id) {
+                    aura_inst.attached_to = Some(*target_id);
+                }
+                if let Some(target_inst) = state.objects.get_mut(target_id) {
+                    if !target_inst.attachments.contains(&obj_id) {
+                        target_inst.attachments.push(obj_id);
+                    }
+                }
+            }
+        }
+
         // Apply ETB replacement effects (CR 614): enters tapped, enters with counters, etc.
         state.apply_etb_replacements(obj_id);
 

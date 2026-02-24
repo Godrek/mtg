@@ -2523,6 +2523,7 @@ pub fn build_sample_db() -> CardDatabase {
         starting_loyalty: None,
         static_abilities: vec![],
         enters_tapped: false,
+        equip_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
         oracle_text: "Equipped creature gets +1/+0 for each artifact you control. {B}{B}: Attach Cranial Plating to target creature you control. Equip {1}.".into(),
         ..Default::default()
     });
@@ -4977,6 +4978,18 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "Whenever a nontoken creature is put into your graveyard from the battlefield, you may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it.".into(),
             },
         ],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 2,
+                toughness: 2,
+                affected: AffectedObjects::AttachedTo,
+            },
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Intimidate,
+                affected: AffectedObjects::AttachedTo,
+            },
+        ],
+        equip_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
         oracle_text: "Equipped creature gets +2/+2, is black, is a Zombie in addition to its other types, and has intimidate. Whenever a nontoken creature is put into your graveyard from the battlefield, you may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it. Equip {4}.".into(),
         ..Default::default()
     });
@@ -5020,6 +5033,14 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "Whenever equipped creature dies, draw two cards.".into(),
             },
         ],
+        static_abilities: vec![
+            StaticAbility::Anthem {
+                power: 1,
+                toughness: -1,
+                affected: AffectedObjects::AttachedTo,
+            },
+        ],
+        equip_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
         oracle_text: "Equipped creature gets +1/-1. Whenever equipped creature dies, draw two cards. Equip {1}.".into(),
         ..Default::default()
     });
@@ -5093,6 +5114,7 @@ pub fn build_sample_db() -> CardDatabase {
                 description: "Whenever a creature dies, untap equipped creature.".into(),
             },
         ],
+        equip_cost: Some(ManaCost::new(4, 0, 0, 0, 0, 0)),
         oracle_text: "Equipped creature has \"{2}, {T}: This creature deals 1 damage to any target.\" Whenever a creature dies, untap equipped creature. Equip {4}.".into(),
         ..Default::default()
     });

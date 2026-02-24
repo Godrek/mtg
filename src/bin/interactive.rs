@@ -519,6 +519,11 @@ fn format_action_rich(state: &GameState, action: &Action, db: &CardDatabase) -> 
                 .unwrap_or("?");
             format!("Tutor for: {}", name)
         }
+        Action::Equip { equipment_id, target_id } => {
+            let eq_name = card_name(state, *equipment_id, db);
+            let tgt_name = card_name(state, *target_id, db);
+            format!("Equip {} to {}", eq_name, tgt_name)
+        }
         Action::Concede => "Concede".into(),
         Action::ActivateMacro { combo_id } => {
             format!("Activate combo #{}", combo_id)

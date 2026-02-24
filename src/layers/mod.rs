@@ -83,6 +83,8 @@ pub enum AffectedObjects {
     AllPermanents,
     /// All permanents controlled by a specific player.
     PermanentsControlledBy(PlayerIndex),
+    /// The permanent this source is attached to (equipment/aura buffs).
+    AttachedTo,
 }
 
 /// A single modification applied by a continuous effect, keyed to its layer.
@@ -448,6 +450,14 @@ fn effect_applies_to(
         AffectedObjects::AllPermanents => battlefield.contains(&obj_id),
         AffectedObjects::PermanentsControlledBy(player) => {
             inst.controller == *player && battlefield.contains(&obj_id)
+        }
+        AffectedObjects::AttachedTo => {
+            // The effect applies to whatever the source is attached to
+            objects
+                .get(&effect.source_id)
+                .and_then(|src| src.attached_to)
+                .map(|attached_id| obj_id == attached_id)
+                .unwrap_or(false)
         }
     }
 }
