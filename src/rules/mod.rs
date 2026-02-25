@@ -19,7 +19,7 @@ use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
 pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands, spell_cost_reduction, total_cost_increase};
 pub use sba::check_state_based_actions;
 pub use triggers::fire_triggers;
-pub use setup::{setup_game, setup_commander_game, setup_commander_game_with_partners, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck, validate_commander_deck_with_partner};
+pub use setup::{setup_game, setup_game_seeded, setup_commander_game, setup_commander_game_seeded, setup_commander_game_with_partners, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck, validate_commander_deck_with_partner};
 pub(crate) use tokens::create_token_from_combo;
 
 /// Apply an action to the game state, advancing it.

@@ -101,6 +101,41 @@ fn run_game_inner(
     run_game_loop(&mut state, strategy0, strategy1, verbose)
 }
 
+/// Run a single game with a fixed random seed for deterministic replay.
+///
+/// Given the same seed, decks, and deterministic strategies, the game will
+/// produce identical results every time. Useful for debugging and regression
+/// testing.
+pub fn run_game_seeded(
+    card_db: &CardDatabase,
+    deck0: &[CardId],
+    deck1: &[CardId],
+    strategy0: &dyn Strategy,
+    strategy1: &dyn Strategy,
+    seed: u64,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    let mut state = GameState::new(2);
+    state.card_db = Some(db);
+    rules::setup_game_seeded(&mut state, deck0, deck1, seed);
+    run_game_loop(&mut state, strategy0, strategy1, false)
+}
+
+/// Run a single Commander goldfish game with a fixed random seed.
+pub fn run_commander_goldfish_game_seeded(
+    card_db: &CardDatabase,
+    deck: &[CardId],
+    commander: CardId,
+    strategy: &dyn Strategy,
+    seed: u64,
+) -> GameResult {
+    let db = Arc::new(card_db.clone());
+    let mut state = GameState::new_commander(2);
+    state.card_db = Some(db);
+    rules::setup_commander_game_seeded(&mut state, deck, deck, commander, commander, seed);
+    run_goldfish_loop(&mut state, strategy, false)
+}
+
 /// Run a single Commander game to completion with the given strategies.
 pub fn run_commander_game(
     card_db: &CardDatabase,

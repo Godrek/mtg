@@ -1,4 +1,6 @@
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
 
 use crate::action::Action;
 use crate::card::{ObjectId, ZoneType};
@@ -81,6 +83,94 @@ pub fn setup_game(
     state.turn_number = 1;
 
     // Execute first untap step (which auto-advances to upkeep -> draw)
+    super::phases::execute_phase_entry(state);
+}
+
+/// Set up a game with a fixed random seed for deterministic replay.
+///
+/// Given the same seed, the same deck order and opening hands are produced
+/// every time, allowing games to be replayed for debugging.
+pub fn setup_game_seeded(
+    state: &mut GameState,
+    deck0: &[crate::card::CardId],
+    deck1: &[crate::card::CardId],
+    seed: u64,
+) {
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    let mut lib0: Vec<ObjectId> = deck0
+        .iter()
+        .map(|&card_id| state.create_card_in_zone(card_id, 0, ZoneType::Library))
+        .collect();
+    lib0.shuffle(&mut rng);
+    state.players[0].library = lib0;
+
+    let mut lib1: Vec<ObjectId> = deck1
+        .iter()
+        .map(|&card_id| state.create_card_in_zone(card_id, 1, ZoneType::Library))
+        .collect();
+    lib1.shuffle(&mut rng);
+    state.players[1].library = lib1;
+
+    super::draw_cards(state, 0, 7);
+    super::draw_cards(state, 1, 7);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Untap;
+    state.turn_number = 1;
+    super::phases::execute_phase_entry(state);
+}
+
+/// Set up a Commander game with a fixed random seed for deterministic replay.
+pub fn setup_commander_game_seeded(
+    state: &mut GameState,
+    deck0: &[crate::card::CardId],
+    deck1: &[crate::card::CardId],
+    commander0: crate::card::CardId,
+    commander1: crate::card::CardId,
+    seed: u64,
+) {
+    let mut rng = StdRng::seed_from_u64(seed);
+
+    state.players[0].commander_card_id = Some(commander0);
+    state.players[1].commander_card_id = Some(commander1);
+
+    let mut lib0 = Vec::new();
+    let mut found_commander0 = false;
+    for &card_id in deck0 {
+        if card_id == commander0 && !found_commander0 {
+            let obj_id = state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            state.players[0].commander_object_id = Some(obj_id);
+            found_commander0 = true;
+        } else {
+            lib0.push(state.create_card_in_zone(card_id, 0, ZoneType::Library));
+        }
+    }
+    lib0.shuffle(&mut rng);
+    state.players[0].library = lib0;
+
+    let mut lib1 = Vec::new();
+    let mut found_commander1 = false;
+    for &card_id in deck1 {
+        if card_id == commander1 && !found_commander1 {
+            let obj_id = state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            state.players[1].commander_object_id = Some(obj_id);
+            found_commander1 = true;
+        } else {
+            lib1.push(state.create_card_in_zone(card_id, 1, ZoneType::Library));
+        }
+    }
+    lib1.shuffle(&mut rng);
+    state.players[1].library = lib1;
+
+    super::draw_cards(state, 0, 7);
+    super::draw_cards(state, 1, 7);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Untap;
+    state.turn_number = 1;
     super::phases::execute_phase_entry(state);
 }
 
