@@ -89,9 +89,10 @@ pub(super) fn check_your_creature_dies_triggers(
 }
 
 /// Flush pending triggers onto the stack in APNAP order
-/// (Active Player, Non-Active Player). When a player controls multiple
-/// simultaneous triggers, they must choose the ordering — this is surfaced
-/// as an `Action::OrderTriggers` decision point for MCCFR to observe.
+/// (Active Player first, then clockwise through all non-active players).
+/// When a player controls multiple simultaneous triggers, they must choose
+/// the ordering — this is surfaced as an `Action::OrderTriggers` decision
+/// point for MCCFR to observe.
 ///
 /// If a player has >1 trigger, this function pauses (leaves triggers in
 /// `pending_triggers` and sets `priority_player`) so the game loop can
@@ -104,50 +105,42 @@ pub(super) fn flush_triggers(state: &mut GameState) -> bool {
     }
 
     let active = state.active_player;
+    let num_players = state.players.len();
 
-    // Count each player's pending triggers
-    let ap_count = state
-        .pending_triggers
-        .iter()
-        .filter(|t| t.controller == active)
-        .count();
-    let nap_count = state
-        .pending_triggers
-        .iter()
-        .filter(|t| t.controller != active)
-        .count();
+    // Process players in APNAP order: active player first, then clockwise
+    for offset in 0..num_players {
+        let player = (active + offset) % num_players;
+        if state.players[player].has_lost {
+            continue;
+        }
 
-    // APNAP: handle active player's triggers first
-    if ap_count > 1 {
-        // AP has multiple triggers — pause for ordering decision
-        state.priority_player = active;
-        return false;
-    }
+        let player_count = state
+            .pending_triggers
+            .iter()
+            .filter(|t| t.controller == player)
+            .count();
 
-    // AP has 0-1 triggers: auto-push them to the stack
-    let ap_triggers: Vec<PendingTrigger> = state
-        .pending_triggers
-        .iter()
-        .filter(|t| t.controller == active)
-        .cloned()
-        .collect();
-    for trigger in ap_triggers {
-        push_trigger_to_stack(state, &trigger);
-    }
-    state.pending_triggers.retain(|t| t.controller != active);
+        if player_count == 0 {
+            continue;
+        }
 
-    // Now handle non-active player's triggers
-    if nap_count > 1 {
-        // NAP has multiple triggers — pause for ordering decision
-        let nap = state.opponent(active);
-        state.priority_player = nap;
-        return false;
-    }
+        if player_count > 1 {
+            // Player has multiple triggers — pause for ordering decision
+            state.priority_player = player;
+            return false;
+        }
 
-    // NAP has 0-1 triggers: auto-push them
-    let nap_triggers = std::mem::take(&mut state.pending_triggers);
-    for trigger in nap_triggers {
-        push_trigger_to_stack(state, &trigger);
+        // Player has exactly 1 trigger: auto-push it
+        let triggers: Vec<PendingTrigger> = state
+            .pending_triggers
+            .iter()
+            .filter(|t| t.controller == player)
+            .cloned()
+            .collect();
+        for trigger in triggers {
+            push_trigger_to_stack(state, &trigger);
+        }
+        state.pending_triggers.retain(|t| t.controller != player);
     }
 
     true

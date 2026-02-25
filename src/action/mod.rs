@@ -715,8 +715,9 @@ fn enumerate_targets_for_spell(
                 }
             }
             TargetSpec::Opponent => {
-                let opponent = state.opponent(caster);
-                targets.push(Target::Player(opponent));
+                for opp in state.opponents(caster) {
+                    targets.push(Target::Player(opp));
+                }
             }
             TargetSpec::AnySpell => {
                 for entry in &state.stack {

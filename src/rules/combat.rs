@@ -29,7 +29,7 @@ struct DamageEvent {
 
 /// Resolve combat damage. Collects all damage events first (read phase), then applies them.
 pub(super) fn resolve_combat_damage(state: &mut GameState, first_strike_only: bool) {
-    let defending_player = state.opponent(state.active_player);
+    let defending_player = state.next_player(state.active_player);
     let mut damage_events: Vec<DamageEvent> = Vec::new();
 
     // Apply flanking before damage (when blockers are declared, creatures blocking

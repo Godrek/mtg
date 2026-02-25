@@ -261,7 +261,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
 
                 if flushed {
                     state.phase = Phase::DeclareBlockers;
-                    state.priority_player = state.opponent(state.active_player);
+                    state.priority_player = state.next_player(state.active_player);
                 }
             }
         }
@@ -525,8 +525,12 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
         Action::Concede => {
             let player = state.priority_player;
             state.players[player].has_lost = true;
-            state.game_over = true;
-            state.winner = Some(state.opponent(player));
+            // Check if game ends: only 1 active player left = game over
+            let active_count = state.active_player_count();
+            if active_count <= 1 {
+                state.game_over = true;
+                state.winner = (0..state.players.len()).find(|&i| !state.players[i].has_lost);
+            }
         }
 
         Action::ActivateMacro { combo_id } => {

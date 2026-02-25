@@ -630,26 +630,20 @@ impl GameState {
                 visible.insert(source_id, inst);
             }
         }
-        // Both graveyards — public
-        for &id in &self.players[player].graveyard {
-            if let Some(inst) = self.objects.get(&id) {
-                visible.insert(id, inst);
+        // All graveyards — public
+        for p in &self.players {
+            for &id in &p.graveyard {
+                if let Some(inst) = self.objects.get(&id) {
+                    visible.insert(id, inst);
+                }
             }
         }
-        for &id in &self.players[opp].graveyard {
-            if let Some(inst) = self.objects.get(&id) {
-                visible.insert(id, inst);
-            }
-        }
-        // Both exile zones — public
-        for &id in &self.players[player].exile {
-            if let Some(inst) = self.objects.get(&id) {
-                visible.insert(id, inst);
-            }
-        }
-        for &id in &self.players[opp].exile {
-            if let Some(inst) = self.objects.get(&id) {
-                visible.insert(id, inst);
+        // All exile zones — public
+        for p in &self.players {
+            for &id in &p.exile {
+                if let Some(inst) = self.objects.get(&id) {
+                    visible.insert(id, inst);
+                }
             }
         }
         // Viewing player's hand — private to this player
@@ -1073,9 +1067,35 @@ impl GameState {
             .collect()
     }
 
-    /// The opponent of the given player (two-player only).
+    /// The opponent of the given player (backward-compatible 2-player convenience).
+    /// For multiplayer, returns the first opponent in clockwise order.
     pub fn opponent(&self, player: PlayerIndex) -> PlayerIndex {
-        1 - player
+        self.opponents(player).into_iter().next().unwrap_or(0)
+    }
+
+    /// All opponents of the given player (all non-eliminated players except self).
+    pub fn opponents(&self, player: PlayerIndex) -> Vec<PlayerIndex> {
+        (0..self.players.len())
+            .filter(|&i| i != player && !self.players[i].has_lost)
+            .collect()
+    }
+
+    /// Next player in clockwise turn order, skipping eliminated players.
+    /// Wraps around. Returns `player` if no other active players exist.
+    pub fn next_player(&self, player: PlayerIndex) -> PlayerIndex {
+        let n = self.players.len();
+        for offset in 1..=n {
+            let next = (player + offset) % n;
+            if !self.players[next].has_lost {
+                return next;
+            }
+        }
+        player // fallback: only player left
+    }
+
+    /// Number of active (non-eliminated) players.
+    pub fn active_player_count(&self) -> usize {
+        self.players.iter().filter(|p| !p.has_lost).count()
     }
 
     /// Emit a game event to the transient event accumulator.

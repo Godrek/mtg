@@ -18,8 +18,8 @@ pub(super) fn handle_priority_pass(state: &mut GameState) {
             advance_phase(state);
         }
     } else {
-        // Pass priority to the next player
-        state.priority_player = state.opponent(state.priority_player);
+        // Pass priority to the next player in clockwise order
+        state.priority_player = state.next_player(state.priority_player);
     }
 }
 
@@ -126,7 +126,7 @@ pub(super) fn execute_phase_entry(state: &mut GameState) {
 
         Phase::DeclareBlockers => {
             // Defending player gets priority to declare blockers
-            state.priority_player = state.opponent(active);
+            state.priority_player = state.next_player(active);
         }
 
         Phase::FirstStrikeDamage => {
@@ -197,7 +197,7 @@ fn next_turn(state: &mut GameState) {
     if let Some(extra_turn_player) = state.extra_turns.pop_front() {
         state.active_player = extra_turn_player;
     } else {
-        state.active_player = state.opponent(state.active_player);
+        state.active_player = state.next_player(state.active_player);
     }
 
     state.priority_player = state.active_player;
