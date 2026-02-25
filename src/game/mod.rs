@@ -408,6 +408,10 @@ pub struct GameState {
     /// shifted to the player at the front of the queue.
     pub extra_turns: VecDeque<PlayerIndex>,
 
+    /// Number of spells cast this turn (for Storm count).
+    /// Reset at the beginning of each turn.
+    pub spells_cast_this_turn: u32,
+
     /// Phases to skip for the current turn (Phase 3A).
     /// When an effect says "skip your draw step" or "skip your combat phase",
     /// the relevant phase is added here. `advance_phase()` checks this set.
@@ -504,6 +508,7 @@ pub struct GameStateSnapshot {
     replacement_effects: Vec<ReplacementEffect>,
     pending_tutor: Option<PendingTutor>,
     extra_turns: VecDeque<PlayerIndex>,
+    spells_cast_this_turn: u32,
     skip_phases: HashSet<Phase>,
     game_over: bool,
     winner: Option<PlayerIndex>,
@@ -744,6 +749,7 @@ impl GameState {
             replacement_effects: Vec::new(),
             pending_tutor: None,
             extra_turns: VecDeque::new(),
+            spells_cast_this_turn: 0,
             skip_phases: HashSet::new(),
             game_over: false,
             winner: None,
@@ -778,6 +784,7 @@ impl GameState {
             replacement_effects: Vec::new(),
             pending_tutor: None,
             extra_turns: VecDeque::new(),
+            spells_cast_this_turn: 0,
             skip_phases: HashSet::new(),
             game_over: false,
             winner: None,
@@ -824,6 +831,7 @@ impl GameState {
             replacement_effects: self.replacement_effects.clone(),
             pending_tutor: self.pending_tutor.clone(),
             extra_turns: self.extra_turns.clone(),
+            spells_cast_this_turn: self.spells_cast_this_turn,
             skip_phases: self.skip_phases.clone(),
             game_over: self.game_over,
             winner: self.winner,
@@ -852,6 +860,7 @@ impl GameState {
         self.replacement_effects = snap.replacement_effects;
         self.pending_tutor = snap.pending_tutor;
         self.extra_turns = snap.extra_turns;
+        self.spells_cast_this_turn = snap.spells_cast_this_turn;
         self.skip_phases = snap.skip_phases;
         self.game_over = snap.game_over;
         self.winner = snap.winner;
@@ -1278,6 +1287,20 @@ impl GameState {
         self.get_characteristics(obj_id)
             .map(|c| c.keywords.contains(&kw))
             .unwrap_or(false)
+    }
+
+    /// Check if a permanent has a given creature subtype, respecting Changeling.
+    /// Changelings have every creature type.
+    pub fn has_subtype(&self, obj_id: ObjectId, subtype: &str) -> bool {
+        if self.has_keyword(obj_id, crate::card::KeywordAbility::Changeling) {
+            return true;
+        }
+        let db = self.card_db();
+        self.objects.get(&obj_id).and_then(|inst| {
+            db.get(inst.card_def_id).map(|def| {
+                def.subtypes.iter().any(|s| s.0 == subtype)
+            })
+        }).unwrap_or(false)
     }
 
     /// Apply damage with replacement effects (CR 614).

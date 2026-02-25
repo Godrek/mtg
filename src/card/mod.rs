@@ -218,6 +218,30 @@ pub struct CardDef {
     /// Equipment: mana cost to equip to a creature you control (sorcery speed).
     #[serde(default)]
     pub equip_cost: Option<ManaCost>,
+
+    /// Flashback cost — cast from graveyard for this cost, then exile.
+    #[serde(default)]
+    pub flashback_cost: Option<ManaCost>,
+
+    /// Kicker cost — optional additional cost for an enhanced effect.
+    #[serde(default)]
+    pub kicker_cost: Option<ManaCost>,
+
+    /// Overload cost — cast for this cost to replace "target" with "each".
+    #[serde(default)]
+    pub overload_cost: Option<ManaCost>,
+
+    /// Evoke cost — cast for this cost and sacrifice when ETB.
+    #[serde(default)]
+    pub evoke_cost: Option<ManaCost>,
+
+    /// Escape: number of cards to exile from graveyard (escape cost is the regular mana cost).
+    #[serde(default)]
+    pub escape_exile_count: Option<u32>,
+
+    /// Annihilator N value (how many permanents the defending player sacrifices).
+    #[serde(default)]
+    pub annihilator_count: Option<u32>,
 }
 
 impl CardDef {
@@ -324,6 +348,12 @@ impl Default for CardDef {
             dynamic_toughness: None,
             cost_reduction: None,
             equip_cost: None,
+            flashback_cost: None,
+            kicker_cost: None,
+            overload_cost: None,
+            evoke_cost: None,
+            escape_exile_count: None,
+            annihilator_count: None,
         }
     }
 }

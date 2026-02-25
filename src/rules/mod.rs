@@ -16,7 +16,7 @@ use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
 
 // Public API re-exports
-pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands};
+pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands, spell_cost_reduction};
 pub use sba::check_state_based_actions;
 pub use triggers::fire_triggers;
 pub use setup::{setup_game, setup_commander_game, setup_commander_game_with_partners, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck, validate_commander_deck_with_partner};
@@ -91,10 +91,14 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let def = db.get(inst.card_def_id).unwrap().clone();
             let is_creature = def.is_creature();
 
-            // Pay mana cost (with cost reduction from permanents like Jet Medallion)
+            // Pay mana cost (with cost reduction from permanents + spell keywords)
+            let card_def_id = {
+                state.objects[&obj_id].card_def_id
+            };
             if let Some(ref cost) = def.mana_cost {
                 let reduction = mana::total_cost_reduction(state, player, is_creature);
-                let reduced_cost = mana::apply_cost_reduction(cost, reduction);
+                let spell_reduction = mana::spell_cost_reduction(state, player, card_def_id);
+                let reduced_cost = mana::apply_cost_reduction(cost, reduction + spell_reduction);
                 // First, auto-tap lands to generate mana if pool is insufficient
                 mana::auto_tap_lands(state, player, &reduced_cost);
                 // Then pay from pool — if payment fails, abort the cast
@@ -253,6 +257,16 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 state.phase = Phase::EndOfCombat;
                 state.priority_player = state.active_player;
             } else {
+                // Exalted: if exactly one creature attacks, each permanent with
+                // Exalted gives it +1/+1 until EOT.
+                if attackers.len() == 1 {
+                    triggers::apply_exalted(state, attackers[0]);
+                }
+
+                // Annihilator: for each attacker with Annihilator N, the defending
+                // player sacrifices N permanents (simplified: random selection).
+                triggers::apply_annihilator(state, attackers);
+
                 // Batch-check attack triggers for all attackers before flushing
                 for &attacker_id in attackers {
                     triggers::check_triggers(state, TriggerCondition::Attacks, Some(attacker_id));
@@ -458,6 +472,77 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 controller,
                 targets: Vec::new(),
             });
+            state.consecutive_passes = 0;
+        }
+
+        Action::CastFromGraveyard { object_id, targets } => {
+            let obj_id = *object_id;
+            let player = state.priority_player;
+            let (def, is_flashback, escape_exile_count) = {
+                let db = state.card_db();
+                let inst = &state.objects[&obj_id];
+                let def = db.get(inst.card_def_id).unwrap().clone();
+                let is_flashback = def.flashback_cost.is_some();
+                let escape_count = def.escape_exile_count;
+                (def, is_flashback, escape_count)
+            };
+            let is_creature = def.is_creature();
+
+            // Pay the appropriate cost
+            if is_flashback {
+                if let Some(ref fb_cost) = def.flashback_cost {
+                    let reduction = mana::total_cost_reduction(state, player, is_creature);
+                    let reduced_cost = mana::apply_cost_reduction(fb_cost, reduction);
+                    mana::auto_tap_lands(state, player, &reduced_cost);
+                    if !state.players[player].mana_pool.pay(&reduced_cost) {
+                        return;
+                    }
+                }
+            } else if let Some(exile_count) = escape_exile_count {
+                // Escape: pay regular mana cost + exile N cards from graveyard
+                if let Some(ref cost) = def.mana_cost {
+                    let reduction = mana::total_cost_reduction(state, player, is_creature);
+                    let reduced_cost = mana::apply_cost_reduction(cost, reduction);
+                    mana::auto_tap_lands(state, player, &reduced_cost);
+                    if !state.players[player].mana_pool.pay(&reduced_cost) {
+                        return;
+                    }
+                }
+                // Exile N other cards from graveyard as additional cost
+                let mut exiled = 0u32;
+                let gy: Vec<ObjectId> = state.players[player].graveyard.clone();
+                for &gy_id in &gy {
+                    if exiled >= exile_count {
+                        break;
+                    }
+                    if gy_id != obj_id {
+                        state.move_object(gy_id, ZoneType::Graveyard, ZoneType::Exile);
+                        exiled += 1;
+                    }
+                }
+            }
+
+            // Move to stack from graveyard
+            let stack_id = state.new_stack_id();
+            state.stack.push(StackEntry {
+                id: stack_id,
+                source: StackSource::Spell(obj_id),
+                controller: player,
+                targets: targets.clone(),
+            });
+            state.players[player].graveyard.retain(|&id| id != obj_id);
+
+            state.emit_event(GameEvent::SpellCast {
+                object: obj_id,
+                controller: player,
+            });
+            state.emit_event(GameEvent::ZoneChange {
+                object: obj_id,
+                from: Zone::Graveyard,
+                to: Zone::Stack,
+            });
+
+            triggers::fire_spell_cast_triggers(state, player, is_creature);
             state.consecutive_passes = 0;
         }
 

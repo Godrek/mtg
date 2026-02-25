@@ -204,6 +204,7 @@ fn next_turn(state: &mut GameState) {
     state.turn_number += 1;
     state.phase = Phase::TURN_ORDER[0]; // Untap
     state.consecutive_passes = 0;
+    state.spells_cast_this_turn = 0;
 
     state.emit_event(GameEvent::TurnStarted {
         active_player: state.active_player,

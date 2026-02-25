@@ -248,6 +248,12 @@ pub(super) fn fire_spell_cast_triggers(state: &mut GameState, caster: PlayerInde
         apply_prowess(state, caster);
     }
 
+    // Extort: each permanent with Extort drains 1 life from each opponent
+    apply_extort(state, caster);
+
+    // Track spell count for Storm
+    state.spells_cast_this_turn += 1;
+
     let _ = flush_triggers(state);
 }
 
@@ -380,4 +386,123 @@ pub(super) fn fire_card_draw_triggers(state: &mut GameState, drawing_player: Pla
 
     state.pending_triggers.extend(triggers);
     let _ = flush_triggers(state);
+}
+
+/// Apply Exalted: when exactly one creature attacks, each permanent you control
+/// with Exalted gives the attacker +1/+1 until end of turn.
+pub(super) fn apply_exalted(state: &mut GameState, attacker_id: ObjectId) {
+    use crate::card::KeywordAbility;
+    use crate::layers::{AffectedObjects, ContinuousEffect, Duration, LayerModification};
+
+    let controller = match state.objects.get(&attacker_id) {
+        Some(inst) => inst.controller,
+        None => return,
+    };
+
+    let exalted_count = state
+        .battlefield
+        .iter()
+        .filter(|&&id| {
+            state
+                .objects
+                .get(&id)
+                .map_or(false, |inst| inst.controller == controller)
+                && state.has_keyword(id, KeywordAbility::Exalted)
+        })
+        .count() as i32;
+
+    if exalted_count > 0 {
+        let ts = state.new_timestamp();
+        state.continuous_effects.push(ContinuousEffect {
+            source_id: attacker_id,
+            controller,
+            timestamp: ts,
+            duration: Duration::UntilEndOfTurn,
+            affected: AffectedObjects::Specific(attacker_id),
+            modification: LayerModification::ModifyPT(exalted_count, exalted_count),
+        });
+        state.invalidate_characteristics_cache();
+    }
+}
+
+/// Apply Annihilator: when a creature with Annihilator N attacks, the defending
+/// player sacrifices N permanents (simplified: random permanents).
+pub(super) fn apply_annihilator(state: &mut GameState, attackers: &[ObjectId]) {
+    use crate::card::ZoneType;
+
+    let defending_player = state.next_player(state.active_player);
+
+    // Collect annihilator counts from attacking creatures
+    let mut total_annihilator = 0u32;
+    {
+        let db = state.card_db();
+        for &attacker_id in attackers {
+            if let Some(inst) = state.objects.get(&attacker_id) {
+                if let Some(def) = db.get(inst.card_def_id) {
+                    if let Some(n) = def.annihilator_count {
+                        total_annihilator += n;
+                    }
+                }
+            }
+        }
+    }
+
+    if total_annihilator == 0 {
+        return;
+    }
+
+    // Defending player sacrifices N permanents (simplified: sacrifice the cheapest permanents)
+    let mut sacrificed = 0u32;
+    let their_perms: Vec<ObjectId> = state
+        .battlefield
+        .iter()
+        .copied()
+        .filter(|&id| {
+            state
+                .objects
+                .get(&id)
+                .map_or(false, |inst| inst.controller == defending_player)
+        })
+        .collect();
+
+    for &perm_id in &their_perms {
+        if sacrificed >= total_annihilator {
+            break;
+        }
+        state.move_object(perm_id, ZoneType::Battlefield, ZoneType::Graveyard);
+        sacrificed += 1;
+    }
+
+    if sacrificed > 0 {
+        state.refresh_continuous_effects();
+        state.refresh_replacement_effects();
+    }
+}
+
+/// Apply Extort: when a spell is cast, each permanent with Extort drains 1 life
+/// from each opponent (simplified: auto-extort without optional payment).
+pub(super) fn apply_extort(state: &mut GameState, caster: PlayerIndex) {
+    use crate::card::KeywordAbility;
+
+    let extort_count = {
+        state
+            .battlefield
+            .iter()
+            .filter(|&&id| {
+                state
+                    .objects
+                    .get(&id)
+                    .map_or(false, |inst| inst.controller == caster)
+                    && state.has_keyword(id, KeywordAbility::Extort)
+            })
+            .count() as i32
+    };
+
+    if extort_count > 0 {
+        let opponents = state.opponents(caster);
+        for &opp in &opponents {
+            state.players[opp].life -= extort_count;
+        }
+        state.players[caster].life += extort_count * opponents.len() as i32;
+    }
 }

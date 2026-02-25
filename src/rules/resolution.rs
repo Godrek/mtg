@@ -97,6 +97,9 @@ fn resolve_spell(
         // Commander redirect: non-permanent commander spells go to command zone
         if state.is_commander(obj_id) {
             state.move_object(obj_id, ZoneType::Stack, ZoneType::Command);
+        } else if def.flashback_cost.is_some() || def.escape_exile_count.is_some() {
+            // Flashback/Escape: exile after resolution instead of graveyard
+            state.move_object(obj_id, ZoneType::Stack, ZoneType::Exile);
         } else {
             state.move_object(obj_id, ZoneType::Stack, ZoneType::Graveyard);
         }

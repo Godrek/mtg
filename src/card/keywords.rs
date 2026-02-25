@@ -53,18 +53,52 @@ pub enum KeywordAbility {
     Persist,
     /// Whenever you cast a noncreature spell, this creature gets +1/+1 until EOT.
     Prowess,
+    /// On cast, exile cards from top until you hit a nonland with lesser CMC; may cast for free.
+    Cascade,
+    /// On cast, copy this spell for each spell cast before it this turn.
+    Storm,
 
     // --- Type modification ---
     /// This creature is every creature type (e.g., Morophon, Maskwood Nexus).
     Changeling,
 
-    // --- Other ---
+    // --- Damage prevention ---
     /// Flanking: when blocked by a creature without flanking, blocker gets -1/-1 until EOT.
     Flanking,
     /// Ward: opponent must pay an additional cost to target this (simplified: counter unless pays {1}).
     Ward,
 
+    // --- Cost modification keywords ---
+    /// Convoke: tap creatures to help pay for this spell ({1} per tapped creature).
+    Convoke,
+    /// Delve: exile cards from your graveyard to help pay for this spell ({1} per exiled card).
+    Delve,
+    /// Affinity for artifacts: costs {1} less for each artifact you control.
+    AffinityForArtifacts,
+
+    // --- Alternative cost keywords (use the cost fields on CardDef) ---
+    /// Flashback: may cast this from your graveyard for its flashback cost, then exile.
+    Flashback,
+    /// Kicker: may pay an additional cost for an enhanced effect.
+    Kicker,
+    /// Overload: may cast for overload cost; replaces "target" with "each".
+    Overload,
+    /// Escape: cast from graveyard by paying mana + exiling N cards from graveyard.
+    Escape,
+    /// Evoke: cast for evoke cost, sacrifice when ETB.
+    Evoke,
+
     // --- Commander-specific ---
     /// Partner: this creature can be paired with another Partner creature as co-commanders.
     Partner,
+
+    // --- Keyword actions (used as flags for triggered effects) ---
+    /// Annihilator N: defending player sacrifices N permanents when this attacks.
+    /// The N value is stored on the card definition.
+    Annihilator,
+    /// Exalted: whenever a creature you control attacks alone, it gets +1/+1 until EOT.
+    Exalted,
+    /// Extort: whenever you cast a spell, you may pay {W/B}. If you do, each opponent
+    /// loses 1 life and you gain that much life.
+    Extort,
 }

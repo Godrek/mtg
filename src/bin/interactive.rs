@@ -536,6 +536,10 @@ fn format_action_rich(state: &GameState, action: &Action, db: &CardDatabase) -> 
             let tgt_name = card_name(state, *target_id, db);
             format!("Equip {} to {}", eq_name, tgt_name)
         }
+        Action::CastFromGraveyard { object_id, .. } => {
+            let name = card_name(state, *object_id, db);
+            format!("Flashback/Escape: {}", name)
+        }
         Action::Concede => "Concede".into(),
         Action::ActivateMacro { combo_id } => {
             format!("Activate combo #{}", combo_id)

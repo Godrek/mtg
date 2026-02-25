@@ -120,6 +120,13 @@ pub enum Action {
         ability_index: usize,
     },
 
+    /// Cast a spell from the graveyard using Flashback or Escape.
+    /// After resolution, the card is exiled instead of going to graveyard.
+    CastFromGraveyard {
+        object_id: ObjectId,
+        targets: Vec<Target>,
+    },
+
     /// Activate a pre-defined combo as a single macro-action.
     /// The combo_id indexes into the ComboRegistry attached to GameState.
     /// This collapses an infinite loop (e.g., Basalt Monolith + Kinnan
@@ -170,6 +177,9 @@ impl fmt::Display for Action {
             }
             Action::ActivateLoyalty { object_id, ability_index } => {
                 write!(f, "Activate loyalty #{} (obj {})", ability_index, object_id)
+            }
+            Action::CastFromGraveyard { object_id, .. } => {
+                write!(f, "Cast from graveyard (obj {})", object_id)
             }
             Action::Concede => write!(f, "Concede"),
             Action::ActivateMacro { combo_id } => {
@@ -411,7 +421,10 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             let reduction = crate::rules::total_cost_reduction(
                                 state, player, def.is_creature(),
                             );
-                            let reduced = crate::rules::apply_cost_reduction(cost, reduction);
+                            let spell_reduction = crate::rules::spell_cost_reduction(
+                                state, player, inst.card_def_id,
+                            );
+                            let reduced = crate::rules::apply_cost_reduction(cost, reduction + spell_reduction);
                             if can_potentially_pay(state, player, &reduced) {
                                 let targets = enumerate_targets_for_spell(state, player, def);
                                 if targets.is_empty() {
@@ -426,6 +439,74 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                                             targets: vec![target],
                                         });
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Flashback / Escape: cast from graveyard
+            {
+                let graveyard = state.players[player].graveyard.clone();
+                for &obj_id in &graveyard {
+                    let inst = &state.objects[&obj_id];
+                    let def = match db.get(inst.card_def_id) {
+                        Some(d) => d,
+                        None => continue,
+                    };
+
+                    // Flashback: cast instant/sorcery from graveyard for flashback cost
+                    if let Some(ref fb_cost) = def.flashback_cost {
+                        let can_cast_timing = if def.is_instant_speed() {
+                            true
+                        } else {
+                            is_main
+                        };
+                        if can_cast_timing {
+                            let reduction = crate::rules::total_cost_reduction(
+                                state, player, def.is_creature(),
+                            );
+                            let reduced = crate::rules::apply_cost_reduction(fb_cost, reduction);
+                            if can_potentially_pay(state, player, &reduced) {
+                                let targets = enumerate_targets_for_spell(state, player, def);
+                                if targets.is_empty() {
+                                    actions.push(Action::CastFromGraveyard {
+                                        object_id: obj_id,
+                                        targets: vec![],
+                                    });
+                                } else {
+                                    for target in targets {
+                                        actions.push(Action::CastFromGraveyard {
+                                            object_id: obj_id,
+                                            targets: vec![target],
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Escape: cast from graveyard for regular mana cost + exile N cards
+                    if let Some(exile_count) = def.escape_exile_count {
+                        let can_cast_timing = if def.is_instant_speed() {
+                            true
+                        } else {
+                            is_main
+                        };
+                        // Need enough other cards in graveyard to exile
+                        let gy_count = state.players[player].graveyard.len() as u32;
+                        if can_cast_timing && gy_count > exile_count {
+                            if let Some(ref cost) = def.mana_cost {
+                                let reduction = crate::rules::total_cost_reduction(
+                                    state, player, def.is_creature(),
+                                );
+                                let reduced = crate::rules::apply_cost_reduction(cost, reduction);
+                                if can_potentially_pay(state, player, &reduced) {
+                                    actions.push(Action::CastFromGraveyard {
+                                        object_id: obj_id,
+                                        targets: vec![],
+                                    });
                                 }
                             }
                         }

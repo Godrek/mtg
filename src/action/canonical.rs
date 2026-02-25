@@ -146,6 +146,14 @@ pub enum CanonicalAction {
         target_instance_index: usize,
     },
 
+    /// Cast a spell from the graveyard (Flashback, Escape).
+    CastFromGraveyard {
+        card_id: CardId,
+        /// Disambiguation: which instance of this card in the graveyard.
+        graveyard_index: usize,
+        targets: Vec<CanonicalTarget>,
+    },
+
     /// Activate a pre-defined combo as a single macro-action.
     /// Combo ID is stable across game states (it's a registry index, not
     /// dependent on ObjectIds), so this is already canonical.
@@ -352,6 +360,21 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
                 equipment_instance_index: eq_idx,
                 target_card_id: tgt_card_id,
                 target_instance_index: tgt_idx,
+            }
+        }
+
+        Action::CastFromGraveyard { object_id, targets } => {
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let graveyard_index = graveyard_instance_index(state, inst.owner, *object_id);
+            let canonical_targets: Vec<CanonicalTarget> = targets
+                .iter()
+                .map(|t| canonicalize_target(t, state))
+                .collect();
+            CanonicalAction::CastFromGraveyard {
+                card_id,
+                graveyard_index,
+                targets: canonical_targets,
             }
         }
 
@@ -572,6 +595,22 @@ pub fn resolve(
             Some(Action::Equip { equipment_id, target_id })
         }
 
+        CanonicalAction::CastFromGraveyard {
+            card_id,
+            graveyard_index,
+            targets,
+        } => {
+            let obj_id = find_in_graveyard_by_index(state, player, *card_id, *graveyard_index)?;
+            let concrete_targets: Vec<Target> = targets
+                .iter()
+                .filter_map(|ct| resolve_target(ct, state))
+                .collect();
+            Some(Action::CastFromGraveyard {
+                object_id: obj_id,
+                targets: concrete_targets,
+            })
+        }
+
         CanonicalAction::ActivateMacro { combo_id } => {
             Some(Action::ActivateMacro { combo_id: *combo_id })
         }
@@ -673,6 +712,37 @@ fn find_on_battlefield_by_index(
 ) -> Option<ObjectId> {
     let mut matches: Vec<ObjectId> = state
         .battlefield
+        .iter()
+        .copied()
+        .filter(|&id| state.objects[&id].card_def_id == card_id)
+        .collect();
+    matches.sort();
+    matches.get(instance_index).copied()
+}
+
+/// Compute the instance index of `obj_id` among cards in the player's graveyard
+/// sharing the same `card_def_id`. Ordered by ObjectId for determinism.
+fn graveyard_instance_index(state: &GameState, player: PlayerIndex, obj_id: ObjectId) -> usize {
+    let card_id = state.objects[&obj_id].card_def_id;
+    let mut siblings: Vec<ObjectId> = state.players[player]
+        .graveyard
+        .iter()
+        .copied()
+        .filter(|&id| state.objects[&id].card_def_id == card_id)
+        .collect();
+    siblings.sort();
+    siblings.iter().position(|&id| id == obj_id).unwrap_or(0)
+}
+
+/// Find the N-th instance of `card_id` in a player's graveyard.
+fn find_in_graveyard_by_index(
+    state: &GameState,
+    player: PlayerIndex,
+    card_id: CardId,
+    instance_index: usize,
+) -> Option<ObjectId> {
+    let mut matches: Vec<ObjectId> = state.players[player]
+        .graveyard
         .iter()
         .copied()
         .filter(|&id| state.objects[&id].card_def_id == card_id)

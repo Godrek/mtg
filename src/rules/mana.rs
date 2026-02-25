@@ -2,7 +2,8 @@ use crate::card::{CardType, ManaAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex};
 
 /// Compute the total generic cost reduction for a spell being cast by `player`.
-/// Checks all permanents the player controls for `CostReduction` abilities.
+/// Checks all permanents the player controls for `CostReduction` abilities,
+/// plus keyword-based cost reductions (Affinity for Artifacts).
 pub fn total_cost_reduction(state: &GameState, player: PlayerIndex, is_creature: bool) -> u32 {
     use crate::card::CostReductionTarget;
     let db = state.card_db();
@@ -27,6 +28,66 @@ pub fn total_cost_reduction(state: &GameState, player: PlayerIndex, is_creature:
         }
     }
     total
+}
+
+/// Compute cost reduction for a specific spell, including spell-intrinsic keywords
+/// like Affinity for Artifacts, Convoke, and Delve.
+pub fn spell_cost_reduction(state: &GameState, player: PlayerIndex, card_def_id: crate::card::CardId) -> u32 {
+    use crate::card::KeywordAbility;
+    let db = state.card_db();
+    let def = match db.get(card_def_id) {
+        Some(d) => d,
+        None => return 0,
+    };
+
+    let mut extra = 0u32;
+
+    // Affinity for Artifacts: reduce by 1 for each artifact you control
+    if def.keywords.contains(&KeywordAbility::AffinityForArtifacts) {
+        let artifact_count = state
+            .battlefield
+            .iter()
+            .filter(|&&id| {
+                state
+                    .objects
+                    .get(&id)
+                    .map_or(false, |inst| {
+                        inst.controller == player
+                            && db
+                                .get(inst.card_def_id)
+                                .map_or(false, |d| d.is_artifact())
+                    })
+            })
+            .count() as u32;
+        extra += artifact_count;
+    }
+
+    // Convoke: simplified — reduce by number of untapped creatures you could tap
+    // (auto-convoke: tap as many as needed, up to generic cost)
+    if def.keywords.contains(&KeywordAbility::Convoke) {
+        let untapped_creatures = state
+            .battlefield
+            .iter()
+            .filter(|&&id| {
+                state.objects.get(&id).map_or(false, |inst| {
+                    inst.controller == player
+                        && !inst.tapped
+                        && !inst.summoning_sick
+                        && db.get(inst.card_def_id).map_or(false, |d| d.is_creature())
+                })
+            })
+            .count() as u32;
+        extra += untapped_creatures;
+    }
+
+    // Delve: simplified — reduce by number of cards in graveyard
+    // (auto-delve: exile as many as needed, up to generic cost)
+    if def.keywords.contains(&KeywordAbility::Delve) {
+        let graveyard_count = state.players[player].graveyard.len() as u32;
+        extra += graveyard_count;
+    }
+
+    extra
 }
 
 /// Apply cost reduction to a ManaCost, returning the reduced cost.
