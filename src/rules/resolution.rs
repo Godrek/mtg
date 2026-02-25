@@ -53,6 +53,15 @@ fn resolve_spell(
             inst.controller = controller;
         }
 
+        // Planeswalker: enter with starting loyalty counters
+        if def.card_types.contains(&CardType::Planeswalker) {
+            if let Some(loyalty) = def.starting_loyalty {
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    inst.loyalty_counters = loyalty;
+                }
+            }
+        }
+
         // Aura attachment: when an aura spell resolves, attach it to its target
         if def.is_aura() {
             if let Some(Target::Object(target_id)) = targets.first() {
@@ -105,7 +114,10 @@ fn resolve_activated_ability(
         let db = state.card_db();
         let inst = &state.objects[&source_id];
         let def = db.get(inst.card_def_id).unwrap();
-        let effect = def.activated_abilities.get(ability_index).map(|a| a.effect.clone());
+        // Check activated abilities first, then loyalty abilities
+        let effect = def.activated_abilities.get(ability_index)
+            .map(|a| a.effect.clone())
+            .or_else(|| def.loyalty_abilities.get(ability_index).map(|a| a.effect.clone()));
         (effect, inst.controller)
     };
 

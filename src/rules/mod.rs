@@ -408,6 +408,48 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.consecutive_passes = 0;
         }
 
+        Action::ActivateLoyalty { object_id, ability_index } => {
+            let obj_id = *object_id;
+            let ab_idx = *ability_index;
+
+            // Read the loyalty ability info
+            let (loyalty_cost, _effect, controller) = {
+                let db = state.card_db();
+                let inst = &state.objects[&obj_id];
+                let def = db.get(inst.card_def_id).unwrap();
+                let la = &def.loyalty_abilities[ab_idx];
+                (la.cost, la.effect.clone(), inst.controller)
+            };
+
+            // Adjust loyalty counters
+            if loyalty_cost >= 0 {
+                // +N: add counters
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    inst.loyalty_counters += loyalty_cost as u32;
+                    inst.loyalty_activated_this_turn = true;
+                }
+            } else {
+                // -N: remove counters
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    inst.loyalty_counters = inst.loyalty_counters.saturating_sub((-loyalty_cost) as u32);
+                    inst.loyalty_activated_this_turn = true;
+                }
+            }
+
+            // Put the ability on the stack
+            let stack_id = state.new_stack_id();
+            state.stack.push(crate::game::StackEntry {
+                id: stack_id,
+                source: crate::game::StackSource::ActivatedAbility {
+                    source_id: obj_id,
+                    ability_index: ab_idx,
+                },
+                controller,
+                targets: Vec::new(),
+            });
+            state.consecutive_passes = 0;
+        }
+
         Action::ChooseReplacementOrder { ordering } => {
             let _ = ordering;
             state.consecutive_passes = 0;

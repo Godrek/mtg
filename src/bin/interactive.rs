@@ -519,6 +519,18 @@ fn format_action_rich(state: &GameState, action: &Action, db: &CardDatabase) -> 
                 .unwrap_or("?");
             format!("Tutor for: {}", name)
         }
+        Action::ActivateLoyalty { object_id, ability_index } => {
+            let name = card_name(state, *object_id, db);
+            let inst = &state.objects[object_id];
+            let desc = db.get(inst.card_def_id)
+                .and_then(|d| d.loyalty_abilities.get(*ability_index))
+                .map(|la| {
+                    let sign = if la.cost >= 0 { "+" } else { "" };
+                    format!("[{}{}]: {}", sign, la.cost, la.description)
+                })
+                .unwrap_or_else(|| format!("ability #{}", ability_index));
+            format!("Loyalty: {} {}", name, desc)
+        }
         Action::Equip { equipment_id, target_id } => {
             let eq_name = card_name(state, *equipment_id, db);
             let tgt_name = card_name(state, *target_id, db);

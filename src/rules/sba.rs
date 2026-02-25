@@ -139,6 +139,38 @@ pub fn check_state_based_actions(state: &mut GameState) {
                 died_this_round.extend(pw_dupes);
             }
 
+            // CR 704.5i: Planeswalker with 0 or fewer loyalty counters is put
+            // into its owner's graveyard.
+            {
+                let db = state.card_db();
+                let pw_zero_loyalty: Vec<ObjectId> = state
+                    .battlefield
+                    .iter()
+                    .copied()
+                    .filter(|&id| {
+                        let inst = match state.objects.get(&id) {
+                            Some(i) => i,
+                            None => return false,
+                        };
+                        let def = match db.get(inst.card_def_id) {
+                            Some(d) => d,
+                            None => return false,
+                        };
+                        def.card_types.contains(&CardType::Planeswalker)
+                            && inst.loyalty_counters == 0
+                    })
+                    .collect();
+                for &id in &pw_zero_loyalty {
+                    state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
+                    any_action = true;
+                }
+                if !pw_zero_loyalty.is_empty() {
+                    state.refresh_continuous_effects();
+                    state.refresh_replacement_effects();
+                    died_this_round.extend(pw_zero_loyalty);
+                }
+            }
+
             // CR 704.5n: Aura not attached to a legal permanent goes to graveyard
             {
                 let db = state.card_db();

@@ -114,6 +114,12 @@ pub enum Action {
         target_id: ObjectId,
     },
 
+    /// Activate a loyalty ability on a planeswalker (sorcery speed, once per turn).
+    ActivateLoyalty {
+        object_id: ObjectId,
+        ability_index: usize,
+    },
+
     /// Activate a pre-defined combo as a single macro-action.
     /// The combo_id indexes into the ComboRegistry attached to GameState.
     /// This collapses an infinite loop (e.g., Basalt Monolith + Kinnan
@@ -161,6 +167,9 @@ impl fmt::Display for Action {
             }
             Action::Equip { equipment_id, target_id } => {
                 write!(f, "Equip (obj {} -> obj {})", equipment_id, target_id)
+            }
+            Action::ActivateLoyalty { object_id, ability_index } => {
+                write!(f, "Activate loyalty #{} (obj {})", ability_index, object_id)
             }
             Action::Concede => write!(f, "Concede"),
             Action::ActivateMacro { combo_id } => {
@@ -510,6 +519,28 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                                     actions.push(Action::Equip {
                                         equipment_id: obj_id,
                                         target_id: creature_id,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Loyalty abilities (sorcery speed, main phase, empty stack, once per turn)
+                if is_main && state.stack.is_empty() && !def.loyalty_abilities.is_empty() {
+                    if let Some(inst) = state.objects.get(&obj_id) {
+                        if !inst.loyalty_activated_this_turn {
+                            for (i, la) in def.loyalty_abilities.iter().enumerate() {
+                                // Can activate if: positive cost, or loyalty >= abs(negative cost)
+                                let can_pay = if la.cost >= 0 {
+                                    true // +N: always available, adds counters
+                                } else {
+                                    inst.loyalty_counters as i32 + la.cost >= 0
+                                };
+                                if can_pay {
+                                    actions.push(Action::ActivateLoyalty {
+                                        object_id: obj_id,
+                                        ability_index: i,
                                     });
                                 }
                             }

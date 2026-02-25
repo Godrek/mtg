@@ -3682,15 +3682,19 @@ fn test_planeswalker_uniqueness_sba() {
     let mut state = GameState::new(2);
     state.card_db = Some(Arc::new(db));
 
-    // Place two copies of the same planeswalker
+    // Place two copies of the same planeswalker (with loyalty counters set)
     let id1 = state.next_object_id;
     state.next_object_id += 1;
-    state.objects.insert(id1, CardInstance::new(id1, 9100, 0));
+    let mut inst1 = CardInstance::new(id1, 9100, 0);
+    inst1.loyalty_counters = 3;
+    state.objects.insert(id1, inst1);
     state.battlefield.push(id1);
 
     let id2 = state.next_object_id;
     state.next_object_id += 1;
-    state.objects.insert(id2, CardInstance::new(id2, 9100, 0));
+    let mut inst2 = CardInstance::new(id2, 9100, 0);
+    inst2.loyalty_counters = 3;
+    state.objects.insert(id2, inst2);
     state.battlefield.push(id2);
 
     assert_eq!(state.battlefield.len(), 2);

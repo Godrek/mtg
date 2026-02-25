@@ -82,6 +82,15 @@ pub enum SacrificeCost {
     CreatureWithSubtype(Subtype),
 }
 
+/// A loyalty ability on a planeswalker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoyaltyAbility {
+    /// Loyalty cost: positive = add counters, negative = remove counters, 0 = no change.
+    pub cost: i32,
+    pub effect: Effect,
+    pub description: String,
+}
+
 /// A triggered ability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriggeredAbility {
@@ -182,6 +191,10 @@ pub struct CardDef {
 
     // Loyalty (planeswalkers).
     pub starting_loyalty: Option<u32>,
+
+    /// Loyalty abilities for planeswalkers (e.g., +1, -2, -7).
+    #[serde(default)]
+    pub loyalty_abilities: Vec<LoyaltyAbility>,
 
     // Whether this permanent enters the battlefield tapped.
     pub enters_tapped: bool,
@@ -304,6 +317,7 @@ impl Default for CardDef {
             triggered_abilities: Vec::new(),
             static_abilities: Vec::new(),
             starting_loyalty: None,
+            loyalty_abilities: Vec::new(),
             enters_tapped: false,
             oracle_text: String::new(),
             dynamic_power: None,
@@ -344,6 +358,11 @@ pub struct CardInstance {
     pub temp_toughness_mod: i32,
     pub temp_keywords: Vec<KeywordAbility>,
 
+    // Planeswalker loyalty
+    pub loyalty_counters: u32,
+    /// Whether a loyalty ability has been activated this turn.
+    pub loyalty_activated_this_turn: bool,
+
     // Attached permanents (auras, equipment).
     pub attached_to: Option<ObjectId>,
     pub attachments: Vec<ObjectId>,
@@ -370,6 +389,8 @@ impl CardInstance {
             temp_power_mod: 0,
             temp_toughness_mod: 0,
             temp_keywords: Vec::new(),
+            loyalty_counters: 0,
+            loyalty_activated_this_turn: false,
             attached_to: None,
             attachments: Vec::new(),
             is_token: false,
@@ -411,6 +432,7 @@ impl CardInstance {
         self.temp_toughness_mod = 0;
         self.temp_keywords.clear();
         self.damage_marked = 0;
+        self.loyalty_activated_this_turn = false;
     }
 }
 

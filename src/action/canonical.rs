@@ -131,6 +131,13 @@ pub enum CanonicalAction {
 
     Concede,
 
+    /// Activate a loyalty ability on a planeswalker.
+    ActivateLoyalty {
+        source_card_id: CardId,
+        source_instance_index: usize,
+        ability_index: usize,
+    },
+
     /// Equip an equipment to a target creature.
     Equip {
         equipment_card_id: CardId,
@@ -320,6 +327,17 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::MulliganBottomCard { object_id } => {
             let inst = &state.objects[object_id];
             CanonicalAction::MulliganBottomCard { card_id: inst.card_def_id }
+        }
+
+        Action::ActivateLoyalty { object_id, ability_index } => {
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let instance_index = battlefield_instance_index(state, *object_id);
+            CanonicalAction::ActivateLoyalty {
+                source_card_id: card_id,
+                source_instance_index: instance_index,
+                ability_index: *ability_index,
+            }
         }
 
         Action::Equip { equipment_id, target_id } => {
@@ -528,6 +546,19 @@ pub fn resolve(
             // Match first instance — strategically equivalent for duplicates
             let obj_id = find_in_hand_by_index(state, player, *card_id, 0)?;
             Some(Action::MulliganBottomCard { object_id: obj_id })
+        }
+
+        CanonicalAction::ActivateLoyalty {
+            source_card_id,
+            source_instance_index,
+            ability_index,
+        } => {
+            let obj_id =
+                find_on_battlefield_by_index(state, *source_card_id, *source_instance_index)?;
+            Some(Action::ActivateLoyalty {
+                object_id: obj_id,
+                ability_index: *ability_index,
+            })
         }
 
         CanonicalAction::Equip {
