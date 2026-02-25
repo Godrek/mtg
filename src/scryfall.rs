@@ -269,6 +269,11 @@ impl ScryfallFetcher {
         Ok(scryfall_to_card_def(&raw, id))
     }
 
+    /// Fetch a raw ScryfallCard (for callers that need DFC back face support).
+    pub fn fetch_card(&mut self, name: &str) -> Result<ScryfallCard, ScryfallError> {
+        self.fetch_raw(name)
+    }
+
     /// Look up a card by name in the hand-authored sample database.
     /// Returns a clone of the CardDef if found, None otherwise.
     fn lookup_sample_db(&self, name: &str) -> Option<CardDef> {
@@ -348,14 +353,19 @@ impl ScryfallFetcher {
             let card_id = if let Some(&existing_id) = name_to_id.get(lookup_name) {
                 existing_id
             } else {
-                match self.fetch_card_def(lookup_name) {
-                    Ok(mut def) => {
-                        let id = def.id;
+                match self.fetch_card(lookup_name) {
+                    Ok(scryfall_card) => {
+                        let id = self.next_card_id;
+                        self.next_card_id += 2; // Reserve space for potential back face
+                        let (mut front, back) = scryfall_to_card_defs(&scryfall_card, id);
                         // Use the full deck list name for display
                         if card_name.contains(" // ") {
-                            def.name = card_name.to_string();
+                            front.name = card_name.to_string();
                         }
-                        db.insert(def);
+                        db.insert(front);
+                        if let Some(back_def) = back {
+                            db.insert(back_def);
+                        }
                         name_to_id.insert(lookup_name.to_string(), id);
                         id
                     }
@@ -508,11 +518,80 @@ pub fn scryfall_to_card_def(card: &ScryfallCard, id: CardId) -> CardDef {
         enters_tapped: oracle_text.contains("enters the battlefield tapped")
             || oracle_text.contains("enters tapped"),
         oracle_text: oracle_text.to_string(),
-        dynamic_power: None,
-        dynamic_toughness: None,
         cost_reduction,
         equip_cost,
+        ..CardDef::default()
     }
+}
+
+/// Convert a Scryfall card to front and (optional) back face CardDefs.
+/// For DFCs, `back_face_id` should be `front_face_id + 1`.
+/// Returns `(front_def, Option<back_def>)`.
+pub fn scryfall_to_card_defs(card: &ScryfallCard, front_id: CardId) -> (CardDef, Option<CardDef>) {
+    let mut front = scryfall_to_card_def(card, front_id);
+
+    // Check for double-faced card
+    let is_dfc = card.layout.as_deref().map_or(false, |l| {
+        matches!(l, "transform" | "modal_dfc" | "flip" | "meld")
+    });
+
+    if is_dfc {
+        if let Some(faces) = &card.card_faces {
+            if faces.len() >= 2 {
+                let back_face = &faces[1];
+                let back_id = front_id + 1;
+
+                // Link front to back
+                front.back_face_id = Some(back_id);
+
+                // Build a back face CardDef from back face data
+                let back_type_line = back_face.type_line.as_deref().unwrap_or("");
+                let back_oracle = back_face.oracle_text.as_deref().unwrap_or("");
+                let (back_supertypes, back_card_types, back_subtypes) =
+                    parse_type_line(back_type_line);
+                let back_keywords = parse_keywords(&back_face.keywords);
+                let back_power = back_face.power.as_deref().and_then(|s| s.parse::<i32>().ok());
+                let back_toughness =
+                    back_face.toughness.as_deref().and_then(|s| s.parse::<i32>().ok());
+                let back_loyalty = back_face
+                    .loyalty
+                    .as_deref()
+                    .and_then(|s| s.parse::<u32>().ok());
+
+                let mut back_def = CardDef {
+                    id: back_id,
+                    name: back_face.name.clone(),
+                    mana_cost: back_face
+                        .mana_cost
+                        .as_deref()
+                        .and_then(|s| ManaCost::parse(s)),
+                    card_types: back_card_types,
+                    supertypes: back_supertypes,
+                    subtypes: back_subtypes,
+                    keywords: back_keywords,
+                    power: back_power,
+                    toughness: back_toughness,
+                    mana_abilities: parse_land_mana_abilities(back_type_line, back_oracle),
+                    spell_effect: parse_spell_effect(back_oracle),
+                    activated_abilities: parse_activated_abilities(back_oracle),
+                    triggered_abilities: parse_triggered_abilities(back_oracle),
+                    static_abilities: parse_static_abilities(back_oracle),
+                    starting_loyalty: back_loyalty,
+                    oracle_text: back_oracle.to_string(),
+                    front_face_id: Some(front_id),
+                    ..CardDef::default()
+                };
+                back_def.enters_tapped = back_oracle.to_lowercase().contains("enters tapped")
+                    || back_oracle
+                        .to_lowercase()
+                        .contains("enters the battlefield tapped");
+
+                return (front, Some(back_def));
+            }
+        }
+    }
+
+    (front, None)
 }
 
 // ---------------------------------------------------------------------------

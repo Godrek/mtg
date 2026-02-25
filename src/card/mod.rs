@@ -268,6 +268,15 @@ pub struct CardDef {
     /// Annihilator N value (how many permanents the defending player sacrifices).
     #[serde(default)]
     pub annihilator_count: Option<u32>,
+
+    /// For double-faced cards: the CardId of the back face definition.
+    /// Both faces are stored as separate CardDef entries in the database.
+    #[serde(default)]
+    pub back_face_id: Option<CardId>,
+
+    /// For DFC back faces: the CardId of the front face.
+    #[serde(default)]
+    pub front_face_id: Option<CardId>,
 }
 
 impl CardDef {
@@ -381,6 +390,8 @@ impl Default for CardDef {
             evoke_cost: None,
             escape_exile_count: None,
             annihilator_count: None,
+            back_face_id: None,
+            front_face_id: None,
         }
     }
 }

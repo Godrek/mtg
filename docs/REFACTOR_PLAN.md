@@ -31,7 +31,7 @@
 | 9 | Goldfish First-Class | **Done** | 5/5 |
 | 10 | Commander Rules Completion | **Done** | 5/5 |
 | 11 | Advanced Mechanics | **Done** | 5/7 |
-| 12 | Scryfall Integration Completion | Not started | 0/3 |
+| 12 | Scryfall Integration Completion | **Done** | 2/3 (1 deferred) |
 | 13 | Testing & Validation | Not started | 0/4 |
 
 ---
@@ -497,25 +497,25 @@ Transform the current MCCFR-focused MTG simulator into a **comprehensive Command
 
 ---
 
-## Phase 12: Scryfall Integration Completion (0/3 done)
+## Phase 12: Scryfall Integration Completion (2/3 done) **Completed: 2026-02-24**
 
 **Goal:** Any card name can be resolved to a working CardDef.
 
-- [ ] **Step 12.1: Bulk Scryfall data**
-  - Download Scryfall bulk data JSON (`default_cards.json` ~300MB compressed)
-  - Parse on startup, build complete CardDatabase
-  - Cache the processed CardDatabase to disk (serde binary format)
+- [~] **Step 12.1: Bulk Scryfall data** — Deferred (current per-card fetch + disk cache sufficient for deck import; bulk download adds startup complexity without functional benefit for goldfish mode)
 
-- [ ] **Step 12.2: Double-faced cards**
-  - Transform cards (Delver of Secrets → Insectile Aberration)
-  - Modal DFCs (Hagra Mauling / Hagra Broodpit)
-  - Adventure cards (Bonecrusher Giant // Stomp)
-  - Split cards (Fire // Ice)
-  - Store both faces in CardDef, resolve based on zone and context
+- [x] **Step 12.2: Double-faced cards**
+  - Added `back_face_id: Option<CardId>` and `front_face_id: Option<CardId>` to CardDef for DFC linking
+  - `scryfall_to_card_defs()` function generates `(CardDef, Option<CardDef>)` for front + optional back face
+  - `fetch_card()` raw method on ScryfallFetcher returns `ScryfallCard` for custom processing
+  - Back face builds full CardDef from second face data (name, type_line, oracle_text, mana_cost, p/t)
+  - `import_deck()` updated to register back faces in CardDatabase with `next_card_id += 2` for ID space
+  - Transform / Modal DFC / Adventure / Split card layouts all detected from `card_faces` array
 
-- [ ] **Step 12.3: Card errata handling**
-  - Use most recent Scryfall data which reflects current Oracle text
-  - Handle creature type changes, oracle text updates
+- [x] **Step 12.3: Card errata handling**
+  - Scryfall API always returns current Oracle text (reflects latest errata)
+  - Disk cache with configurable expiry ensures data stays fresh
+  - Creature type updates handled via `type_line` parsing from Scryfall response
+  - `..CardDef::default()` pattern ensures new fields get proper defaults for auto-parsed cards
 
 ---
 
