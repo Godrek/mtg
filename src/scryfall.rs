@@ -252,10 +252,29 @@ impl ScryfallFetcher {
     }
 
     /// Fetch a card and convert it to our internal `CardDef`.
+    ///
+    /// Uses two-tier resolution:
+    /// - **Tier 1:** Check the hand-authored sample database for an exact name match.
+    ///   These are carefully tuned CardDefs for staple/complex cards.
+    /// - **Tier 2:** Fetch from Scryfall and auto-parse oracle text into a best-effort CardDef.
     pub fn fetch_card_def(&mut self, name: &str) -> Result<CardDef, ScryfallError> {
+        // Tier 1: Check hand-authored overrides
+        if let Some(def) = self.lookup_sample_db(name) {
+            return Ok(def);
+        }
+
+        // Tier 2: Auto-parse from Scryfall
         let raw = self.fetch_raw(name)?;
         let id = self.allocate_id();
         Ok(scryfall_to_card_def(&raw, id))
+    }
+
+    /// Look up a card by name in the hand-authored sample database.
+    /// Returns a clone of the CardDef if found, None otherwise.
+    fn lookup_sample_db(&self, name: &str) -> Option<CardDef> {
+        let sample_db = crate::card::sample::build_sample_db();
+        let id = sample_db.find_by_name(name)?;
+        sample_db.get(id).cloned()
     }
 
     /// Import an entire deck list from a string, fetching all cards from
@@ -455,8 +474,20 @@ pub fn scryfall_to_card_def(card: &ScryfallCard, id: CardId) -> CardDef {
         None
     };
 
-    // Parse ETB triggered abilities from oracle text
+    // Parse triggered abilities from oracle text (ETB, dies, attacks, upkeep, etc.)
     let triggered_abilities = parse_triggered_abilities(oracle_text);
+
+    // Parse activated abilities from oracle text
+    let activated_abilities = parse_activated_abilities(oracle_text);
+
+    // Parse static abilities from oracle text (anthems, keyword grants, cost reduction)
+    let static_abilities = parse_static_abilities(oracle_text);
+
+    // Parse cost reduction
+    let cost_reduction = parse_cost_reduction(oracle_text);
+
+    // Parse equip cost
+    let equip_cost = parse_equip_cost(oracle_text);
 
     CardDef {
         id,
@@ -470,16 +501,17 @@ pub fn scryfall_to_card_def(card: &ScryfallCard, id: CardId) -> CardDef {
         toughness,
         mana_abilities,
         spell_effect,
-        activated_abilities: Vec::new(),
+        activated_abilities,
         triggered_abilities,
-        static_abilities: Vec::new(),
+        static_abilities,
         starting_loyalty,
         enters_tapped: oracle_text.contains("enters the battlefield tapped")
             || oracle_text.contains("enters tapped"),
         oracle_text: oracle_text.to_string(),
         dynamic_power: None,
         dynamic_toughness: None,
-        cost_reduction: None,
+        cost_reduction,
+        equip_cost,
     }
 }
 
@@ -827,13 +859,219 @@ fn parse_spell_effect(oracle_text: &str) -> Option<Effect> {
 // Triggered ability parser
 // ---------------------------------------------------------------------------
 
-/// Parse simple triggered abilities from oracle text.
+/// Parse triggered abilities from oracle text.
+/// Handles ETB, dies, attacks, upkeep, combat, end of turn, and various
+/// "whenever" triggers.
 fn parse_triggered_abilities(oracle_text: &str) -> Vec<TriggeredAbility> {
     let text = oracle_text.to_lowercase();
     let mut abilities = Vec::new();
 
-    // "When ~ enters the battlefield, ..."
-    if text.contains("enters the battlefield") || text.contains("enters, ") {
+    // Process each sentence separately (split on newlines which Scryfall uses)
+    for line in oracle_text.lines() {
+        let lower = line.to_lowercase();
+
+        // "When ~ enters the battlefield, ..."
+        if (lower.contains("enters the battlefield") || lower.contains("enters, "))
+            && (lower.starts_with("when ") || lower.starts_with("whenever "))
+        {
+            if let Some(effect) = parse_etb_effect(&lower) {
+                abilities.push(TriggeredAbility {
+                    trigger: TriggerCondition::EntersBattlefield,
+                    effect,
+                    description: line.to_string(),
+                });
+            }
+        }
+
+        // "Whenever a creature enters the battlefield" (watcher)
+        if lower.contains("whenever a creature enters") || lower.contains("whenever another creature enters") {
+            let effect = parse_trigger_effect_after(&lower, "enters")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::ACreatureEnters,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "When ~ dies" / "Whenever ~ dies"
+        if lower.contains("dies") && (lower.starts_with("when ") || lower.starts_with("whenever ")) {
+            // "Whenever a creature dies" (watcher)
+            if lower.contains("whenever a creature dies") || lower.contains("whenever another creature dies") {
+                let effect = parse_trigger_effect_after(&lower, "dies")
+                    .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+                abilities.push(TriggeredAbility {
+                    trigger: TriggerCondition::ACreatureDies,
+                    effect,
+                    description: line.to_string(),
+                });
+            }
+            // "Whenever a creature you control dies"
+            else if lower.contains("creature you control dies") {
+                let effect = parse_trigger_effect_after(&lower, "dies")
+                    .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+                abilities.push(TriggeredAbility {
+                    trigger: TriggerCondition::ACreatureYouControlDies,
+                    effect,
+                    description: line.to_string(),
+                });
+            }
+            // Self dies trigger
+            else {
+                let effect = parse_trigger_effect_after(&lower, "dies")
+                    .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+                abilities.push(TriggeredAbility {
+                    trigger: TriggerCondition::Dies,
+                    effect,
+                    description: line.to_string(),
+                });
+            }
+            continue;
+        }
+
+        // "Whenever ~ attacks" / "Whenever ~ attacks alone"
+        if lower.contains("attacks") && (lower.starts_with("when") || lower.starts_with("whenever")) {
+            let trigger = if lower.contains("attacks alone") {
+                TriggerCondition::AttacksAlone
+            } else {
+                TriggerCondition::Attacks
+            };
+            let effect = parse_trigger_effect_after(&lower, "attacks")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "At the beginning of your upkeep"
+        if lower.contains("beginning of your upkeep") || lower.contains("beginning of each upkeep") {
+            let effect = parse_trigger_effect_after(&lower, "upkeep")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfUpkeep,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "At the beginning of combat on your turn"
+        if lower.contains("beginning of combat") {
+            let effect = parse_trigger_effect_after(&lower, "combat")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::BeginningOfCombat,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "At the beginning of each end step" / "at the beginning of your end step"
+        if lower.contains("end step") || lower.contains("end of turn") {
+            if lower.starts_with("at ") {
+                let effect = parse_trigger_effect_after(&lower, "step")
+                    .or_else(|| parse_trigger_effect_after(&lower, "turn"))
+                    .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+                abilities.push(TriggeredAbility {
+                    trigger: TriggerCondition::EndOfTurn,
+                    effect,
+                    description: line.to_string(),
+                });
+                continue;
+            }
+        }
+
+        // "Whenever ~ deals combat damage to a player"
+        if lower.contains("deals combat damage to a player") || lower.contains("deals combat damage to an opponent") {
+            let effect = parse_trigger_effect_after(&lower, "player")
+                .or_else(|| parse_trigger_effect_after(&lower, "opponent"))
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::DealsCombatDamageToPlayer,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "Whenever ~ deals combat damage"
+        if lower.contains("deals combat damage") && !lower.contains("to a player") && !lower.contains("to an opponent") {
+            let effect = parse_trigger_effect_after(&lower, "damage")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::DealsCombatDamage,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "Whenever ~ deals damage"
+        if lower.contains("deals damage") && !lower.contains("combat") {
+            let effect = parse_trigger_effect_after(&lower, "damage")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::DealsDamage,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "Whenever you cast a spell" / "Whenever you cast a creature spell"
+        if lower.contains("whenever you cast") {
+            let trigger = if lower.contains("creature spell") {
+                TriggerCondition::YouCastCreatureSpell
+            } else {
+                TriggerCondition::YouCastSpell
+            };
+            let effect = parse_trigger_effect_after(&lower, "spell")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "Whenever an opponent casts a spell" / "noncreature spell"
+        if lower.contains("whenever an opponent casts") {
+            let trigger = if lower.contains("noncreature") {
+                TriggerCondition::OpponentCastsNoncreatureSpell
+            } else {
+                TriggerCondition::OpponentCastsSpell
+            };
+            let effect = parse_trigger_effect_after(&lower, "spell")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+
+        // "Whenever an opponent draws a card"
+        if lower.contains("whenever an opponent draws") {
+            let effect = parse_trigger_effect_after(&lower, "card")
+                .unwrap_or_else(|| Effect::Unimplemented(line.to_string()));
+            abilities.push(TriggeredAbility {
+                trigger: TriggerCondition::OpponentDrawsCard,
+                effect,
+                description: line.to_string(),
+            });
+            continue;
+        }
+    }
+
+    // Legacy fallback: if no line-by-line triggers found, try the old single-pass
+    if abilities.is_empty() && (text.contains("enters the battlefield") || text.contains("enters, ")) {
         if let Some(effect) = parse_etb_effect(&text) {
             abilities.push(TriggeredAbility {
                 trigger: TriggerCondition::EntersBattlefield,
@@ -844,6 +1082,382 @@ fn parse_triggered_abilities(oracle_text: &str) -> Vec<TriggeredAbility> {
     }
 
     abilities
+}
+
+// ---------------------------------------------------------------------------
+// Activated ability parser
+// ---------------------------------------------------------------------------
+
+/// Parse activated abilities from oracle text.
+/// Looks for "{cost}: {effect}" patterns.
+fn parse_activated_abilities(oracle_text: &str) -> Vec<ActivatedAbility> {
+    let mut abilities = Vec::new();
+
+    for line in oracle_text.lines() {
+        let lower = line.to_lowercase();
+
+        // Skip lines that are keyword abilities, triggered abilities, or static text
+        if lower.starts_with("when") || lower.starts_with("at ") || lower.starts_with("as ")
+            || lower.starts_with("if ") || lower.starts_with("equipped")
+            || lower.starts_with("enchanted") || lower.starts_with("creatures")
+        {
+            continue;
+        }
+
+        // Look for "{cost}: {effect}" pattern
+        // Common patterns: "{T}: effect", "{N}, {T}: effect", "{T}, Sacrifice ~: effect"
+        if let Some(colon_idx) = lower.find(": ") {
+            let cost_part = &line[..colon_idx];
+            let effect_part = &line[colon_idx + 2..];
+
+            // Skip equip lines (handled separately)
+            if lower.starts_with("equip") {
+                continue;
+            }
+
+            // Check if cost part looks like an ability cost (has mana symbols or {T})
+            if !cost_part.contains('{') {
+                continue;
+            }
+
+            let requires_tap = cost_part.contains("{T}");
+            let sacrifice_cost = if lower.contains("sacrifice") {
+                if lower.contains("sacrifice a creature") {
+                    Some(SacrificeCost::AnyCreature)
+                } else {
+                    // Self-sacrifice or specific type — simplified
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Parse mana cost from cost part
+            let mana_cost = parse_ability_mana_cost(cost_part);
+
+            // Parse the effect
+            let effect_lower = effect_part.to_lowercase();
+            let effect = parse_inline_effect(&effect_lower, effect_part);
+
+            abilities.push(ActivatedAbility {
+                cost: mana_cost,
+                requires_tap,
+                sacrifice_cost,
+                effect,
+                description: line.to_string(),
+            });
+        }
+    }
+
+    abilities
+}
+
+/// Parse a mana cost from an activated ability cost string like "{2}, {T}" or "{B}{B}".
+fn parse_ability_mana_cost(cost_str: &str) -> ManaCost {
+    // Remove {T} and commas, then parse remaining mana symbols
+    let cleaned: String = cost_str
+        .replace("{T}", "")
+        .replace(", ", "")
+        .replace(",", "")
+        .replace("Sacrifice", "")
+        .replace("sacrifice", "")
+        .trim()
+        .to_string();
+
+    if cleaned.is_empty() || !cleaned.contains('{') {
+        return ManaCost::new(0, 0, 0, 0, 0, 0);
+    }
+
+    ManaCost::parse(&cleaned).unwrap_or_else(|| ManaCost::new(0, 0, 0, 0, 0, 0))
+}
+
+// ---------------------------------------------------------------------------
+// Static ability parser
+// ---------------------------------------------------------------------------
+
+/// Parse static abilities from oracle text (anthems, keyword grants).
+fn parse_static_abilities(oracle_text: &str) -> Vec<crate::layers::StaticAbility> {
+    use crate::layers::{AffectedObjects, StaticAbility};
+    let mut abilities = Vec::new();
+
+    for line in oracle_text.lines() {
+        let lower = line.to_lowercase();
+
+        // Skip triggered/activated ability lines
+        if lower.starts_with("when") || lower.starts_with("at ") || lower.contains(": ") {
+            continue;
+        }
+
+        // "Creatures you control get +N/+N" or "Other creatures you control get +N/+N"
+        if let Some((p, t)) = parse_buff(&lower) {
+            let affected = if lower.contains("other creatures you control") {
+                AffectedObjects::OtherCreaturesControlledBy(0) // placeholder controller
+            } else if lower.contains("creatures you control") {
+                AffectedObjects::CreaturesControlledBy(0)
+            } else if lower.contains("equipped creature") || lower.contains("enchanted creature") {
+                AffectedObjects::AttachedTo
+            } else {
+                continue; // Not a recognized anthem pattern
+            };
+
+            abilities.push(StaticAbility::Anthem {
+                power: p,
+                toughness: t,
+                affected,
+            });
+        }
+
+        // "Creatures you control have {keyword}" / "Other creatures you control have {keyword}"
+        if lower.contains("have ") || lower.contains("has ") {
+            let affected = if lower.contains("other creatures you control") {
+                Some(AffectedObjects::OtherCreaturesControlledBy(0))
+            } else if lower.contains("creatures you control") {
+                Some(AffectedObjects::CreaturesControlledBy(0))
+            } else if lower.contains("equipped creature") || lower.contains("enchanted creature") {
+                Some(AffectedObjects::AttachedTo)
+            } else {
+                None
+            };
+
+            if let Some(affected) = affected {
+                // Try to extract keyword
+                for (kw_str, kw) in keyword_string_map() {
+                    if lower.contains(kw_str) {
+                        abilities.push(StaticAbility::GrantKeyword { keyword: kw, affected: affected.clone() });
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    abilities
+}
+
+/// Map of keyword strings to KeywordAbility values for oracle text matching.
+fn keyword_string_map() -> Vec<(&'static str, KeywordAbility)> {
+    vec![
+        ("flying", KeywordAbility::Flying),
+        ("first strike", KeywordAbility::FirstStrike),
+        ("double strike", KeywordAbility::DoubleStrike),
+        ("deathtouch", KeywordAbility::Deathtouch),
+        ("haste", KeywordAbility::Haste),
+        ("hexproof", KeywordAbility::Hexproof),
+        ("indestructible", KeywordAbility::Indestructible),
+        ("lifelink", KeywordAbility::Lifelink),
+        ("menace", KeywordAbility::Menace),
+        ("reach", KeywordAbility::Reach),
+        ("trample", KeywordAbility::Trample),
+        ("vigilance", KeywordAbility::Vigilance),
+        ("defender", KeywordAbility::Defender),
+        ("fear", KeywordAbility::Fear),
+        ("intimidate", KeywordAbility::Intimidate),
+        ("shadow", KeywordAbility::Shadow),
+        ("skulk", KeywordAbility::Skulk),
+        ("wither", KeywordAbility::Wither),
+        ("infect", KeywordAbility::Infect),
+        ("undying", KeywordAbility::Undying),
+        ("persist", KeywordAbility::Persist),
+        ("prowess", KeywordAbility::Prowess),
+        ("flanking", KeywordAbility::Flanking),
+    ]
+}
+
+// ---------------------------------------------------------------------------
+// Cost reduction / equip cost parsers
+// ---------------------------------------------------------------------------
+
+/// Parse cost reduction from oracle text.
+fn parse_cost_reduction(oracle_text: &str) -> Option<CostReduction> {
+    let text = oracle_text.to_lowercase();
+
+    // "Spells you cast cost {N} less to cast"
+    // "Creature spells you cast cost {N} less to cast"
+    if text.contains("cost") && text.contains("less to cast") {
+        let amount = extract_generic_reduction(&text).unwrap_or(1);
+        let applies_to = if text.contains("creature spells") {
+            CostReductionTarget::CreatureSpells
+        } else {
+            CostReductionTarget::AllSpells
+        };
+        return Some(CostReduction {
+            generic_reduction: amount,
+            applies_to,
+        });
+    }
+
+    None
+}
+
+/// Extract generic reduction amount from text like "cost {1} less" or "cost {2} less".
+fn extract_generic_reduction(text: &str) -> Option<u32> {
+    // Look for {N} before "less"
+    if let Some(less_idx) = text.find("less") {
+        let before = &text[..less_idx];
+        // Find the last {N} pattern
+        for n in (1..=10).rev() {
+            let pattern = format!("{{{n}}}");
+            if before.contains(&pattern) {
+                return Some(n);
+            }
+        }
+        // "one less", "1 less"
+        if before.contains("one ") || before.contains("1 ") {
+            return Some(1);
+        }
+        if before.contains("two ") || before.contains("2 ") {
+            return Some(2);
+        }
+    }
+    None
+}
+
+/// Parse equip cost from oracle text.
+fn parse_equip_cost(oracle_text: &str) -> Option<ManaCost> {
+    let text = oracle_text.to_lowercase();
+
+    // "Equip {N}" pattern
+    if let Some(idx) = text.find("equip ") {
+        let after = &oracle_text[idx + 6..];
+        // Find the mana cost: could be "{1}", "{2}{B}", etc.
+        let cost_str: String = after.chars()
+            .take_while(|c| *c == '{' || *c == '}' || c.is_alphanumeric())
+            .collect();
+        if !cost_str.is_empty() && cost_str.contains('{') {
+            return ManaCost::parse(&cost_str);
+        }
+    }
+
+    None
+}
+
+/// Parse the effect portion after a trigger keyword.
+/// Looks for the part after the given word and attempts to parse it as an effect.
+fn parse_trigger_effect_after(text: &str, after_word: &str) -> Option<Effect> {
+    if let Some(idx) = text.find(after_word) {
+        let after = &text[idx + after_word.len()..];
+        let after = after.trim_start_matches(|c: char| c == ',' || c == ' ' || c == '.');
+        if after.is_empty() {
+            return None;
+        }
+        return Some(parse_inline_effect(after, after));
+    }
+    None
+}
+
+/// Parse an inline effect from text. Used for trigger effects and activated ability effects.
+fn parse_inline_effect(lower: &str, original: &str) -> Effect {
+    // Draw cards
+    if lower.contains("draw") && lower.contains("card") {
+        let count = extract_number_before(lower, "card").unwrap_or(1);
+        return Effect::DrawCards { count };
+    }
+
+    // Gain life
+    if lower.contains("gain") && lower.contains("life") {
+        let amount = extract_number_before(lower, "life").unwrap_or(1);
+        return Effect::GainLife { amount };
+    }
+
+    // Lose life (opponent)
+    if lower.contains("lose") && lower.contains("life") {
+        let amount = extract_number_before(lower, "life").unwrap_or(1);
+        return Effect::LoseLife { amount, target: TargetSpec::Opponent };
+    }
+
+    // Deal damage
+    if let Some(amount) = parse_damage_amount(lower, "deal") {
+        let target = if lower.contains("any target") || lower.contains("target creature or player") {
+            TargetSpec::CreatureOrPlayer
+        } else if lower.contains("target creature") {
+            TargetSpec::AnyCreature
+        } else if lower.contains("each opponent") || lower.contains("target opponent") {
+            TargetSpec::Opponent
+        } else if lower.contains("target player") {
+            TargetSpec::AnyPlayer
+        } else {
+            TargetSpec::AnyPlayer
+        };
+        return Effect::DealDamage { amount, target };
+    }
+
+    // Destroy target creature
+    if lower.contains("destroy target creature") {
+        return Effect::DestroyTarget { target: TargetSpec::AnyCreature };
+    }
+
+    // Destroy target nonland permanent
+    if lower.contains("destroy target nonland permanent") {
+        return Effect::DestroyTarget { target: TargetSpec::AnyNonlandPermanent };
+    }
+
+    // Exile target creature
+    if lower.contains("exile target creature") {
+        return Effect::ExileTarget { target: TargetSpec::AnyCreature };
+    }
+
+    // Return to hand (bounce)
+    if lower.contains("return") && lower.contains("to") && lower.contains("hand") {
+        let target = if lower.contains("target creature") {
+            TargetSpec::AnyCreature
+        } else if lower.contains("target nonland") {
+            TargetSpec::AnyNonlandPermanent
+        } else {
+            TargetSpec::AnyPermanent
+        };
+        return Effect::BounceTo { zone: ZoneType::Hand, target };
+    }
+
+    // Create token
+    if lower.contains("create") && lower.contains("token") {
+        if lower.contains("treasure") {
+            let count = extract_number_before(lower, "treasure").unwrap_or(1);
+            return Effect::CreatePredefinedToken { token_type: effects::PredefinedToken::Treasure, count };
+        }
+        if lower.contains("food") {
+            let count = extract_number_before(lower, "food").unwrap_or(1);
+            return Effect::CreatePredefinedToken { token_type: effects::PredefinedToken::Food, count };
+        }
+        if lower.contains("clue") {
+            let count = extract_number_before(lower, "clue").unwrap_or(1);
+            return Effect::CreatePredefinedToken { token_type: effects::PredefinedToken::Clue, count };
+        }
+    }
+
+    // Add mana
+    if lower.contains("add ") && (lower.contains("{") || lower.contains("mana")) {
+        if let Some(amount) = count_mana_symbols(lower) {
+            return Effect::AddMana { color: None, amount };
+        }
+    }
+
+    // Buff/debuff target creature
+    if let Some((p, t)) = parse_buff(lower) {
+        if p >= 0 && t >= 0 {
+            return Effect::Buff { power: p, toughness: t, until_eot: lower.contains("until end of turn") };
+        } else {
+            return Effect::Debuff { power: p, toughness: t, until_eot: lower.contains("until end of turn") };
+        }
+    }
+
+    // Discard
+    if lower.contains("discard") && lower.contains("card") {
+        let count = extract_number_before(lower, "card").unwrap_or(1);
+        let target = if lower.contains("target player") || lower.contains("target opponent") {
+            TargetSpec::Opponent
+        } else {
+            TargetSpec::Controller
+        };
+        return Effect::DiscardCards { count, target };
+    }
+
+    // Counter target spell
+    if lower.contains("counter target spell") {
+        return Effect::Counter { target: TargetSpec::AnySpell };
+    }
+
+    // Unimplemented fallback
+    Effect::Unimplemented(original.to_string())
 }
 
 /// Parse the effect portion of an ETB trigger.

@@ -1438,3 +1438,126 @@ pub fn card_implementation_status(db: &CardDatabase) -> Vec<CardImplementationSt
         })
         .collect()
 }
+
+/// Card coverage level for a single card in a deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverageLevel {
+    /// Card is hand-authored in sample database with full effects.
+    FullyImplemented,
+    /// Card is in sample database but effects are stub/unimplemented.
+    Stubbed,
+    /// Card would be auto-parsed from Scryfall oracle text (not hand-authored).
+    AutoParsed,
+    /// Card is unknown (not in sample DB or Scryfall).
+    Unknown,
+}
+
+/// Coverage analysis for a single card.
+#[derive(Debug, Clone)]
+pub struct CardCoverageEntry {
+    pub name: String,
+    pub level: CoverageLevel,
+    pub has_unimplemented: bool,
+}
+
+/// Deck coverage summary.
+#[derive(Debug, Clone)]
+pub struct DeckCoverage {
+    pub cards: Vec<CardCoverageEntry>,
+    pub fully_implemented: usize,
+    pub stubbed: usize,
+    pub auto_parsed: usize,
+    pub unknown: usize,
+}
+
+impl DeckCoverage {
+    /// Coverage percentage (fully implemented + auto-parsed / total).
+    pub fn coverage_pct(&self) -> f64 {
+        let total = self.cards.len();
+        if total == 0 {
+            return 100.0;
+        }
+        let covered = self.fully_implemented + self.auto_parsed;
+        (covered as f64 / total as f64) * 100.0
+    }
+}
+
+/// Analyze card coverage for a list of card names.
+/// Checks each card against the sample database to determine implementation level.
+pub fn analyze_deck_coverage(card_names: &[&str], db: &CardDatabase) -> DeckCoverage {
+    let mut entries = Vec::new();
+    let mut fully = 0;
+    let mut stubbed = 0;
+    let mut auto_parsed = 0;
+    let mut unknown = 0;
+
+    for &name in card_names {
+        let card_id = db.find_by_name(name);
+        let (level, has_unimplemented) = if let Some(id) = card_id {
+            if let Some(def) = db.get(id) {
+                let has_effects = def.spell_effect.is_some()
+                    || !def.activated_abilities.is_empty()
+                    || !def.triggered_abilities.is_empty()
+                    || !def.static_abilities.is_empty()
+                    || !def.mana_abilities.is_empty()
+                    || def.is_land()
+                    || def.is_creature();
+
+                let has_unimpl = has_unimplemented_effects(def);
+
+                if has_effects && !has_unimpl {
+                    (CoverageLevel::FullyImplemented, false)
+                } else {
+                    (CoverageLevel::Stubbed, has_unimpl)
+                }
+            } else {
+                (CoverageLevel::Unknown, false)
+            }
+        } else {
+            (CoverageLevel::AutoParsed, false) // Would need Scryfall
+        };
+
+        match level {
+            CoverageLevel::FullyImplemented => fully += 1,
+            CoverageLevel::Stubbed => stubbed += 1,
+            CoverageLevel::AutoParsed => auto_parsed += 1,
+            CoverageLevel::Unknown => unknown += 1,
+        }
+
+        entries.push(CardCoverageEntry {
+            name: name.to_string(),
+            level,
+            has_unimplemented,
+        });
+    }
+
+    DeckCoverage {
+        cards: entries,
+        fully_implemented: fully,
+        stubbed: stubbed,
+        auto_parsed: auto_parsed,
+        unknown: unknown,
+    }
+}
+
+/// Check if a CardDef has any Unimplemented effects.
+fn has_unimplemented_effects(def: &super::CardDef) -> bool {
+    use super::Effect;
+
+    if let Some(ref eff) = def.spell_effect {
+        if matches!(eff, Effect::Unimplemented(_)) {
+            return true;
+        }
+    }
+    for ability in &def.activated_abilities {
+        if matches!(&ability.effect, Effect::Unimplemented(_)) {
+            return true;
+        }
+    }
+    for ability in &def.triggered_abilities {
+        if matches!(&ability.effect, Effect::Unimplemented(_)) {
+            return true;
+        }
+    }
+    false
+}
