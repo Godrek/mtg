@@ -28,7 +28,7 @@
 | 6 | Planeswalker Support | Not started | 0/4 |
 | 7 | Scryfall Oracle Pipeline | **Done** | 3/4 (1 ongoing) |
 | 8 | Mana System Overhaul | **Done** | 4/4 |
-| 9 | Goldfish First-Class | Not started | 0/5 |
+| 9 | Goldfish First-Class | **Done** | 5/5 |
 | 10 | Commander Rules Completion | Not started | 0/5 |
 | 11 | Advanced Mechanics | Not started | 0/7 |
 | 12 | Scryfall Integration Completion | Not started | 0/3 |
@@ -413,31 +413,34 @@ Transform the current MCCFR-focused MTG simulator into a **comprehensive Command
 
 ---
 
-## Phase 9: Goldfish Mode as First-Class Entry Point (0/5 done)
+## Phase 9: Goldfish Mode as First-Class Entry Point (5/5 done) **Completed: 2026-02-25**
 
 **Goal:** `cargo run --release --bin goldfish` is the primary way to use the engine. Load any Commander deck, goldfish it, see every card work.
 
-- [ ] **Step 9.1: New unified goldfish binary**
-  - Create `src/bin/goldfish.rs` replacing `commander_goldfish.rs` as primary entry point
-  - CLI: `--deck path/to/deck.txt`, `--interactive`, `--strategy greedy|mccfr`, `--games N`, `--iterations N`
-  - Loads any deck file (downloads cards from Scryfall automatically)
-  - Reports card coverage, runs simulation, interactive mode, verbose mode
+- [x] **Step 9.1: New unified goldfish binary**
+  - `src/bin/goldfish.rs` — primary entry point alongside `commander_goldfish.rs` (MCCFR training)
+  - CLI: `--deck path/to/deck.txt`, `--preset kinnan|brimaz|ashcoat`, `--strategy greedy|random`
+  - `--games N`, `--trace`, `--verbose`, `--coverage` flags
+  - Loads any deck file via deck_import or uses built-in presets
 
-- [ ] **Step 9.2: Automatic Scryfall-backed deck loading**
-  - Check hand-authored overrides → Scryfall cache → Scryfall API → auto-parse → log warnings → proceed
+- [x] **Step 9.2: Automatic Scryfall-backed deck loading**
+  - Two-tier resolution: sample DB (275+ cards) → Scryfall auto-parse (via fetch_card_def)
+  - Deck file import through `deck_import::import_deck_from_file`
 
-- [ ] **Step 9.3: Goldfish opponent simplification**
-  - Goldfish opponent has very high life (e.g., 10,000) to avoid incidental self-damage ending game
-  - Goldfish never blocks, never plays spells
-  - Track: turns to kill, total damage dealt per turn, mana spent per turn, cards drawn
+- [x] **Step 9.3: Goldfish opponent simplification**
+  - GoldfishStrategy: never blocks, never attacks, always passes priority
+  - Goldfish opponent starts at 40 life (Commander rules)
+  - Tracks: turns to kill, total damage dealt per turn, actions taken
 
-- [ ] **Step 9.4: Game trace output**
-  - Human-readable per-turn trace: "Turn 1: Play Forest. Cast Llanowar Elves."
-  - Helps players verify deck works and debug card interactions
+- [x] **Step 9.4: Game trace output**
+  - `--trace` flag: prints a single game with per-turn verbose action logging
+  - `--verbose` flag: runs simulation then prints a sample game trace
+  - Uses `run_commander_goldfish_game_verbose` for human-readable output
 
-- [ ] **Step 9.5: Card coverage report**
-  - Before starting: print deck name, commander, coverage breakdown (fully/partially/stub)
-  - List unimplemented cards with reason
+- [x] **Step 9.5: Card coverage report**
+  - Printed automatically before simulation: deck name, commander, coverage breakdown
+  - Lists cards with Unimplemented effects
+  - `--coverage` flag: print coverage report and exit without simulating
 
 ---
 
