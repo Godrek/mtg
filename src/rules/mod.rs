@@ -16,7 +16,7 @@ use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
 
 // Public API re-exports
-pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands, spell_cost_reduction};
+pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands, spell_cost_reduction, total_cost_increase};
 pub use sba::check_state_based_actions;
 pub use triggers::fire_triggers;
 pub use setup::{setup_game, setup_commander_game, setup_commander_game_with_partners, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck, validate_commander_deck_with_partner};
@@ -91,14 +91,16 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let def = db.get(inst.card_def_id).unwrap().clone();
             let is_creature = def.is_creature();
 
-            // Pay mana cost (with cost reduction from permanents + spell keywords)
+            // Pay mana cost (with cost reduction, spell keywords, and tax effects)
             let card_def_id = {
                 state.objects[&obj_id].card_def_id
             };
             if let Some(ref cost) = def.mana_cost {
                 let reduction = mana::total_cost_reduction(state, player, is_creature);
                 let spell_reduction = mana::spell_cost_reduction(state, player, card_def_id);
-                let reduced_cost = mana::apply_cost_reduction(cost, reduction + spell_reduction);
+                let tax = mana::total_cost_increase(state, player, is_creature);
+                let mut reduced_cost = mana::apply_cost_reduction(cost, reduction + spell_reduction);
+                reduced_cost.generic += tax;
                 // First, auto-tap lands to generate mana if pool is insufficient
                 mana::auto_tap_lands(state, player, &reduced_cost);
                 // Then pay from pool — if payment fails, abort the cast

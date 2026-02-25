@@ -30,6 +30,42 @@ pub fn total_cost_reduction(state: &GameState, player: PlayerIndex, is_creature:
     total
 }
 
+/// Compute the total generic cost increase (tax) for a spell being cast by `player`.
+/// Checks all permanents on the battlefield for `CostIncrease` abilities.
+pub fn total_cost_increase(state: &GameState, player: PlayerIndex, is_creature: bool) -> u32 {
+    use crate::card::CostIncreaseTarget;
+    let db = state.card_db();
+    let mut total = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = &state.objects[&obj_id];
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        if let Some(ref increase) = def.cost_increase {
+            // Check if this tax applies to the caster
+            let is_opponents_permanent = inst.controller != player;
+            let applies_to_caster = if increase.affects_controller {
+                inst.controller == player
+            } else {
+                is_opponents_permanent
+            };
+            if !applies_to_caster {
+                continue;
+            }
+            let spell_matches = match increase.applies_to {
+                CostIncreaseTarget::AllSpells => true,
+                CostIncreaseTarget::NoncreatureSpells => !is_creature,
+                CostIncreaseTarget::CreatureSpells => is_creature,
+            };
+            if spell_matches {
+                total += increase.generic_increase;
+            }
+        }
+    }
+    total
+}
+
 /// Compute cost reduction for a specific spell, including spell-intrinsic keywords
 /// like Affinity for Artifacts, Convoke, and Delve.
 pub fn spell_cost_reduction(state: &GameState, player: PlayerIndex, card_def_id: crate::card::CardId) -> u32 {

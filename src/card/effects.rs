@@ -351,6 +351,9 @@ pub enum Effect {
         count: u32,
     },
 
+    /// Proliferate — for each permanent/player with a counter, add one more of that type.
+    Proliferate,
+
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }

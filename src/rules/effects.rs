@@ -782,6 +782,32 @@ pub(super) fn resolve_effect(
             let _ = count;
         }
 
+        Effect::Proliferate => {
+            // Add one counter of each type already present on each permanent/player
+            // that the controller chooses. Simplified: proliferate all permanents
+            // with +1/+1 counters (add another) and all players with poison counters.
+            let bf = state.battlefield.clone();
+            for &obj_id in &bf {
+                if let Some(inst) = state.objects.get_mut(&obj_id) {
+                    if inst.plus_counters > 0 {
+                        inst.plus_counters += 1;
+                    }
+                    if inst.minus_counters > 0 {
+                        inst.minus_counters += 1;
+                    }
+                    if inst.loyalty_counters > 0 {
+                        inst.loyalty_counters += 1;
+                    }
+                }
+            }
+            for p in &mut state.players {
+                if p.poison_counters > 0 {
+                    p.poison_counters += 1;
+                }
+            }
+            state.invalidate_characteristics_cache();
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }

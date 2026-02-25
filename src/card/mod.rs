@@ -150,6 +150,28 @@ pub struct CostReduction {
     pub applies_to: CostReductionTarget,
 }
 
+/// What spells a cost increase applies to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CostIncreaseTarget {
+    /// All spells (e.g., Grand Arbiter Augustin IV for opponents).
+    AllSpells,
+    /// Only noncreature spells (e.g., Thalia, Guardian of Thraben).
+    NoncreatureSpells,
+    /// Only creature spells.
+    CreatureSpells,
+}
+
+/// Cost increase imposed by a permanent on opponents' spells (tax effect).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CostIncrease {
+    /// How much generic mana to add.
+    pub generic_increase: u32,
+    /// What spells the increase applies to.
+    pub applies_to: CostIncreaseTarget,
+    /// Whether this applies to the controller's spells (true) or opponents' (false).
+    pub affects_controller: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ZoneType {
     Library,
@@ -214,6 +236,10 @@ pub struct CardDef {
     /// Cost reduction this permanent provides while on the battlefield.
     #[serde(default)]
     pub cost_reduction: Option<CostReduction>,
+
+    /// Cost increase this permanent imposes while on the battlefield (tax effect).
+    #[serde(default)]
+    pub cost_increase: Option<CostIncrease>,
 
     /// Equipment: mana cost to equip to a creature you control (sorcery speed).
     #[serde(default)]
@@ -347,6 +373,7 @@ impl Default for CardDef {
             dynamic_power: None,
             dynamic_toughness: None,
             cost_reduction: None,
+            cost_increase: None,
             equip_cost: None,
             flashback_cost: None,
             kicker_cost: None,

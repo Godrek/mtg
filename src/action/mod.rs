@@ -416,7 +416,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                     };
 
                     if can_cast_timing {
-                        // Check if player can pay the mana cost (with cost reduction)
+                        // Check if player can pay the mana cost (with cost reduction & tax)
                         if let Some(ref cost) = def.mana_cost {
                             let reduction = crate::rules::total_cost_reduction(
                                 state, player, def.is_creature(),
@@ -424,8 +424,12 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             let spell_reduction = crate::rules::spell_cost_reduction(
                                 state, player, inst.card_def_id,
                             );
-                            let reduced = crate::rules::apply_cost_reduction(cost, reduction + spell_reduction);
-                            if can_potentially_pay(state, player, &reduced) {
+                            let tax = crate::rules::total_cost_increase(
+                                state, player, def.is_creature(),
+                            );
+                            let mut adjusted = crate::rules::apply_cost_reduction(cost, reduction + spell_reduction);
+                            adjusted.generic += tax;
+                            if can_potentially_pay(state, player, &adjusted) {
                                 let targets = enumerate_targets_for_spell(state, player, def);
                                 if targets.is_empty() {
                                     actions.push(Action::CastSpell {
