@@ -145,6 +145,82 @@ pub fn setup_commander_game(
     state.turn_number = 1;
 }
 
+/// Set up a Commander game with Partner commanders.
+///
+/// Each player can have one or two commanders. If a partner is provided, both
+/// start in the command zone and each has independent commander tax.
+/// The combined color identity of both commanders is used for deck validation.
+pub fn setup_commander_game_with_partners(
+    state: &mut GameState,
+    deck0: &[crate::card::CardId],
+    deck1: &[crate::card::CardId],
+    commander0: crate::card::CardId,
+    partner0: Option<crate::card::CardId>,
+    commander1: crate::card::CardId,
+    partner1: Option<crate::card::CardId>,
+) {
+    let mut rng = rand::thread_rng();
+
+    // Record commander designations
+    state.players[0].commander_card_id = Some(commander0);
+    state.players[1].commander_card_id = Some(commander1);
+    if let Some(p) = partner0 {
+        state.players[0].partner_commander_card_id = Some(p);
+    }
+    if let Some(p) = partner1 {
+        state.players[1].partner_commander_card_id = Some(p);
+    }
+
+    // Player 0: create all cards, put commanders in command zone, rest in library
+    let mut lib0 = Vec::new();
+    let mut found_commander0 = false;
+    let mut found_partner0 = false;
+    for &card_id in deck0 {
+        if card_id == commander0 && !found_commander0 {
+            let obj_id = state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            state.players[0].commander_object_id = Some(obj_id);
+            found_commander0 = true;
+        } else if partner0 == Some(card_id) && !found_partner0 {
+            let obj_id = state.create_card_in_zone(card_id, 0, ZoneType::Command);
+            state.players[0].partner_commander_object_id = Some(obj_id);
+            found_partner0 = true;
+        } else {
+            lib0.push(state.create_card_in_zone(card_id, 0, ZoneType::Library));
+        }
+    }
+    lib0.shuffle(&mut rng);
+    state.players[0].library = lib0;
+
+    // Player 1: same
+    let mut lib1 = Vec::new();
+    let mut found_commander1 = false;
+    let mut found_partner1 = false;
+    for &card_id in deck1 {
+        if card_id == commander1 && !found_commander1 {
+            let obj_id = state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            state.players[1].commander_object_id = Some(obj_id);
+            found_commander1 = true;
+        } else if partner1 == Some(card_id) && !found_partner1 {
+            let obj_id = state.create_card_in_zone(card_id, 1, ZoneType::Command);
+            state.players[1].partner_commander_object_id = Some(obj_id);
+            found_partner1 = true;
+        } else {
+            lib1.push(state.create_card_in_zone(card_id, 1, ZoneType::Library));
+        }
+    }
+    lib1.shuffle(&mut rng);
+    state.players[1].library = lib1;
+
+    // Draw opening hands (7 cards each)
+    super::draw_cards(state, 0, 7);
+    super::draw_cards(state, 1, 7);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::Mulligan;
+    state.turn_number = 1;
+}
+
 /// Configure tutor targets for a player.
 ///
 /// When tutor targets are set, `SearchLibrary` effects present the player with
@@ -261,15 +337,27 @@ fn resolve_mulligans_with_heuristic(state: &mut GameState) {
 }
 
 /// Validate a Commander deck:
-/// - Exactly 100 cards (including commander)
+/// - Exactly 100 cards (including commander(s))
 /// - Singleton (max 1 copy of each non-basic-land card)
 /// - Commander must be a legendary creature
+/// - Optional partner commander must also be legendary with Partner keyword
+/// - All cards must match the combined color identity
 ///
 /// Returns Ok(()) or an error message.
 pub fn validate_commander_deck(
     db: &crate::game::CardDatabase,
     deck: &[crate::card::CardId],
     commander: crate::card::CardId,
+) -> Result<(), String> {
+    validate_commander_deck_with_partner(db, deck, commander, None)
+}
+
+/// Validate a Commander deck with an optional partner commander.
+pub fn validate_commander_deck_with_partner(
+    db: &crate::game::CardDatabase,
+    deck: &[crate::card::CardId],
+    commander: crate::card::CardId,
+    partner: Option<crate::card::CardId>,
 ) -> Result<(), String> {
     if deck.len() != 100 {
         return Err(format!(
@@ -297,11 +385,52 @@ pub fn validate_commander_deck(
         return Err(format!("Commander card ID {} not found in database", commander));
     }
 
-    // Color identity check (CR 903.4)
-    let commander_identity: std::collections::HashSet<crate::mana::Color> = db
+    // Validate partner if provided
+    if let Some(partner_id) = partner {
+        if !deck.contains(&partner_id) {
+            return Err("Partner commander must be included in the deck".to_string());
+        }
+        if let Some(def) = db.get(partner_id) {
+            let is_legendary = def.supertypes.contains(&crate::card::Supertype::Legendary);
+            let is_creature = def.is_creature();
+            if !is_legendary || !is_creature {
+                return Err(format!(
+                    "Partner commander '{}' must be a legendary creature",
+                    def.name
+                ));
+            }
+            if !def.keywords.contains(&crate::card::KeywordAbility::Partner) {
+                return Err(format!(
+                    "Partner commander '{}' must have the Partner keyword",
+                    def.name
+                ));
+            }
+        } else {
+            return Err(format!("Partner commander card ID {} not found in database", partner_id));
+        }
+        // Primary commander must also have Partner when using a partner
+        if let Some(def) = db.get(commander) {
+            if !def.keywords.contains(&crate::card::KeywordAbility::Partner) {
+                return Err(format!(
+                    "Commander '{}' must have the Partner keyword to use with a partner",
+                    def.name
+                ));
+            }
+        }
+    }
+
+    // Color identity check (CR 903.4) — combined identity for partner pairs
+    let mut commander_identity: std::collections::HashSet<crate::mana::Color> = db
         .get(commander)
         .map(|d| d.color_identity().into_iter().collect())
         .unwrap_or_default();
+    if let Some(partner_id) = partner {
+        if let Some(def) = db.get(partner_id) {
+            for color in def.color_identity() {
+                commander_identity.insert(color);
+            }
+        }
+    }
     for &card_id in deck {
         if let Some(def) = db.get(card_id) {
             let card_identity = def.color_identity();

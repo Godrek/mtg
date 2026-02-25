@@ -198,6 +198,15 @@ pub struct PlayerState {
     /// How many times the commander has been cast from the command zone.
     /// Each additional cast costs {2} more (the "commander tax").
     pub commander_tax: u32,
+    /// Partner commander fields (CR 702.124): a second commander with Partner.
+    /// Combined color identity is used for deck validation.
+    #[serde(default)]
+    pub partner_commander_card_id: Option<CardId>,
+    #[serde(default)]
+    pub partner_commander_object_id: Option<ObjectId>,
+    /// Separate tax for the partner commander.
+    #[serde(default)]
+    pub partner_commander_tax: u32,
     /// Commander damage received from each opponent's commander, indexed by
     /// opponent PlayerIndex. In 1v1 this is a single-element vec.
     /// A player loses if any entry reaches 21.
@@ -238,6 +247,9 @@ impl PlayerState {
             commander_card_id: None,
             commander_object_id: None,
             commander_tax: 0,
+            partner_commander_card_id: None,
+            partner_commander_object_id: None,
+            partner_commander_tax: 0,
             commander_damage_received: Vec::new(),
             poison_counters: 0,
             mulligan_count: 0,
@@ -1392,9 +1404,12 @@ impl GameState {
         if self.format != GameFormat::Commander {
             return false;
         }
-        // Prefer object identity check
+        // Prefer object identity check (primary + partner)
         for player in &self.players {
             if player.commander_object_id == Some(obj_id) {
+                return true;
+            }
+            if player.partner_commander_object_id == Some(obj_id) {
                 return true;
             }
         }
@@ -1403,6 +1418,11 @@ impl GameState {
             let owner = inst.owner;
             if self.players[owner].commander_object_id.is_none() {
                 return self.players[owner].commander_card_id == Some(inst.card_def_id);
+            }
+            if self.players[owner].partner_commander_object_id.is_none() {
+                if self.players[owner].partner_commander_card_id == Some(inst.card_def_id) {
+                    return true;
+                }
             }
         }
         false

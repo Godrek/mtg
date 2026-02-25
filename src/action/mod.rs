@@ -433,7 +433,7 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 }
             }
 
-            // Commander: cast commander from command zone
+            // Commander: cast commander(s) from command zone
             if state.is_commander_format() && is_main {
                 let cmd_zone = &state.players[player].command_zone;
                 for &obj_id in cmd_zone {
@@ -442,13 +442,19 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                         Some(d) => d,
                         None => continue,
                     };
-                    // Only the player's own commander
-                    if state.players[player].commander_card_id != Some(inst.card_def_id) {
+                    // Must be this player's commander or partner commander
+                    let is_primary = state.players[player].commander_card_id == Some(inst.card_def_id);
+                    let is_partner = state.players[player].partner_commander_card_id == Some(inst.card_def_id);
+                    if !is_primary && !is_partner {
                         continue;
                     }
                     if let Some(ref cost) = def.mana_cost {
-                        // Commander tax: add {2} per previous cast (then cost reduction)
-                        let tax = state.players[player].commander_tax;
+                        // Commander tax: separate tracking for partner
+                        let tax = if is_partner {
+                            state.players[player].partner_commander_tax
+                        } else {
+                            state.players[player].commander_tax
+                        };
                         let mut taxed_cost = cost.clone();
                         taxed_cost.generic += tax * 2;
                         let reduction = crate::rules::total_cost_reduction(

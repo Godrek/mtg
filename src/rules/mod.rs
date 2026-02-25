@@ -19,7 +19,7 @@ use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
 pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands};
 pub use sba::check_state_based_actions;
 pub use triggers::fire_triggers;
-pub use setup::{setup_game, setup_commander_game, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck};
+pub use setup::{setup_game, setup_commander_game, setup_commander_game_with_partners, set_tutor_targets, reshuffle_opening_hand, validate_commander_deck, validate_commander_deck_with_partner};
 pub(crate) use tokens::create_token_from_combo;
 
 /// Apply an action to the game state, advancing it.
@@ -325,9 +325,16 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let def = db.get(inst.card_def_id).unwrap().clone();
             let is_creature = def.is_creature();
 
+            // Determine if this is the partner commander (separate tax tracking)
+            let is_partner = state.players[player].partner_commander_object_id == Some(obj_id);
+
             // Pay mana cost with commander tax (and cost reduction)
             if let Some(ref cost) = def.mana_cost {
-                let tax = state.players[player].commander_tax;
+                let tax = if is_partner {
+                    state.players[player].partner_commander_tax
+                } else {
+                    state.players[player].commander_tax
+                };
                 let reduction = mana::total_cost_reduction(state, player, is_creature);
                 let mut taxed_cost = cost.clone();
                 taxed_cost.generic += tax * 2;
@@ -338,8 +345,12 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 }
             }
 
-            // Increment commander tax for next cast
-            state.players[player].commander_tax += 1;
+            // Increment commander tax for next cast (separate tracking per partner)
+            if is_partner {
+                state.players[player].partner_commander_tax += 1;
+            } else {
+                state.players[player].commander_tax += 1;
+            }
 
             // Move to stack
             let stack_id = state.new_stack_id();

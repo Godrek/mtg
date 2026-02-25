@@ -63,4 +63,8 @@ pub enum KeywordAbility {
     Flanking,
     /// Ward: opponent must pay an additional cost to target this (simplified: counter unless pays {1}).
     Ward,
+
+    // --- Commander-specific ---
+    /// Partner: this creature can be paired with another Partner creature as co-commanders.
+    Partner,
 }
