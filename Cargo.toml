@@ -23,4 +23,9 @@ name = "tui"
 path = "src/bin/tui.rs"
 required-features = ["tui"]
 
+[[bin]]
+name = "tui_snapshot"
+path = "src/bin/tui_snapshot.rs"
+required-features = ["tui"]
+
 [dev-dependencies]

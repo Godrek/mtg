@@ -1,0 +1,114 @@
+name: TUI Screenshots
+
+on:
+  pull_request:
+    branches: [ "mainline" ]
+    paths:
+      - 'src/tui.rs'
+      - 'src/bin/tui.rs'
+      - 'src/bin/tui_snapshot.rs'
+      - 'src/card/**'
+      - 'src/game/**'
+      - 'src/action/**'
+      - 'Cargo.toml'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache cargo registry and build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-tui-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-tui-
+
+    - name: Build snapshot generator
+      run: cargo build --features tui --bin tui_snapshot
+
+    - name: Generate screenshots (kinnan)
+      run: cargo run --features tui --bin tui_snapshot -- --preset kinnan --output-dir tui_screenshots/kinnan
+
+    - name: Generate screenshots (red)
+      run: cargo run --features tui --bin tui_snapshot -- --preset red --output-dir tui_screenshots/red
+
+    - name: Upload screenshots as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: tui-screenshots
+        path: tui_screenshots/
+        retention-days: 30
+
+    - name: Build screenshot comment
+      id: screenshots
+      run: |
+        {
+          echo 'comment<<SCREENSHOTS_EOF'
+          echo '## TUI Screenshots'
+          echo ''
+          echo 'Auto-generated from `tui_snapshot` at this PR'"'"'s HEAD commit.'
+          echo 'Download the **tui-screenshots** artifact above to view the SVGs.'
+          echo ''
+          echo '### Scenarios captured'
+          echo ''
+          echo '**Kinnan (Commander)**'
+          echo '| # | Scenario |'
+          echo '|---|----------|'
+          for f in tui_screenshots/kinnan/*.svg; do
+            name=$(basename "$f" .svg)
+            desc=$(echo "$name" | sed 's/kinnan_[0-9]*_//' | tr '_' ' ')
+            echo "| ${name##*_} | ${desc} |"
+          done
+          echo ''
+          echo '**Red Aggro (Standard)**'
+          echo '| # | Scenario |'
+          echo '|---|----------|'
+          for f in tui_screenshots/red/*.svg; do
+            name=$(basename "$f" .svg)
+            desc=$(echo "$name" | sed 's/red_[0-9]*_//' | tr '_' ' ')
+            echo "| ${name##*_} | ${desc} |"
+          done
+          echo ''
+          echo '*Download the artifact to inspect full SVG renders with colors and layout.*'
+          echo 'SCREENSHOTS_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Comment on PR with screenshot summary
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const body = `${{ steps.screenshots.outputs.comment }}`;
+          // Find existing comment to update
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c =>
+            c.user.type === 'Bot' && c.body.includes('## TUI Screenshots')
+          );
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }

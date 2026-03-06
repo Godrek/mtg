@@ -18,5 +18,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: cargo build --verbose
+    - name: Build TUI
+      run: cargo build --features tui --bin tui --bin tui_snapshot --verbose
     - name: Run tests
       run: cargo test --verbose

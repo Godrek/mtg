@@ -15,3 +15,5 @@ pub mod strategy;
 pub mod simulation;
 pub mod info_set;
 pub mod solver;
+#[cfg(feature = "tui")]
+pub mod tui;
