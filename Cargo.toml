@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = []
 scryfall = ["ureq"]
+tui = ["ratatui", "crossterm"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -14,5 +15,12 @@ rand = "0.8"
 rayon = "1.8"
 bincode = "1"
 ureq = { version = "2", features = ["json"], optional = true }
+ratatui = { version = "0.28", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+[[bin]]
+name = "tui"
+path = "src/bin/tui.rs"
+required-features = ["tui"]
 
 [dev-dependencies]
