@@ -32,6 +32,17 @@ pub(super) fn resolve_effect(
                             .map(Target::Object)
                             .collect()
                     }
+                    crate::card::TargetSpec::Opponent => {
+                        // "Target opponent" — deal damage to the opponent
+                        let opp = state.opponent(controller);
+                        vec![Target::Player(opp)]
+                    }
+                    crate::card::TargetSpec::CreatureOrPlayer
+                    | crate::card::TargetSpec::AnyPlayer => {
+                        // Default to targeting opponent when no explicit target
+                        let opp = state.opponent(controller);
+                        vec![Target::Player(opp)]
+                    }
                     _ => vec![],
                 }
             } else {

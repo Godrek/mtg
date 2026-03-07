@@ -214,14 +214,16 @@ fn ucb1_select(children: &[MctsChild], parent_visits: u32, c: f64) -> usize {
 /// Returns a value in [0, 1] where:
 /// - Win on turn T: `(MAX_TURN + 1 - T) / MAX_TURN` — faster kills get
 ///   higher reward. Turn 1 kill = 1.0, turn 20 kill = 0.05.
-/// - No kill: partial credit for life reduction, scaled to `[0, 0.04]` so
-///   any actual kill (min 0.05) always outranks any non-kill. This gives
-///   MCTS gradient signal even when rollouts can't close the game.
+/// - No kill: partial credit for damage dealt plus combo proximity,
+///   scaled to `[0, 0.04]` so any actual kill (min 0.05) always outranks
+///   any non-kill. Combo proximity rewards assembling combo pieces even
+///   when the full combo hasn't fired.
 fn goldfish_reward(
     winner: Option<PlayerIndex>,
     turn: u32,
     opponent_life: i32,
     starting_life: i32,
+    combo_bonus: f64,
 ) -> f64 {
     match winner {
         Some(0) => {
@@ -229,11 +231,14 @@ fn goldfish_reward(
             (GOLDFISH_MAX_TURNS + 1 - t) as f64 / GOLDFISH_MAX_TURNS as f64
         }
         _ => {
-            // Reward shaping: partial credit for damage dealt.
-            // Scale to [0, 0.04] — strictly below worst win (T20 = 0.05).
+            // Reward shaping: partial credit for damage + combo proximity.
+            // Scale total to [0, 0.04] — strictly below worst win (T20 = 0.05).
             let damage = (starting_life - opponent_life).max(0) as f64;
-            let fraction = (damage / starting_life as f64).min(1.0);
-            fraction * 0.04
+            let damage_fraction = (damage / starting_life as f64).min(1.0);
+            // Combo bonus (0-1 range) adds up to half the non-kill budget.
+            let combo_fraction = combo_bonus.min(1.0);
+            let total = damage_fraction * 0.02 + combo_fraction * 0.02;
+            total.min(0.04)
         }
     }
 }
@@ -452,7 +457,12 @@ fn tree_walk(
         // Terminal check
         if state.game_over || state.turn_number > GOLDFISH_MAX_TURNS {
             let sl = format_starting_life(state.format);
-            return goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl);
+            let combo_bonus = if let Some(ref registry) = state.combo_registry {
+                crate::combo::combo_proximity_bonus(state, 0, registry)
+            } else {
+                0.0
+            };
+            return goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl, combo_bonus);
         }
 
         // Depth limit — switch to rollout
@@ -590,7 +600,12 @@ fn rollout(
     }
 
     let sl = format_starting_life(state.format);
-    goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl)
+    let combo_bonus = if let Some(ref registry) = state.combo_registry {
+        crate::combo::combo_proximity_bonus(state, 0, registry)
+    } else {
+        0.0
+    };
+    goldfish_reward(state.winner, state.turn_number, state.players[1].life, sl, combo_bonus)
 }
 
 /// Select the action with the highest visit count (most robust child selection).
@@ -1174,31 +1189,33 @@ mod tests {
     #[test]
     fn test_goldfish_reward() {
         // Win on turn 1 → highest reward (opponent life irrelevant for wins)
-        assert!((goldfish_reward(Some(0), 1, 0, 20) - 1.0).abs() < 1e-10);
+        assert!((goldfish_reward(Some(0), 1, 0, 20, 0.0) - 1.0).abs() < 1e-10);
         // Win on turn 20 → lowest positive reward
-        assert!((goldfish_reward(Some(0), 20, 0, 20) - 1.0 / 20.0).abs() < 1e-10);
+        assert!((goldfish_reward(Some(0), 20, 0, 20, 0.0) - 1.0 / 20.0).abs() < 1e-10);
         // Win on turn 5
-        assert!((goldfish_reward(Some(0), 5, 0, 20) - 16.0 / 20.0).abs() < 1e-10);
+        assert!((goldfish_reward(Some(0), 5, 0, 20, 0.0) - 16.0 / 20.0).abs() < 1e-10);
         // Loss with no damage → 0.0
-        assert!((goldfish_reward(Some(1), 5, 20, 20)).abs() < 1e-10);
+        assert!((goldfish_reward(Some(1), 5, 20, 20, 0.0)).abs() < 1e-10);
         // Draw with no damage → 0.0
-        assert!((goldfish_reward(None, 20, 20, 20)).abs() < 1e-10);
+        assert!((goldfish_reward(None, 20, 20, 20, 0.0)).abs() < 1e-10);
     }
 
     #[test]
     fn test_goldfish_reward_shaping() {
-        // No kill, no damage → 0.0
-        assert!((goldfish_reward(None, 20, 40, 40)).abs() < 1e-10);
-        // No kill, half damage (40 → 20) → 0.02
-        assert!((goldfish_reward(None, 20, 20, 40) - 0.02).abs() < 1e-10);
-        // No kill, most damage (40 → 1) → 39/40 * 0.04 = 0.039
-        assert!((goldfish_reward(None, 20, 1, 40) - 39.0 / 40.0 * 0.04).abs() < 1e-10);
+        // No kill, no damage, no combo → 0.0
+        assert!((goldfish_reward(None, 20, 40, 40, 0.0)).abs() < 1e-10);
+        // No kill, half damage, no combo (40 → 20) → 0.5 * 0.02 = 0.01
+        assert!((goldfish_reward(None, 20, 20, 40, 0.0) - 0.01).abs() < 1e-10);
+        // No kill, no damage, full combo proximity → 0.02
+        assert!((goldfish_reward(None, 20, 40, 40, 1.0) - 0.02).abs() < 1e-10);
+        // No kill, half damage + half combo → 0.01 + 0.01 = 0.02
+        assert!((goldfish_reward(None, 20, 20, 40, 0.5) - 0.02).abs() < 1e-10);
         // Shaping reward is always less than worst win (T20 = 0.05)
-        let worst_win = goldfish_reward(Some(0), 20, 0, 40);
-        let best_shaping = goldfish_reward(None, 20, 0, 40);
+        let worst_win = goldfish_reward(Some(0), 20, 0, 40, 0.0);
+        let best_shaping = goldfish_reward(None, 20, 0, 40, 1.0);
         assert!(best_shaping < worst_win);
-        // Standard format: no kill, half damage (20 → 10) → 0.02
-        assert!((goldfish_reward(None, 20, 10, 20) - 0.02).abs() < 1e-10);
+        // Standard format: no kill, half damage (20 → 10) → 0.5 * 0.02 = 0.01
+        assert!((goldfish_reward(None, 20, 10, 20, 0.0) - 0.01).abs() < 1e-10);
     }
 
     #[test]

@@ -346,6 +346,85 @@ fn test_lands_have_mana_abilities() {
     }
 }
 
+// ===========================================================================
+// Fetch lands
+// ===========================================================================
+
+#[test]
+fn test_flooded_strand_sacrifices_and_fetches() {
+    let mut state = base_state();
+    // Add fetchable lands to library
+    state.create_card_in_zone(ids::ISLAND, 0, ZoneType::Library);
+    state.create_card_in_zone(ids::BREEDING_POOL, 0, ZoneType::Library);
+
+    let fetch = add_land(&mut state, ids::FLOODED_STRAND, 0);
+    state.phase = Phase::PreCombatMain;
+
+    let life_before = state.players[0].life;
+    let actions = legal_actions(&state);
+    let activate = actions.iter().find(|a| {
+        matches!(a, Action::ActivateAbility { object_id, .. } if *object_id == fetch)
+    });
+
+    assert!(activate.is_some(), "Should be able to activate Flooded Strand");
+    rules::apply_action(&mut state, activate.unwrap());
+
+    // Fetch land should be sacrificed (moved off battlefield)
+    assert!(
+        !state.battlefield.contains(&fetch),
+        "Flooded Strand should be sacrificed after activation"
+    );
+    // Life should be paid
+    assert_eq!(
+        state.players[0].life,
+        life_before - 1,
+        "Activating fetch land should cost 1 life"
+    );
+    // Stack should have the search ability
+    assert!(
+        !state.stack.is_empty(),
+        "Search ability should be on the stack"
+    );
+
+    // Pass priority to resolve the search ability on the stack.
+    // Don't use resolve_stack() because PassPriority clears pending_tutor.
+    // We need to pass priority enough times to resolve the stack entry,
+    // then handle the tutor choice.
+    let mut safety = 0;
+    while !state.stack.is_empty() && safety < 10 {
+        rules::apply_action(&mut state, &Action::PassPriority);
+        safety += 1;
+        // If pending_tutor appeared, stop passing priority
+        if state.pending_tutor.is_some() {
+            break;
+        }
+    }
+
+    // After stack resolution, pending_tutor should be set
+    assert!(
+        state.pending_tutor.is_some(),
+        "Pending tutor should be set after resolving search ability"
+    );
+
+    // Choose a tutor target
+    let actions = legal_actions(&state);
+    let choose = actions.iter().find(|a| {
+        matches!(a, Action::ChooseTutorTarget { .. })
+    });
+    assert!(choose.is_some(), "Should have ChooseTutorTarget actions");
+    rules::apply_action(&mut state, choose.unwrap());
+
+    // The fetched land should now be on the battlefield
+    let bf_has_fetchable = state.battlefield.iter().any(|&id| {
+        let inst = &state.objects[&id];
+        inst.card_def_id == ids::ISLAND || inst.card_def_id == ids::BREEDING_POOL
+    });
+    assert!(
+        bf_has_fetchable,
+        "A fetchable land should be on the battlefield after resolving"
+    );
+}
+
 #[test]
 fn test_deck_has_correct_number_of_cards() {
     let red = sample::red_aggro_deck();

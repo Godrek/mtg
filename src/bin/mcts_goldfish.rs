@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 use rayon::prelude::*;
 
 use mtg_gto::card::sample;
+use mtg_gto::combo_discovery::{discover_and_register, DiscoveryConfig};
 use mtg_gto::game::{CardDatabase, GameState};
 use mtg_gto::rules;
 use mtg_gto::simulation::{
@@ -203,7 +204,7 @@ fn run_commander_checkpoint(
     checkpoint_dir: &str,
     checkpoint_every: u64,
 ) {
-    let (deck, commander, _tutor_targets) = match deck_name {
+    let (deck, commander, tutor_targets) = match deck_name {
         "brimaz" => {
             let (d, c) = sample::brimaz_commander_deck();
             (d, c, Vec::new())
@@ -217,6 +218,19 @@ fn run_commander_checkpoint(
 
     let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
     println!("Commander: {}\n", commander_name);
+
+    // Discover combos using commander + tutor targets (known combo pieces).
+    // Using the full deck finds hundreds of spurious combos.
+    let mut combo_cards = vec![commander];
+    combo_cards.extend_from_slice(&tutor_targets);
+    let (mut registry, discovered) = discover_and_register(db, &combo_cards, &DiscoveryConfig::default());
+    if !discovered.is_empty() {
+        println!("Discovered {} combo(s) for macro-actions", discovered.len());
+    }
+    // Register manual win combos (e.g., infinite mana + Walking Ballista)
+    mtg_gto::combo::register_ballista_win_combo(&mut registry);
+    println!("Total registered combos: {}", registry.combos.len());
+    let combo_reg = Arc::new(registry);
 
     // Try to resume from existing checkpoint
     let mut checkpoint = match MctsCampaignCheckpoint::load(checkpoint_dir) {
@@ -259,6 +273,8 @@ fn run_commander_checkpoint(
             let mut state = GameState::new_commander(2);
             state.card_db = Some(db_arc);
             rules::setup_commander_game(&mut state, &deck, &deck, commander, commander);
+            rules::set_tutor_targets(&mut state, 0, &tutor_targets);
+            state.combo_registry = Some(Arc::clone(&combo_reg));
             mcts::run_mcts_goldfish_game(&mut state, config, false, None)
         },
     );
@@ -421,7 +437,7 @@ fn run_commander_goldfish(
     num_games: u64,
     checkpoint_path: Option<&str>,
 ) {
-    let (deck, commander, _tutor_targets) = match deck_name {
+    let (deck, commander, tutor_targets) = match deck_name {
         "brimaz" => {
             let (d, c) = sample::brimaz_commander_deck();
             (d, c, Vec::new())
@@ -435,6 +451,16 @@ fn run_commander_goldfish(
 
     let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
     println!("Commander: {}\n", commander_name);
+
+    // Discover combos using commander + tutor targets (known combo pieces)
+    let mut combo_cards = vec![commander];
+    combo_cards.extend_from_slice(&tutor_targets);
+    let (mut registry, discovered) = discover_and_register(db, &combo_cards, &DiscoveryConfig::default());
+    if !discovered.is_empty() {
+        println!("Discovered {} combo(s) for macro-actions", discovered.len());
+    }
+    mtg_gto::combo::register_ballista_win_combo(&mut registry);
+    println!("Total registered combos: {}\n", registry.combos.len());
 
     // ── 1. Greedy baseline ─────────────────────────────────────────────
     println!("Running Greedy baseline ({} games)...", num_games);
@@ -450,7 +476,7 @@ fn run_commander_goldfish(
     let decisions = Arc::new(AtomicU64::new(0));
     let done = Arc::new(AtomicBool::new(false));
     let printer = spawn_progress_thread(progress.clone(), decisions.clone(), done.clone(), num_games, t0);
-    let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress, &decisions);
+    let mcts_results = simulate_mcts_commander_goldfish_with_progress(db, &deck, commander, config, num_games, &progress, &decisions, &tutor_targets);
     done.store(true, Ordering::Relaxed);
     let mcts_time = t0.elapsed();
     eprintln!(
@@ -483,7 +509,7 @@ fn run_commander_goldfish(
     print_fastest_sequence(&mcts_results, config);
 
     // ── 6. Sample game trace ───────────────────────────────────────────
-    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true);
+    let result = run_mcts_commander_goldfish_game(db, &deck, commander, config, true, &tutor_targets);
 
     println!("Sample Game Trace (MCTS)");
     println!("────────────────────────");

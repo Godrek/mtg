@@ -375,22 +375,31 @@ pub fn reshuffle_opening_hand(state: &mut GameState) {
 
 /// Resolve the Mulligan phase using a simple land-count heuristic.
 ///
-/// Uses the same logic as `GreedyStrategy`: keep hands with 2-5 lands,
-/// mulligan otherwise (up to 2 mulligans), bottom highest-CMC non-lands.
+/// Uses the same logic as `GreedyStrategy`: count effective mana sources
+/// (lands = 1.0, cheap mana rocks/dorks = 0.7), keep if 1.5-6.0 effective
+/// sources, mulligan otherwise (up to 2 mulligans), bottom targeted spells
+/// first then highest-CMC non-mana-producing cards.
 fn resolve_mulligans_with_heuristic(state: &mut GameState) {
     while state.phase == Phase::Mulligan {
         let player = state.priority_player;
         let ps = &state.players[player];
 
         if !ps.mulligan_decided {
-            // Keep/mulligan decision: count lands in hand
-            let land_count = ps.hand.iter().filter(|&&obj_id| {
-                state.objects.get(&obj_id).map_or(false, |inst| {
-                    state.card_db().get(inst.card_def_id).map_or(false, |d| d.is_land())
-                })
-            }).count();
+            // Count effective mana sources: lands + cheap mana producers
+            let mut mana_sources = 0.0f64;
+            for &obj_id in &ps.hand {
+                if let Some(inst) = state.objects.get(&obj_id) {
+                    if let Some(def) = state.card_db().get(inst.card_def_id) {
+                        if def.is_land() {
+                            mana_sources += 1.0;
+                        } else if !def.mana_abilities.is_empty() && def.cmc() <= 2 {
+                            mana_sources += 0.7;
+                        }
+                    }
+                }
+            }
 
-            let action = if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
+            let action = if (1.5..=6.0).contains(&mana_sources) || ps.mulligan_count >= 2 {
                 Action::MulliganKeep
             } else {
                 Action::MulliganMulligan
@@ -399,7 +408,8 @@ fn resolve_mulligans_with_heuristic(state: &mut GameState) {
             continue;
         }
 
-        // Bottom-card decision: bottom the highest-CMC non-land
+        // Bottom-card decision: bottom targeted spells first (dead in
+        // goldfish), then highest-CMC non-land, non-mana-producing cards.
         let target_hand_size = 7u32.saturating_sub(ps.mulligan_count) as usize;
         if ps.hand.len() > target_hand_size {
             let mut worst_obj = ps.hand[0];
@@ -409,8 +419,14 @@ fn resolve_mulligans_with_heuristic(state: &mut GameState) {
                     let def = state.card_db().get(inst.card_def_id);
                     let score = if def.map_or(false, |d| d.is_land()) {
                         0 // keep lands
+                    } else if def.map_or(false, |d| !d.mana_abilities.is_empty()) {
+                        1 // keep mana producers
+                    } else if def.map_or(false, |d| {
+                        crate::action::spell_requires_target(d)
+                    }) {
+                        100 // bottom targeted spells (dead in goldfish)
                     } else {
-                        def.map_or(5, |d| d.cmc() as i32)
+                        def.map_or(5, |d| d.cmc() as i32 + 2)
                     };
                     if score > worst_score {
                         worst_score = score;

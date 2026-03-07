@@ -11,7 +11,7 @@ mod triggers;
 use rand::Rng;
 
 use crate::action::Action;
-use crate::card::{CardType, KeywordAbility, ManaAbility, ObjectId, TriggerCondition, ZoneType};
+use crate::card::{CardType, KeywordAbility, ManaAbility, ObjectId, SacrificeCost, TriggerCondition, ZoneType};
 use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
 
@@ -163,6 +163,15 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                     ManaAbility::TapForAny => {
                         state.players[player].mana_pool.colorless += 1;
                     }
+                    ManaAbility::TapForLegendaryColors => {
+                        // Mox Amber: add one mana of any color among
+                        // legendary creatures/planeswalkers you control.
+                        let leg_colors = mana::legendary_colors(state, player);
+                        if let Some(&c) = leg_colors.first() {
+                            state.players[player].mana_pool.add_color(c, 1);
+                        }
+                        // If no legendary creature/planeswalker, produces nothing
+                    }
                     ManaAbility::TapForChoice(colors) => {
                         if let Some(&color) = colors.first() {
                             state.players[player].mana_pool.add_color(color, 1);
@@ -212,15 +221,36 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             };
 
             if let Some(ability) = ability {
+                // Pay mana cost
                 mana::auto_tap_lands(state, player, &ability.cost);
                 if !state.players[player].mana_pool.pay(&ability.cost) {
                     return;
                 }
 
+                // Pay life cost (e.g., fetch lands pay 1 life)
+                if ability.life_cost > 0 {
+                    state.players[player].life -= ability.life_cost as i32;
+                }
+
+                // Tap if required
                 if ability.requires_tap {
                     if let Some(inst) = state.objects.get_mut(&obj_id) {
                         inst.tapped = true;
                     }
+                }
+
+                // Pay sacrifice cost
+                match &ability.sacrifice_cost {
+                    Some(SacrificeCost::SelfSacrifice) => {
+                        // Sacrifice the source permanent itself (e.g., fetch lands)
+                        state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
+                    }
+                    Some(SacrificeCost::AnyCreature) | Some(SacrificeCost::CreatureWithSubtype(_)) => {
+                        // Sacrifice another creature — for now, this is handled
+                        // by the combo discovery engine. Full implementation would
+                        // require choosing a sacrifice target from legal_actions.
+                    }
+                    None => {}
                 }
 
                 let stack_id = state.new_stack_id();
@@ -630,7 +660,15 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             if let Some(combo) = combo {
                 crate::combo::apply_combo_effect(state, player, &combo);
                 state.consecutive_passes = 0;
+                // Immediately check if the combo ended the game (e.g., infinite
+                // damage killed the opponent). Without this, the game would keep
+                // offering actions until the next scheduled SBA check.
+                sba::check_state_based_actions(state);
             }
+        }
+
+        Action::EndTurn => {
+            fast_forward_end_of_turn(state);
         }
     }
 }
@@ -671,4 +709,161 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
         let obj_id = state.players[player].hand.remove(idx);
         state.players[player].graveyard.push(obj_id);
     }
+}
+
+/// Fast-forward the active player's turn from the current phase to completion.
+///
+/// Called when a player chooses `Action::EndTurn`. Advances through all
+/// remaining phases without calling `legal_actions()`, executing phase
+/// entries (triggers, combat damage, SBA) along the way. The stack is
+/// auto-resolved and cleanup discard is handled randomly.
+///
+/// This collapses O(remaining_phases) priority passes into a single action,
+/// cutting search depth when the optimal play is "do nothing more this turn."
+fn fast_forward_end_of_turn(state: &mut GameState) {
+    let turn_player = state.active_player;
+    let initial_turn = state.turn_number;
+    let mut safety = 0u32;
+    const MAX_SAFETY: u32 = 200;
+
+    while state.active_player == turn_player
+        && state.turn_number == initial_turn
+        && !state.game_over
+        && safety < MAX_SAFETY
+    {
+        safety += 1;
+
+        // Auto-order pending triggers (push in existing order)
+        if !state.pending_triggers.is_empty() {
+            let pending: Vec<_> = state.pending_triggers.drain(..).collect();
+            for trigger in pending {
+                triggers::push_trigger_to_stack(state, &trigger);
+            }
+        }
+
+        // Auto fail-to-find any pending tutor
+        if state.pending_tutor.is_some() {
+            state.pending_tutor = None;
+            continue;
+        }
+
+        // Resolve stack items
+        if !state.stack.is_empty() {
+            resolution::resolve_top_of_stack(state);
+            sba::check_state_based_actions(state);
+            continue;
+        }
+
+        // Handle phases with mandatory actions
+        match state.phase {
+            Phase::DeclareAttackers => {
+                // Skip combat — declare no attackers
+                state.combat.clear();
+                state.consecutive_passes = 0;
+                phases::advance_phase(state);
+            }
+            Phase::DeclareBlockers => {
+                state.consecutive_passes = 0;
+                phases::advance_phase(state);
+            }
+            Phase::Cleanup => {
+                let hand_size = state.players[turn_player].hand.len();
+                if hand_size > 7 {
+                    let to_discard = hand_size - 7;
+                    discard_random(state, turn_player, to_discard);
+                }
+                phases::finalize_cleanup(state);
+            }
+            _ => {
+                // Normal phase — pass priority to advance
+                state.consecutive_passes += 1;
+                phases::handle_priority_pass(state);
+            }
+        }
+    }
+}
+
+/// Fast-forward through the goldfish player's entire turn.
+///
+/// In goldfish mode, the opponent (player 1) never casts spells, attacks,
+/// or blocks. This function advances through all phases of their turn
+/// without calling `legal_actions()` — a significant performance win since
+/// `legal_actions()` is the most expensive function in the game loop.
+///
+/// Phase entries (untap, draw, upkeep/end-step triggers) are still executed
+/// so the pilot's cards that trigger during the opponent's turn work correctly.
+/// If triggers put items on the stack, they are auto-resolved (both players
+/// pass priority). If the goldfish needs to discard in cleanup, random cards
+/// are discarded.
+///
+/// Returns the number of internal actions taken (for action-count tracking).
+pub fn fast_forward_goldfish_turn(state: &mut GameState) -> u32 {
+    let goldfish_player = state.active_player;
+    let mut actions = 0u32;
+    let mut safety = 0u32;
+    const MAX_SAFETY: u32 = 200;
+
+    while state.active_player == goldfish_player && !state.game_over && safety < MAX_SAFETY {
+        safety += 1;
+
+        // Handle pending triggers that need ordering — auto-order them
+        if !state.pending_triggers.is_empty() {
+            // For each player's pending triggers, auto-push in existing order
+            let triggers: Vec<_> = state.pending_triggers.drain(..).collect();
+            for trigger in triggers {
+                triggers::push_trigger_to_stack(state, &trigger);
+            }
+        }
+
+        // Handle pending tutor — auto fail-to-find (goldfish doesn't search)
+        if state.pending_tutor.is_some() {
+            state.pending_tutor = None;
+            actions += 1;
+            continue;
+        }
+
+        // Resolve stack items (both players auto-pass)
+        if !state.stack.is_empty() {
+            resolution::resolve_top_of_stack(state);
+            sba::check_state_based_actions(state);
+            actions += 1;
+            continue;
+        }
+
+        // Handle phases that need mandatory actions
+        match state.phase {
+            Phase::DeclareAttackers if state.priority_player == goldfish_player => {
+                // Goldfish never attacks — declare empty attackers and advance
+                state.combat.clear();
+                state.consecutive_passes = 0;
+                phases::advance_phase(state);
+                actions += 1;
+            }
+            Phase::DeclareBlockers if state.priority_player != goldfish_player => {
+                // Goldfish as defender never blocks — this shouldn't happen in
+                // goldfish mode (pilot is attacking), but handle it gracefully
+                state.consecutive_passes = 0;
+                phases::advance_phase(state);
+                actions += 1;
+            }
+            Phase::Cleanup => {
+                // If goldfish needs to discard, do it randomly
+                let hand_size = state.players[goldfish_player].hand.len();
+                if hand_size > 7 {
+                    let to_discard = hand_size - 7;
+                    discard_random(state, goldfish_player, to_discard);
+                }
+                phases::finalize_cleanup(state);
+                actions += 1;
+            }
+            _ => {
+                // Normal phase — just pass priority to advance
+                state.consecutive_passes += 1;
+                phases::handle_priority_pass(state);
+                actions += 1;
+            }
+        }
+    }
+
+    actions
 }

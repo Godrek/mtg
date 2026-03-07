@@ -43,22 +43,34 @@ impl Strategy for GreedyStrategy {
         let actions = legal_actions(state);
         let db = state.card_db();
 
-        // Mulligan heuristic: keep if hand has 2-5 lands, otherwise mulligan
+        // Mulligan heuristic: count "effective mana sources" — lands count
+        // as 1.0, cheap mana rocks/dorks (CMC ≤ 2 with mana abilities) count
+        // as 0.7. Keep if effective sources ≥ 1.5, ensuring at least 1 real
+        // land + 1 mana producer (or 2 lands). This helps combo decks keep
+        // hands like "1 land + Sol Ring + Mox".
         if state.phase == crate::game::Phase::Mulligan {
             let player = state.priority_player;
             let ps = &state.players[player];
             if !ps.mulligan_decided {
-                let land_count = ps.hand.iter().filter(|&&obj_id| {
+                let mut mana_sources = 0.0f64;
+                for &obj_id in &ps.hand {
                     let inst = &state.objects[&obj_id];
-                    db.get(inst.card_def_id).map_or(false, |d| d.is_land())
-                }).count();
-                // Keep if 2-5 lands, or if already mulliganed twice
-                if (2..=5).contains(&land_count) || ps.mulligan_count >= 2 {
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        if def.is_land() {
+                            mana_sources += 1.0;
+                        } else if !def.mana_abilities.is_empty() && def.cmc() <= 2 {
+                            mana_sources += 0.7;
+                        }
+                    }
+                }
+                // Keep if 1.5-6.0 effective sources, or mulliganed twice
+                if (1.5..=6.0).contains(&mana_sources) || ps.mulligan_count >= 2 {
                     return Action::MulliganKeep;
                 }
                 return Action::MulliganMulligan;
             }
-            // Bottoming: put the highest-CMC non-land card on bottom
+            // Bottoming: bottom targeted spells first (dead in goldfish),
+            // then highest-CMC non-land, non-mana-producing cards.
             let mut worst_card = None;
             let mut worst_score = -1i32;
             for action in &actions {
@@ -66,11 +78,15 @@ impl Strategy for GreedyStrategy {
                     let inst = &state.objects[object_id];
                     let def = db.get(inst.card_def_id);
                     let score = if def.map_or(false, |d| d.is_land()) {
-                        // Lands get low score (keep them)
-                        0
+                        0 // keep lands
+                    } else if def.map_or(false, |d| !d.mana_abilities.is_empty()) {
+                        1 // keep mana producers
+                    } else if def.map_or(false, |d| {
+                        crate::action::spell_requires_target(d)
+                    }) {
+                        100 // bottom targeted spells first (dead in goldfish)
                     } else {
-                        // Non-lands scored by CMC (bottom expensive ones)
-                        def.map_or(5, |d| d.cmc() as i32)
+                        def.map_or(5, |d| d.cmc() as i32 + 2)
                     };
                     if score > worst_score {
                         worst_score = score;
@@ -90,10 +106,80 @@ impl Strategy for GreedyStrategy {
             }
         }
 
+        // Priority 0a: Activate combo macro-action.
+        // Always activate combos that deal damage (instant win).
+        // Only activate mana-only combos if we don't already have massive mana
+        // (prevents infinite loop: ActivateMacro → untap → ActivateMacro → ...).
+        {
+            let pool_total = state.players[_player].mana_pool.total();
+            for action in &actions {
+                if let Action::ActivateMacro { combo_id } = action {
+                    if let Some(ref registry) = state.combo_registry {
+                        if let Some(combo) = registry.get(*combo_id) {
+                            let deals_damage = combo.categories.contains(
+                                &crate::combo::ComboCategory::InfiniteDamage,
+                            );
+                            if deals_damage || pool_total < 1000 {
+                                return action.clone();
+                            }
+                        }
+                    } else if pool_total < 1000 {
+                        return action.clone();
+                    }
+                }
+            }
+        }
+
+        // Priority 0b: Resolve pending tutor — pick the first target offered.
+        // Tutor targets are ordered by strategic priority (e.g., Basalt Monolith
+        // first for Kinnan combo), so the first is the best default choice.
+        for action in &actions {
+            if let Action::ChooseTutorTarget { .. } = action {
+                return action.clone();
+            }
+        }
+
         // Priority 1: Play a land if we can
         for action in &actions {
             if let Action::PlayLand { .. } = action {
                 return action.clone();
+            }
+        }
+
+        // Priority 1.5: When we have infinite mana, cast win-condition
+        // artifacts (Walking Ballista) first to enable 3-piece combo kill.
+        if state.players[_player].mana_pool.total() >= 1000 {
+            for action in &actions {
+                let obj_id = match action {
+                    Action::CastSpell { object_id, .. } => Some(object_id),
+                    _ => None,
+                };
+                if let Some(object_id) = obj_id {
+                    let inst = &state.objects[object_id];
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        // Cast any artifact with a damage-dealing ability
+                        let is_artifact = def.card_types.iter().any(|t| {
+                            matches!(t, crate::card::CardType::Artifact)
+                        });
+                        if is_artifact {
+                            let has_damage = def.activated_abilities.iter().any(|a| {
+                                fn effect_deals_damage(e: &crate::card::Effect) -> bool {
+                                    match e {
+                                        crate::card::Effect::DealDamage { .. } => true,
+                                        crate::card::Effect::Multiple(subs) => {
+                                            subs.iter().any(effect_deals_damage)
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                                effect_deals_damage(&a.effect)
+                            });
+                            if has_damage {
+                                return action.clone();
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -120,6 +206,58 @@ impl Strategy for GreedyStrategy {
         }
         if let Some(spell) = best_spell {
             return spell.clone();
+        }
+
+        // Priority 2.5: Activate non-mana abilities we can afford.
+        // legal_actions() only offers these when the cost is payable.
+        // Prefer the most expensive ability first (Kinnan's 7-mana search
+        // over Basalt's 3-mana untap) to use mana on win conditions before
+        // looping for more.
+        {
+            let mut best_ability: Option<&Action> = None;
+            let mut best_cost = 0u32;
+            for action in &actions {
+                if let Action::ActivateAbility { object_id, ability_index, .. } = action {
+                    let inst = &state.objects[object_id];
+                    if let Some(def) = db.get(inst.card_def_id) {
+                        if let Some(ability) = def.activated_abilities.get(*ability_index) {
+                            let cost = ability.cost.cmc();
+                            if cost >= best_cost || best_ability.is_none() {
+                                best_cost = cost;
+                                best_ability = Some(action);
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(ability) = best_ability {
+                return ability.clone();
+            }
+        }
+
+        // Priority 2.6: Tap mana sources when a mana doubler is on the
+        // field. This enables combo loops: tap Basalt Monolith for 4
+        // (with Kinnan), spend 3 to untap, net +1 per cycle. Without a
+        // doubler, tapping without a spell to cast is pointless.
+        {
+            let has_mana_doubler = state.battlefield.iter().any(|&bid| {
+                let binst = &state.objects[&bid];
+                if binst.controller != _player { return false; }
+                if let Some(bdef) = db.get(binst.card_def_id) {
+                    bdef.static_abilities.iter().any(|sa| {
+                        matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus)
+                    })
+                } else {
+                    false
+                }
+            });
+            if has_mana_doubler {
+                for action in &actions {
+                    if let Action::ActivateManaAbility { .. } = action {
+                        return action.clone();
+                    }
+                }
+            }
         }
 
         // Priority 3: Attack with all eligible creatures
@@ -176,6 +314,12 @@ impl Strategy for GreedyStrategy {
             if let Action::Discard { .. } = action {
                 return action.clone();
             }
+        }
+
+        // Prefer EndTurn over PassPriority to reduce search depth.
+        // EndTurn is only offered post-combat by legal_actions(), so this is safe.
+        if actions.contains(&Action::EndTurn) {
+            return Action::EndTurn;
         }
 
         // Default: pass priority

@@ -814,6 +814,11 @@ fn can_pay_sacrifice(state: &ExploreState, sac_cost: &SacrificeCost) -> bool {
             // engine's job, not the discovery engine's.
             state.creature_tokens >= 1
         }
+        SacrificeCost::SelfSacrifice => {
+            // Self-sacrifice is always payable if the permanent is on the battlefield
+            // (which it must be if we're considering activating it).
+            true
+        }
     }
 }
 
@@ -876,6 +881,13 @@ fn apply_combo_action(
                 ManaAbility::TapForColorlessAmount(n) => {
                     state.mana_pool.colorless += n;
                 }
+                ManaAbility::TapForLegendaryColors => {
+                    // In combo discovery, treat as colorless (board state unknown)
+                    match color_choice {
+                        Some(c) => state.mana_pool.add_color(*c, 1),
+                        None => state.mana_pool.colorless += 1,
+                    }
+                }
             }
 
             // ManaFromNonlandBonus (e.g., Kinnan)
@@ -906,10 +918,19 @@ fn apply_combo_action(
 
             // Pay sacrifice cost — this happens BEFORE the effect resolves.
             // Creature dying fires death triggers.
-            if ability.sacrifice_cost.is_some() {
-                state.creature_tokens = state.creature_tokens.saturating_sub(1);
-                // Fire death triggers on all pieces
-                fire_death_triggers(state, pieces, static_ctx);
+            match &ability.sacrifice_cost {
+                Some(SacrificeCost::AnyCreature | SacrificeCost::CreatureWithSubtype(_)) => {
+                    state.creature_tokens = state.creature_tokens.saturating_sub(1);
+                    // Fire death triggers on all pieces
+                    fire_death_triggers(state, pieces, static_ctx);
+                }
+                Some(SacrificeCost::SelfSacrifice) => {
+                    // Self-sacrifice: the permanent itself goes to graveyard.
+                    // In combo discovery this is modeled as the piece becoming
+                    // unavailable; death triggers fire if it's a creature.
+                    fire_death_triggers(state, pieces, static_ctx);
+                }
+                None => {}
             }
 
             // Apply the ability's effect. Any newly created tokens
@@ -1193,6 +1214,12 @@ fn describe_action(action: &ComboAction, pieces: &[&CardDef]) -> String {
                     }
                 }
                 ManaAbility::TapForColorlessAmount(n) => format!("{{{n}}}"),
+                ManaAbility::TapForLegendaryColors => {
+                    match color_choice {
+                        Some(c) => format!("{{{}}}", color_symbol(*c)),
+                        None => "{C}".to_string(),
+                    }
+                }
             };
             format!("Tap {} for {}", piece.name, mana_desc)
         }

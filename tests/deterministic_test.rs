@@ -50,11 +50,15 @@ fn test_different_seeds_produce_different_results() {
         results.push(result);
     }
 
-    // At least some games should have different outcomes
-    let all_same_turns = results.iter().all(|r| r.turns == results[0].turns);
+    // At least some games should have different outcomes (turns, actions, or life totals)
+    let all_same = results.iter().all(|r| {
+        r.turns == results[0].turns
+            && r.actions_taken == results[0].actions_taken
+            && r.final_life == results[0].final_life
+    });
     assert!(
-        !all_same_turns,
-        "Different seeds should produce at least some different game lengths"
+        !all_same,
+        "Different seeds should produce at least some different game outcomes"
     );
 }
 

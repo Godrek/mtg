@@ -6,7 +6,7 @@ use crate::action::legal_actions;
 use crate::card::CardId;
 use crate::game::{CardDatabase, GameState, PlayerIndex};
 use crate::rules;
-use crate::strategy::{GoldfishStrategy, Strategy};
+use crate::strategy::Strategy;
 
 /// Maximum turns before a game is declared a draw.
 const MAX_TURNS: u32 = 200;
@@ -464,13 +464,18 @@ fn run_goldfish_loop(
     strategy: &dyn Strategy,
     verbose: bool,
 ) -> GameResult {
-    let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
 
     while !state.game_over
         && state.turn_number <= GOLDFISH_MAX_TURNS
         && actions_taken < GOLDFISH_MAX_ACTIONS
     {
+        // Fast-forward the goldfish's entire turn without calling legal_actions
+        if state.active_player != 0 {
+            actions_taken += rules::fast_forward_goldfish_turn(state);
+            continue;
+        }
+
         let player = state.priority_player;
         let actions = legal_actions(state);
 
@@ -482,8 +487,7 @@ fn run_goldfish_loop(
             continue;
         }
 
-        let active_strategy: &dyn Strategy = if player == 0 { strategy } else { &goldfish };
-        let action = active_strategy.choose_action(state, player);
+        let action = strategy.choose_action(state, player);
 
         if verbose && actions_taken < 200 {
             log_action(state, &action, player);
@@ -642,11 +646,25 @@ pub fn run_mcts_commander_goldfish_game(
     commander: CardId,
     config: &MctsConfig,
     verbose: bool,
+    tutor_targets: &[CardId],
 ) -> mcts::MctsGameResult {
     let db = Arc::new(card_db.clone());
     let mut state = GameState::new_commander(2);
     state.card_db = Some(db);
     rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+    rules::set_tutor_targets(&mut state, 0, tutor_targets);
+    // Discover combos using only the commander + tutor targets (known combo
+    // pieces). Using the full 99-card deck finds hundreds of spurious combos
+    // and makes legal_actions() extremely slow.
+    let mut combo_cards = vec![commander];
+    combo_cards.extend_from_slice(tutor_targets);
+    let (mut registry, _) = crate::combo_discovery::discover_and_register(
+        card_db,
+        &combo_cards,
+        &crate::combo_discovery::DiscoveryConfig::default(),
+    );
+    crate::combo::register_ballista_win_combo(&mut registry);
+    state.combo_registry = Some(Arc::new(registry));
     mcts::run_mcts_goldfish_game(&mut state, config, verbose, None)
 }
 
@@ -696,12 +714,26 @@ pub fn simulate_mcts_commander_goldfish(
     commander: CardId,
     config: &MctsConfig,
     num_games: u64,
+    tutor_targets: &[CardId],
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
+    let targets = tutor_targets.to_vec();
+    // Discover combos using commander + tutor targets only
+    let mut combo_cards = vec![commander];
+    combo_cards.extend_from_slice(tutor_targets);
+    let (mut registry, _) = crate::combo_discovery::discover_and_register(
+        card_db,
+        &combo_cards,
+        &crate::combo_discovery::DiscoveryConfig::default(),
+    );
+    crate::combo::register_ballista_win_combo(&mut registry);
+    let combo_reg = Arc::new(registry);
     aggregate_mcts_goldfish_results(num_games, config, |_| {
         let mut state = GameState::new_commander(2);
         state.card_db = Some(Arc::clone(&db));
         rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &targets);
+        state.combo_registry = Some(Arc::clone(&combo_reg));
         state
     }, None, None)
 }
@@ -716,12 +748,26 @@ pub fn simulate_mcts_commander_goldfish_with_progress(
     num_games: u64,
     progress: &AtomicU64,
     decisions: &AtomicU64,
+    tutor_targets: &[CardId],
 ) -> MctsGoldfishResults {
     let db = Arc::new(card_db.clone());
+    let targets = tutor_targets.to_vec();
+    // Discover combos using commander + tutor targets only
+    let mut combo_cards = vec![commander];
+    combo_cards.extend_from_slice(tutor_targets);
+    let (mut registry, _) = crate::combo_discovery::discover_and_register(
+        card_db,
+        &combo_cards,
+        &crate::combo_discovery::DiscoveryConfig::default(),
+    );
+    crate::combo::register_ballista_win_combo(&mut registry);
+    let combo_reg = Arc::new(registry);
     aggregate_mcts_goldfish_results(num_games, config, |_| {
         let mut state = GameState::new_commander(2);
         state.card_db = Some(Arc::clone(&db));
         rules::setup_commander_game(&mut state, deck, deck, commander, commander);
+        rules::set_tutor_targets(&mut state, 0, &targets);
+        state.combo_registry = Some(Arc::clone(&combo_reg));
         state
     }, Some(progress), Some(decisions))
 }

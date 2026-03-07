@@ -59,6 +59,10 @@ pub enum ManaAbility {
     TapForChoice(Vec<Color>),
     /// Tap to add N colorless mana (e.g., Sol Ring → 2, Basalt Monolith → 3).
     TapForColorlessAmount(u32),
+    /// Tap to add one mana of any color among legendary creatures and
+    /// planeswalkers you control (Mox Amber). Produces nothing if you
+    /// control no legendary creature or planeswalker.
+    TapForLegendaryColors,
 }
 
 /// An activated ability (non-mana).
@@ -69,6 +73,9 @@ pub struct ActivatedAbility {
     /// Additional cost: sacrifice a permanent as part of activating this ability.
     #[serde(default)]
     pub sacrifice_cost: Option<SacrificeCost>,
+    /// Additional cost: pay life (e.g., fetch lands pay 1 life).
+    #[serde(default)]
+    pub life_cost: u32,
     pub effect: Effect,
     pub description: String,
 }
@@ -80,6 +87,8 @@ pub enum SacrificeCost {
     AnyCreature,
     /// Sacrifice a creature with a specific subtype (e.g., Marrow-Gnawer: "Sacrifice a Rat").
     CreatureWithSubtype(Subtype),
+    /// Sacrifice the source permanent itself (e.g., fetch lands).
+    SelfSacrifice,
 }
 
 /// A loyalty ability on a planeswalker.

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::card::{CardId, KeywordAbility, ObjectId};
+use crate::card::{CardId, Effect, KeywordAbility, ManaAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex, Target};
 
 /// Controls whether combat actions use full enumeration or strategic bucketing.
@@ -133,6 +133,13 @@ pub enum Action {
     /// for infinite mana) into a single action so the solver doesn't need
     /// to discover the loop step-by-step through depth.
     ActivateMacro { combo_id: usize },
+
+    /// End the turn immediately, fast-forwarding through all remaining phases.
+    /// Phase entries (triggers, SBA, combat damage) still execute, but
+    /// priority is never yielded — all decisions are auto-resolved.
+    /// This collapses O(phases) PassPriority actions into a single action,
+    /// dramatically reducing search depth when the optimal play is "do nothing."
+    EndTurn,
 }
 
 impl fmt::Display for Action {
@@ -185,6 +192,7 @@ impl fmt::Display for Action {
             Action::ActivateMacro { combo_id } => {
                 write!(f, "Activate combo #{}", combo_id)
             }
+            Action::EndTurn => write!(f, "End turn"),
         }
     }
 }
@@ -267,19 +275,20 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
         }
     }
 
-    // ---- Pending tutor: player must choose a card from their library ----
+    // ---- Pending tutor: controller must choose a card from their library ----
+    // The tutor choice is part of ability/spell resolution and is always made
+    // by the controller, regardless of who currently has priority.
     if let Some(ref pending) = state.pending_tutor {
-        if pending.controller == player {
-            let available = tutor_target_actions(state, player);
-            if available.is_empty() {
-                // No valid targets in library — "fail to find" (pass clears it)
-                actions.push(Action::PassPriority);
-            } else {
-                actions.extend(available);
-            }
-            actions.push(Action::Concede);
-            return actions;
+        let tutor_controller = pending.controller;
+        let available = tutor_target_actions(state, tutor_controller);
+        if available.is_empty() {
+            // No valid targets in library — "fail to find" (pass clears it)
+            actions.push(Action::PassPriority);
+        } else {
+            actions.extend(available);
         }
+        actions.push(Action::Concede);
+        return actions;
     }
 
     let forced_discard = state.phase == Phase::Cleanup
@@ -296,6 +305,34 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
 
     // Player can always pass priority
     actions.push(Action::PassPriority);
+
+    // EndTurn: collapses all remaining PassPriority actions for the turn
+    // into one, reducing search depth.  Offered when:
+    //  - post-combat phases (always safe), OR
+    //  - PreCombatMain when the active player has no eligible attackers,
+    //    since combat would be a no-op anyway.
+    if player == state.active_player
+        && state.stack.is_empty()
+        && state.pending_triggers.is_empty()
+    {
+        let dominated_combat = matches!(
+            state.phase,
+            Phase::PostCombatMain | Phase::EndStep | Phase::EndOfCombat
+        );
+        let no_attackers_precombat = state.phase == Phase::PreCombatMain && {
+            let creatures = state.creatures_controlled_by(player);
+            !creatures.iter().any(|&id| {
+                let inst = &state.objects[&id];
+                !inst.tapped
+                    && (!inst.summoning_sick
+                        || state.has_keyword(id, KeywordAbility::Haste))
+                    && !state.has_keyword(id, KeywordAbility::Defender)
+            })
+        };
+        if dominated_combat || no_attackers_precombat {
+            actions.push(Action::EndTurn);
+        }
+    }
 
     // Phase-specific action generation
     match state.phase {
@@ -432,10 +469,16 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                             if can_potentially_pay(state, player, &adjusted) {
                                 let targets = enumerate_targets_for_spell(state, player, def);
                                 if targets.is_empty() {
-                                    actions.push(Action::CastSpell {
-                                        object_id: obj_id,
-                                        targets: vec![],
-                                    });
+                                    // Only offer targetless cast if the spell doesn't
+                                    // require targets. Spells like counterspells that
+                                    // need a target on the stack shouldn't be castable
+                                    // when no valid target exists.
+                                    if !spell_requires_target(def) {
+                                        actions.push(Action::CastSpell {
+                                            object_id: obj_id,
+                                            targets: vec![],
+                                        });
+                                    }
                                 } else {
                                     for target in targets {
                                         actions.push(Action::CastSpell {
@@ -590,7 +633,28 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
 
                 // Mana abilities (tap abilities that don't use the stack)
                 if !inst.tapped && !def.mana_abilities.is_empty() {
-                    for (i, _ma) in def.mana_abilities.iter().enumerate() {
+                    for (i, ma) in def.mana_abilities.iter().enumerate() {
+                        // Skip conditional mana abilities that can't produce mana
+                        if matches!(ma, ManaAbility::TapForLegendaryColors) {
+                            // Mox Amber: only offer if we control a legendary
+                            // creature or planeswalker
+                            let has_legendary = state.battlefield.iter().any(|&bid| {
+                                if bid == obj_id { return false; } // skip self
+                                let binst = &state.objects[&bid];
+                                if binst.controller != player { return false; }
+                                let bdef = match db.get(binst.card_def_id) {
+                                    Some(d) => d,
+                                    None => return false,
+                                };
+                                let is_leg = bdef.supertypes.contains(&crate::card::Supertype::Legendary);
+                                let is_creature = bdef.card_types.contains(&crate::card::CardType::Creature);
+                                let is_pw = bdef.card_types.contains(&crate::card::CardType::Planeswalker);
+                                is_leg && (is_creature || is_pw)
+                            });
+                            if !has_legendary {
+                                continue;
+                            }
+                        }
                         actions.push(Action::ActivateManaAbility {
                             object_id: obj_id,
                             ability_index: i,
@@ -706,6 +770,26 @@ fn can_potentially_pay(
                 ManaAbility::TapForColorlessAmount(n) => {
                     pool.colorless += n;
                 }
+                ManaAbility::TapForLegendaryColors => {
+                    // Mox Amber: check what colors legendary creatures/PWs provide
+                    let leg_colors: Vec<Color> = state.battlefield.iter().filter_map(|&bid| {
+                        let binst = state.objects.get(&bid)?;
+                        if binst.controller != player { return None; }
+                        let bdef = db.get(binst.card_def_id)?;
+                        let is_leg = bdef.supertypes.contains(&crate::card::Supertype::Legendary);
+                        let is_creature = bdef.card_types.contains(&crate::card::CardType::Creature);
+                        let is_pw = bdef.card_types.contains(&crate::card::CardType::Planeswalker);
+                        if is_leg && (is_creature || is_pw) {
+                            bdef.mana_cost.as_ref().map(|c| c.colors())
+                        } else {
+                            None
+                        }
+                    }).flatten().collect();
+                    if !leg_colors.is_empty() {
+                        flexible_count += 1;
+                        flexible_colors.push(leg_colors);
+                    }
+                }
             }
         }
     }
@@ -730,6 +814,30 @@ fn can_potentially_pay(
     pool.colorless += remaining_flexible;
 
     pool.can_pay(cost)
+}
+
+/// Returns true if a spell's effect requires a target to be legal.
+/// Non-targeted spells (draw, destroy all, gain life, etc.) return false.
+pub fn spell_requires_target(def: &crate::card::CardDef) -> bool {
+    let effect = match &def.spell_effect {
+        Some(e) => e,
+        None => return false,
+    };
+    matches!(
+        effect,
+        Effect::DealDamage { .. }
+            | Effect::DestroyTarget { .. }
+            | Effect::ExileTarget { .. }
+            | Effect::BounceTo { .. }
+            | Effect::Counter { .. }
+            | Effect::LoseLife { .. }
+            | Effect::DiscardCards { .. }
+            | Effect::Buff { .. }
+            | Effect::Debuff { .. }
+            | Effect::PutCounters { .. }
+            | Effect::MillCards { .. }
+            | Effect::SacrificeCreatures { .. }
+    )
 }
 
 /// Enumerate valid targets for a spell.

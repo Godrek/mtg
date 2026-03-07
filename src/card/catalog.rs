@@ -169,6 +169,7 @@ pub mod ids {
     pub const AGATHAS_SOUL_CAULDRON: u64 = 580;
     pub const THE_ONE_RING: u64 = 581;
     pub const MIRAGE_MIRROR: u64 = 582;
+    pub const WALKING_BALLISTA: u64 = 583;
     pub const KINNAN_BONDER_PRODIGY: u64 = 600;
     pub const BIRDS_OF_PARADISE: u64 = 601;
     pub const FYNDHORN_ELVES: u64 = 602;

@@ -22,7 +22,6 @@ use mtg_gto::card::sample;
 use mtg_gto::card::ObjectId;
 use mtg_gto::game::{CardDatabase, GameState, PlayerIndex, Target};
 use mtg_gto::rules;
-use mtg_gto::strategy::{GoldfishStrategy, Strategy};
 
 /// Maximum turns before a goldfish game is declared a draw.
 const MAX_TURNS: u32 = 20;
@@ -81,7 +80,6 @@ fn main() {
     println!("Type 'q' to quit, 'u' to undo last action.");
     println!();
 
-    let goldfish = GoldfishStrategy;
     let mut actions_taken: u32 = 0;
     let mut action_log: Vec<String> = Vec::new();
     let mut undo_stack: Vec<GameState> = Vec::new();
@@ -90,6 +88,13 @@ fn main() {
     let mut reader = stdin.lock();
 
     while !state.game_over && state.turn_number <= MAX_TURNS && actions_taken < MAX_ACTIONS {
+        // Fast-forward the goldfish's entire turn without prompting
+        if state.active_player != 0 {
+            let ff_actions = rules::fast_forward_goldfish_turn(&mut state);
+            actions_taken += ff_actions;
+            continue;
+        }
+
         let player = state.priority_player;
         let actions = legal_actions(&state);
 
@@ -98,22 +103,6 @@ fn main() {
         {
             rules::apply_action(&mut state, &Action::PassPriority);
             actions_taken += 1;
-            continue;
-        }
-
-        // If it's the goldfish's turn, auto-play
-        if player != 0 {
-            let action = goldfish.choose_action(&state, player);
-            let desc = format_action_description(&state, &action, player);
-            rules::apply_action(&mut state, &action);
-            actions_taken += 1;
-            // Only log non-pass goldfish actions
-            if action != Action::PassPriority {
-                action_log.push(format!(
-                    "[T{} {:?} P{}] (goldfish) {}",
-                    state.turn_number, state.phase, player, desc
-                ));
-            }
             continue;
         }
 
@@ -544,6 +533,7 @@ fn format_action_rich(state: &GameState, action: &Action, db: &CardDatabase) -> 
         Action::ActivateMacro { combo_id } => {
             format!("Activate combo #{}", combo_id)
         }
+        Action::EndTurn => "End turn (skip remaining phases)".into(),
     }
 }
 

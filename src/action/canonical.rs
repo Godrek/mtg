@@ -158,6 +158,9 @@ pub enum CanonicalAction {
     /// Combo ID is stable across game states (it's a registry index, not
     /// dependent on ObjectIds), so this is already canonical.
     ActivateMacro { combo_id: usize },
+
+    /// End the turn, fast-forwarding through remaining phases.
+    EndTurn,
 }
 
 /// Convert a concrete `Action` (with ObjectIds) into a `CanonicalAction`
@@ -381,6 +384,8 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         Action::ActivateMacro { combo_id } => {
             CanonicalAction::ActivateMacro { combo_id: *combo_id }
         }
+
+        Action::EndTurn => CanonicalAction::EndTurn,
     }
 }
 
@@ -614,6 +619,8 @@ pub fn resolve(
         CanonicalAction::ActivateMacro { combo_id } => {
             Some(Action::ActivateMacro { combo_id: *combo_id })
         }
+
+        CanonicalAction::EndTurn => Some(Action::EndTurn),
     }
 }
 

@@ -1203,12 +1203,29 @@ fn parse_activated_abilities(oracle_text: &str) -> Vec<ActivatedAbility> {
             let sacrifice_cost = if lower.contains("sacrifice") {
                 if lower.contains("sacrifice a creature") {
                     Some(SacrificeCost::AnyCreature)
+                } else if cost_part.to_lowercase().contains("sacrifice") {
+                    // Cost part mentions sacrifice — likely self-sacrifice
+                    Some(SacrificeCost::SelfSacrifice)
                 } else {
-                    // Self-sacrifice or specific type — simplified
                     None
                 }
             } else {
                 None
+            };
+
+            // Parse life cost from cost part (e.g., "Pay 1 life")
+            let life_cost = {
+                let cost_lower = cost_part.to_lowercase();
+                if let Some(pos) = cost_lower.find("pay ") {
+                    let after = &cost_lower[pos + 4..];
+                    if let Some(end) = after.find(" life") {
+                        after[..end].trim().parse::<u32>().unwrap_or(0)
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
             };
 
             // Parse mana cost from cost part
@@ -1222,6 +1239,7 @@ fn parse_activated_abilities(oracle_text: &str) -> Vec<ActivatedAbility> {
                 cost: mana_cost,
                 requires_tap,
                 sacrifice_cost,
+                life_cost,
                 effect,
                 description: line.to_string(),
             });

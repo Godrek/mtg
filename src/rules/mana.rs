@@ -1,5 +1,36 @@
 use crate::card::{CardType, ManaAbility, ObjectId};
 use crate::game::{GameState, PlayerIndex};
+use crate::mana::Color;
+
+/// Return the set of colors among legendary creatures and planeswalkers
+/// controlled by `player`. Used for Mox Amber.
+pub fn legendary_colors(state: &GameState, player: PlayerIndex) -> Vec<Color> {
+    let db = state.card_db();
+    let mut colors = std::collections::HashSet::new();
+    for &obj_id in &state.battlefield {
+        let inst = &state.objects[&obj_id];
+        if inst.controller != player {
+            continue;
+        }
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        let is_legendary = def.supertypes.contains(&crate::card::Supertype::Legendary);
+        let is_creature = def.card_types.contains(&CardType::Creature);
+        let is_planeswalker = def.card_types.contains(&crate::card::CardType::Planeswalker);
+        if is_legendary && (is_creature || is_planeswalker) {
+            if let Some(ref cost) = def.mana_cost {
+                for c in cost.colors() {
+                    colors.insert(c);
+                }
+            }
+        }
+    }
+    let mut result: Vec<Color> = colors.into_iter().collect();
+    result.sort_by_key(|c| *c as u8);
+    result
+}
 
 /// Compute the total generic cost reduction for a spell being cast by `player`.
 /// Checks all permanents the player controls for `CostReduction` abilities,
@@ -158,6 +189,10 @@ fn constraint_score(abilities: &[ManaAbility]) -> u32 {
             ManaAbility::TapForAny => {
                 has_any = true;
             }
+            ManaAbility::TapForLegendaryColors => {
+                // Conditional — treat as flexible since it depends on board state
+                has_any = true;
+            }
             ManaAbility::TapForColorless | ManaAbility::TapForColorlessAmount(_) => {}
         }
     }
@@ -186,9 +221,10 @@ pub fn auto_tap_lands(
     player: PlayerIndex,
     cost: &crate::mana::ManaCost,
 ) {
-    use crate::mana::Color;
-
     let mut decisions: Vec<TapDecision> = Vec::new();
+
+    // Pre-compute legendary colors for Mox Amber (needs immutable borrow)
+    let leg_colors = legendary_colors(state, player);
 
     // Phase 1: Collect tap decisions (immutable borrow)
     {
@@ -263,6 +299,7 @@ pub fn auto_tap_lands(
                     ManaAbility::TapForColor(c) => *c == color,
                     ManaAbility::TapForChoice(colors) => colors.contains(&color),
                     ManaAbility::TapForAny => true,
+                    ManaAbility::TapForLegendaryColors => leg_colors.contains(&color),
                     _ => false,
                 });
                 if produces_color {
@@ -345,6 +382,14 @@ pub fn auto_tap_lands(
                                 decisions.push(TapDecision::Colorless(info.id, 1));
                             }
                             1
+                        }
+                        ManaAbility::TapForLegendaryColors => {
+                            if let Some(&c) = leg_colors.first() {
+                                decisions.push(TapDecision::Color(info.id, c));
+                                1
+                            } else {
+                                0 // No legendary creatures/planeswalkers — produces nothing
+                            }
                         }
                     };
                     tapped_set.insert(info.id);

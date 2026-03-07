@@ -444,6 +444,52 @@ fn apply_effect_recursive(
     }
 }
 
+/// Register the "Infinite Mana + Walking Ballista = Instant Win" combo.
+///
+/// This is a 3-piece combo: Basalt Monolith + Kinnan + Walking Ballista.
+/// When all three are on the battlefield with Monolith untapped, the player
+/// can generate infinite mana AND deal infinite damage via Ballista's ability.
+/// This collapses what would otherwise be hundreds of actions (generate mana,
+/// activate Ballista 40 times) into a single macro-action.
+pub fn register_ballista_win_combo(registry: &mut ComboRegistry) {
+    use crate::card::catalog::ids;
+
+    registry.register(ComboDef {
+        id: 0, // Assigned by registry
+        name: "Basalt Monolith + Kinnan + Walking Ballista Infinite Damage".into(),
+        categories: vec![ComboCategory::InfiniteMana, ComboCategory::InfiniteDamage],
+        required_pieces: vec![
+            ids::BASALT_MONOLITH,
+            ids::KINNAN_BONDER_PRODIGY,
+            ids::WALKING_BALLISTA,
+        ],
+        preconditions: vec![ComboPrecondition::PieceUntapped(ids::BASALT_MONOLITH)],
+        effect: ComboEffect::Multiple(vec![
+            ComboEffect::AddColorlessMana(INFINITE_AMOUNT),
+            ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT),
+        ]),
+        reward_weight: 0.4, // Higher weight — this is an instant win
+    });
+
+    // Also register Grim Monolith variant
+    registry.register(ComboDef {
+        id: 0,
+        name: "Grim Monolith + Kinnan + Walking Ballista Infinite Damage".into(),
+        categories: vec![ComboCategory::InfiniteMana, ComboCategory::InfiniteDamage],
+        required_pieces: vec![
+            ids::GRIM_MONOLITH,
+            ids::KINNAN_BONDER_PRODIGY,
+            ids::WALKING_BALLISTA,
+        ],
+        preconditions: vec![ComboPrecondition::PieceUntapped(ids::GRIM_MONOLITH)],
+        effect: ComboEffect::Multiple(vec![
+            ComboEffect::AddColorlessMana(INFINITE_AMOUNT),
+            ComboEffect::DealDamageToOpponent(INFINITE_AMOUNT),
+        ]),
+        reward_weight: 0.4,
+    });
+}
+
 // =========================================================================
 // Tests
 // =========================================================================
