@@ -1,6 +1,6 @@
-//! TUI Snapshot Generator — renders TUI frames to SVG for visual review.
+//! TUI Snapshot Generator — renders TUI frames to SVG and ANSI for visual review.
 //!
-//! Generates SVG screenshots of the TUI at key game states, suitable for
+//! Generates screenshots of the TUI at key game states, suitable for
 //! automated PR review. Runs headlessly using ratatui's TestBackend.
 //!
 //! Usage:
@@ -43,14 +43,21 @@ fn main() {
     manifest.push_str("# TUI Snapshots\n\n");
     manifest.push_str(&format!("Preset: `{}` | Terminal size: {}x{}\n\n", preset, cols, rows));
 
-    for (scenario, svg) in &snapshots {
-        let filename = format!("{}.svg", scenario.name);
-        let filepath = out_path.join(&filename);
-        fs::write(&filepath, svg).expect("Failed to write SVG");
-        println!("  Wrote: {} ({})", filepath.display(), scenario.description);
+    for (scenario, output) in &snapshots {
+        // Write SVG
+        let svg_name = format!("{}.svg", scenario.name);
+        let svg_path = out_path.join(&svg_name);
+        fs::write(&svg_path, &output.svg).expect("Failed to write SVG");
+
+        // Write ANSI
+        let ansi_name = format!("{}.ansi", scenario.name);
+        let ansi_path = out_path.join(&ansi_name);
+        fs::write(&ansi_path, &output.ansi).expect("Failed to write ANSI");
+
+        println!("  Wrote: {} + {} ({})", svg_path.display(), ansi_name, scenario.description);
 
         manifest.push_str(&format!("## {}\n\n", scenario.description));
-        manifest.push_str(&format!("![{}]({})\n\n", scenario.name, filename));
+        manifest.push_str(&format!("![{}]({})\n\n", scenario.name, svg_name));
     }
 
     // Write manifest
@@ -58,7 +65,8 @@ fn main() {
     fs::write(&manifest_path, &manifest).expect("Failed to write manifest");
     println!();
     println!("  Manifest: {}", manifest_path.display());
-    println!("Done. Generated {} snapshots.", snapshots.len());
+    println!("Done. Generated {} snapshots ({} SVG + {} ANSI).",
+        snapshots.len() * 2, snapshots.len(), snapshots.len());
 }
 
 fn get_arg(args: &[String], flag: &str) -> Option<String> {
