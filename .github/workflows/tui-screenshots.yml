@@ -18,6 +18,9 @@ env:
 jobs:
   screenshots:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
     - uses: actions/checkout@v4
 
@@ -32,14 +35,28 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-tui-
 
+    - name: Install librsvg for SVG-to-PNG conversion
+      run: sudo apt-get update && sudo apt-get install -y librsvg2-bin
+
     - name: Build snapshot generator
       run: cargo build --features tui --bin tui_snapshot
 
-    - name: Generate screenshots (kinnan)
+    - name: Generate SVG screenshots (kinnan)
       run: cargo run --features tui --bin tui_snapshot -- --preset kinnan --output-dir tui_screenshots/kinnan
 
-    - name: Generate screenshots (red)
+    - name: Generate SVG screenshots (red)
       run: cargo run --features tui --bin tui_snapshot -- --preset red --output-dir tui_screenshots/red
+
+    - name: Convert SVGs to PNGs
+      run: |
+        mkdir -p tui_screenshots/png
+        for svg in tui_screenshots/kinnan/*.svg tui_screenshots/red/*.svg; do
+          [ -f "$svg" ] || continue
+          name=$(basename "$svg" .svg)
+          rsvg-convert "$svg" -o "tui_screenshots/png/${name}.png"
+          echo "Converted: $name"
+        done
+        ls -lh tui_screenshots/png/
 
     - name: Upload screenshots as artifact
       uses: actions/upload-artifact@v4
@@ -48,47 +65,92 @@ jobs:
         path: tui_screenshots/
         retention-days: 30
 
-    - name: Build screenshot comment
-      id: screenshots
+    - name: Push PNGs to screenshots branch
+      id: push_screenshots
       run: |
-        {
-          echo 'comment<<SCREENSHOTS_EOF'
-          echo '## TUI Screenshots'
-          echo ''
-          echo 'Auto-generated from `tui_snapshot` at this PR'"'"'s HEAD commit.'
-          echo 'Download the **tui-screenshots** artifact above to view the SVGs.'
-          echo ''
-          echo '### Scenarios captured'
-          echo ''
-          echo '**Kinnan (Commander)**'
-          echo '| # | Scenario |'
-          echo '|---|----------|'
-          for f in tui_screenshots/kinnan/*.svg; do
-            name=$(basename "$f" .svg)
-            desc=$(echo "$name" | sed 's/kinnan_[0-9]*_//' | tr '_' ' ')
-            echo "| ${name##*_} | ${desc} |"
-          done
-          echo ''
-          echo '**Red Aggro (Standard)**'
-          echo '| # | Scenario |'
-          echo '|---|----------|'
-          for f in tui_screenshots/red/*.svg; do
-            name=$(basename "$f" .svg)
-            desc=$(echo "$name" | sed 's/red_[0-9]*_//' | tr '_' ' ')
-            echo "| ${name##*_} | ${desc} |"
-          done
-          echo ''
-          echo '*Download the artifact to inspect full SVG renders with colors and layout.*'
-          echo 'SCREENSHOTS_EOF'
-        } >> "$GITHUB_OUTPUT"
+        set -e
+        PR_NUM=${{ github.event.pull_request.number }}
+        BRANCH="tui-screenshots"
+        SHA=$(git rev-parse --short HEAD)
+        DIR="pr-${PR_NUM}"
 
-    - name: Comment on PR with screenshot summary
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Fetch or create the orphan screenshots branch
+        if git fetch origin "$BRANCH" 2>/dev/null; then
+          git checkout "$BRANCH"
+        else
+          git checkout --orphan "$BRANCH"
+          git rm -rf . 2>/dev/null || true
+          echo "# TUI Screenshots" > README.md
+          echo "Auto-generated screenshots from PR CI runs." >> README.md
+          git add README.md
+          git commit -m "Initialize screenshots branch"
+        fi
+
+        # Clean old screenshots for this PR and copy new ones
+        rm -rf "$DIR"
+        mkdir -p "$DIR"
+        cp tui_screenshots/png/*.png "$DIR/"
+
+        git add "$DIR"
+        git commit -m "Update TUI screenshots for PR #${PR_NUM} (${SHA})" || echo "No changes to commit"
+        git push origin "$BRANCH"
+
+        # Switch back to PR branch
+        git checkout -
+
+        # Output the base URL for referencing images
+        REPO=${{ github.repository }}
+        echo "base_url=https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}" >> "$GITHUB_OUTPUT"
+
+    - name: Comment on PR with embedded screenshots
       uses: actions/github-script@v7
       if: github.event_name == 'pull_request'
       with:
         script: |
-          const body = `${{ steps.screenshots.outputs.comment }}`;
-          // Find existing comment to update
+          const fs = require('fs');
+          const baseUrl = '${{ steps.push_screenshots.outputs.base_url }}';
+          const sha = '${{ github.event.pull_request.head.sha }}'.substring(0, 7);
+
+          // Discover PNGs
+          const pngDir = 'tui_screenshots/png';
+          const files = fs.readdirSync(pngDir).filter(f => f.endsWith('.png')).sort();
+
+          const kinnan = files.filter(f => f.startsWith('kinnan_'));
+          const red = files.filter(f => f.startsWith('red_'));
+
+          function scenarioName(filename) {
+            return filename
+              .replace(/\.png$/, '')
+              .replace(/^(kinnan|red)_\d+_/, '')
+              .replace(/_/g, ' ');
+          }
+
+          let body = '## TUI Screenshots\n\n';
+          body += `Auto-generated at commit \`${sha}\`. Click to expand each scenario.\n\n`;
+
+          body += '### Kinnan (Commander)\n\n';
+          for (const f of kinnan) {
+            const name = scenarioName(f);
+            body += `<details>\n<summary>${name}</summary>\n\n`;
+            body += `![${name}](${baseUrl}/${f})\n\n`;
+            body += `</details>\n\n`;
+          }
+
+          body += '### Red Aggro (Standard)\n\n';
+          for (const f of red) {
+            const name = scenarioName(f);
+            body += `<details>\n<summary>${name}</summary>\n\n`;
+            body += `![${name}](${baseUrl}/${f})\n\n`;
+            body += `</details>\n\n`;
+          }
+
+          body += '*Screenshots are pushed to the `tui-screenshots` branch and also available as a build artifact.*\n';
+
+          // Find existing comment to update (avoid duplicates)
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
