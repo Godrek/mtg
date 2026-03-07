@@ -63,6 +63,18 @@ Play goldfish games manually with human-readable action selection.
 DECK=kinnan cargo run --release --bin interactive
 ```
 
+### `bfs_goldfish` -- Exhaustive Goldfish Solver
+
+Finds the minimum-turn goldfish kill for a Commander deck using DFS with branch-and-bound. Exhaustively searches all play lines with aggressive pruning to prove optimal kill turns per shuffle.
+
+```bash
+SEEDS=20 MAX_TURN=10 TIMEOUT=30 VERBOSE=1 cargo run --release --bin bfs_goldfish
+```
+
+Options: `SEEDS`, `SEED_START`, `MAX_TURN`, `TIMEOUT` (seconds per seed), `MAX_STATES`, `VERBOSE`, `TRACE`
+
+Pruning strategies: phase auto-pass (only Upkeep + PreCombatMain matter), dead card filter (counterspells, opponent-dependent cards), combat skip, fetch land handling, mana ability removal (engine auto-taps), combo macro instant-win detection. Safety limits prevent OOM and runaway searches.
+
 ### `commander_goldfish` -- Commander Goldfish
 
 Goldfish simulation for Commander decks with command zone and commander tax.
@@ -99,6 +111,7 @@ src/
 
   bin/combo_list.rs     # Combo discovery CLI
   bin/mcts_goldfish.rs  # MCTS goldfish optimizer
+  bin/bfs_goldfish.rs   # Exhaustive DFS goldfish solver
   bin/interactive.rs    # Manual goldfish play
   bin/commander_goldfish.rs  # Commander goldfish simulation
 
