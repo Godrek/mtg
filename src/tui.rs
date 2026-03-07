@@ -1064,116 +1064,6 @@ fn color_to_css_fg(c: Color) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// ANSI rendering from ratatui Buffer
-// ---------------------------------------------------------------------------
-
-/// Convert a ratatui Color to an ANSI SGR foreground code.
-fn color_to_ansi_fg(c: Color) -> &'static str {
-    match c {
-        Color::Reset => "\x1b[39m",
-        Color::Black => "\x1b[30m",
-        Color::Red => "\x1b[31m",
-        Color::Green => "\x1b[32m",
-        Color::Yellow => "\x1b[33m",
-        Color::Blue => "\x1b[34m",
-        Color::Magenta => "\x1b[35m",
-        Color::Cyan => "\x1b[36m",
-        Color::Gray => "\x1b[37m",
-        Color::DarkGray => "\x1b[90m",
-        Color::LightRed => "\x1b[91m",
-        Color::LightGreen => "\x1b[92m",
-        Color::LightYellow => "\x1b[93m",
-        Color::LightBlue => "\x1b[94m",
-        Color::LightMagenta => "\x1b[95m",
-        Color::LightCyan => "\x1b[96m",
-        Color::White => "\x1b[97m",
-        _ => "\x1b[39m",
-    }
-}
-
-/// Convert a ratatui Color to an ANSI SGR background code.
-fn color_to_ansi_bg(c: Color) -> &'static str {
-    match c {
-        Color::Reset => "",
-        Color::Black => "\x1b[40m",
-        Color::Red => "\x1b[41m",
-        Color::Green => "\x1b[42m",
-        Color::Yellow => "\x1b[43m",
-        Color::Blue => "\x1b[44m",
-        Color::Magenta => "\x1b[45m",
-        Color::Cyan => "\x1b[46m",
-        Color::Gray => "\x1b[47m",
-        Color::DarkGray => "\x1b[100m",
-        Color::LightRed => "\x1b[101m",
-        Color::LightGreen => "\x1b[102m",
-        Color::LightYellow => "\x1b[103m",
-        Color::LightBlue => "\x1b[104m",
-        Color::LightMagenta => "\x1b[105m",
-        Color::LightCyan => "\x1b[106m",
-        Color::White => "\x1b[107m",
-        _ => "",
-    }
-}
-
-/// Render a ratatui Buffer to a string with ANSI escape codes.
-/// This can be embedded in GitHub markdown using ```ansi fenced code blocks.
-pub fn buffer_to_ansi(buf: &Buffer) -> String {
-    let width = buf.area.width as usize;
-    let height = buf.area.height as usize;
-
-    let mut out = String::new();
-    let mut prev_fg = Color::Reset;
-    let mut prev_bg = Color::Reset;
-    let mut prev_bold = false;
-
-    for y in 0..height {
-        for x in 0..width {
-            let cell = &buf[(x as u16, y as u16)];
-            let ch = cell.symbol();
-            let bold = cell.modifier.contains(Modifier::BOLD);
-
-            // Emit SGR codes only when style changes
-            let fg_changed = cell.fg != prev_fg;
-            let bg_changed = cell.bg != prev_bg;
-            let bold_changed = bold != prev_bold;
-
-            if fg_changed || bg_changed || bold_changed {
-                // Reset then re-apply (simplest correct approach)
-                out.push_str("\x1b[0m");
-                if bold {
-                    out.push_str("\x1b[1m");
-                }
-                out.push_str(color_to_ansi_fg(cell.fg));
-                let bg_code = color_to_ansi_bg(cell.bg);
-                if !bg_code.is_empty() {
-                    out.push_str(bg_code);
-                }
-                prev_fg = cell.fg;
-                prev_bg = cell.bg;
-                prev_bold = bold;
-            }
-
-            out.push_str(ch);
-        }
-
-        // Reset at end of line and trim trailing spaces for smaller output
-        out.push_str("\x1b[0m");
-        prev_fg = Color::Reset;
-        prev_bg = Color::Reset;
-        prev_bold = false;
-
-        // Trim trailing whitespace from the line for compactness
-        while out.ends_with(" \x1b[0m") {
-            // Can't easily trim styled trailing spaces, just add newline
-            break;
-        }
-        out.push('\n');
-    }
-
-    out
-}
-
-// ---------------------------------------------------------------------------
 // Snapshot generation
 // ---------------------------------------------------------------------------
 
@@ -1186,30 +1076,15 @@ pub fn render_snapshot(app: &App, cols: u16, rows: u16) -> String {
     buffer_to_svg(&buf)
 }
 
-/// Render the current TUI state to an ANSI string at the given terminal size.
-pub fn render_snapshot_ansi(app: &App, cols: u16, rows: u16) -> String {
-    let backend = TestBackend::new(cols, rows);
-    let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|f| ui(f, app)).unwrap();
-    let buf = terminal.backend().buffer().clone();
-    buffer_to_ansi(&buf)
-}
-
 /// Scenario descriptor for snapshot generation.
 pub struct Scenario {
     pub name: String,
     pub description: String,
 }
 
-/// Snapshot output containing both SVG and ANSI representations.
-pub struct SnapshotOutput {
-    pub svg: String,
-    pub ansi: String,
-}
-
 /// Generate snapshots for a series of game states using the greedy strategy
-/// to auto-play actions. Returns (scenario, output) pairs.
-pub fn generate_snapshots(preset: &str, cols: u16, rows: u16) -> Vec<(Scenario, SnapshotOutput)> {
+/// to auto-play actions. Returns (scenario_name, svg_content) pairs.
+pub fn generate_snapshots(preset: &str, cols: u16, rows: u16) -> Vec<(Scenario, String)> {
     let args = vec![
         String::new(), // argv[0]
         "--preset".into(),
@@ -1221,37 +1096,48 @@ pub fn generate_snapshots(preset: &str, cols: u16, rows: u16) -> Vec<(Scenario, 
 
     let mut snapshots = Vec::new();
 
-    let mut capture = |app: &App, name: String, description: String| {
-        let backend = TestBackend::new(cols, rows);
-        let mut terminal = Terminal::new(backend).unwrap();
-        terminal.draw(|f| ui(f, app)).unwrap();
-        let buf = terminal.backend().buffer().clone();
-        snapshots.push((
-            Scenario { name, description },
-            SnapshotOutput {
-                svg: buffer_to_svg(&buf),
-                ansi: buffer_to_ansi(&buf),
-            },
-        ));
-    };
-
     // Snapshot 1: Initial game state (opening hand)
-    capture(&app, format!("{}_01_opening_hand", preset), "Opening hand after mulligan decisions".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_01_opening_hand", preset),
+            description: "Opening hand after mulligan decisions".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     // Snapshot 2: Navigate to battlefield zone
     app.active_zone = Zone::Battlefield;
-    capture(&app, format!("{}_02_battlefield_focus", preset), "Battlefield zone focused".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_02_battlefield_focus", preset),
+            description: "Battlefield zone focused".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     // Snapshot 3: Navigate to actions zone
     app.active_zone = Zone::Actions;
-    capture(&app, format!("{}_03_actions_panel", preset), "Actions panel focused".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_03_actions_panel", preset),
+            description: "Actions panel focused".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     // Snapshot 4: Select first card in hand (highlight)
     app.active_zone = Zone::Hand;
     app.set_cursor(0);
-    capture(&app, format!("{}_04_card_selected", preset), "First card in hand selected (highlighted)".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_04_card_selected", preset),
+            description: "First card in hand selected (highlighted)".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     // Snapshot 5: Play a few actions and show mid-game state
+    // Execute up to 5 actions using a greedy approach
     let greedy = crate::strategy::GreedyStrategy;
     for _ in 0..5 {
         if app.state.game_over || app.cached_actions.is_empty() {
@@ -1266,11 +1152,23 @@ pub fn generate_snapshots(preset: &str, cols: u16, rows: u16) -> Vec<(Scenario, 
     }
     app.active_zone = Zone::Battlefield;
     app.set_cursor(0);
-    capture(&app, format!("{}_05_mid_game", preset), "Mid-game state after several actions".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_05_mid_game", preset),
+            description: "Mid-game state after several actions".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     // Snapshot 6: Command zone view (for commander decks)
     app.active_zone = Zone::CommandZone;
-    capture(&app, format!("{}_06_command_zone", preset), "Command zone view".into());
+    snapshots.push((
+        Scenario {
+            name: format!("{}_06_command_zone", preset),
+            description: "Command zone view".into(),
+        },
+        render_snapshot(&app, cols, rows),
+    ));
 
     snapshots
 }
