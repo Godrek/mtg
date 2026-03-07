@@ -862,6 +862,7 @@ pub fn format_action_short(state: &GameState, action: &Action, db: &CardDatabase
         Action::OrderDamageAssignment { .. } => "Assign damage".into(),
         Action::Concede => "Concede".into(),
         Action::ActivateMacro { combo_id } => format!("Combo #{}", combo_id),
+        Action::EndTurn => "End turn".into(),
     }
 }
 
