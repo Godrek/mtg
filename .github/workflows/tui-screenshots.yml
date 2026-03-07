@@ -74,9 +74,16 @@ jobs:
         SHA=$(git rev-parse --short HEAD)
         DIR="pr-${PR_NUM}"
 
+        # Output the base URL for referencing images (before switching branches)
+        REPO=${{ github.repository }}
+        echo "base_url=https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}" >> "$GITHUB_OUTPUT"
+
         # Configure git
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
+
+        # Save PNGs outside the worktree before switching branches
+        cp -r tui_screenshots/png /tmp/tui_pngs
 
         # Fetch or create the orphan screenshots branch
         if git fetch origin "$BRANCH" 2>/dev/null; then
@@ -93,18 +100,11 @@ jobs:
         # Clean old screenshots for this PR and copy new ones
         rm -rf "$DIR"
         mkdir -p "$DIR"
-        cp tui_screenshots/png/*.png "$DIR/"
+        cp /tmp/tui_pngs/*.png "$DIR/"
 
         git add "$DIR"
         git commit -m "Update TUI screenshots for PR #${PR_NUM} (${SHA})" || echo "No changes to commit"
         git push origin "$BRANCH"
-
-        # Switch back to PR branch
-        git checkout -
-
-        # Output the base URL for referencing images
-        REPO=${{ github.repository }}
-        echo "base_url=https://raw.githubusercontent.com/${REPO}/${BRANCH}/${DIR}" >> "$GITHUB_OUTPUT"
 
     - name: Comment on PR with embedded screenshots
       uses: actions/github-script@v7
@@ -115,8 +115,8 @@ jobs:
           const baseUrl = '${{ steps.push_screenshots.outputs.base_url }}';
           const sha = '${{ github.event.pull_request.head.sha }}'.substring(0, 7);
 
-          // Discover PNGs
-          const pngDir = 'tui_screenshots/png';
+          // Discover PNGs (saved to /tmp before branch switch)
+          const pngDir = '/tmp/tui_pngs';
           const files = fs.readdirSync(pngDir).filter(f => f.endsWith('.png')).sort();
 
           const kinnan = files.filter(f => f.startsWith('kinnan_'));
