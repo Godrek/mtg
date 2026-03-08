@@ -4,20 +4,21 @@ Instructions for AI agents working on this codebase.
 
 ## Project Overview
 
-This is an MTG (Magic: The Gathering) game simulator written in Rust, designed for approximating GTO (Game Theory Optimal) play via large-scale simulation. The codebase implements a rules engine, card definitions, strategy interface, and parallel simulation harness.
+MTG Commander Goldfish Simulator -- a Rust-based Magic: The Gathering Commander rules engine with an interactive TUI for goldfish (solitaire) play. The primary entry point is the TUI goldfish player. Commander format only (100-card singleton decks with a commander).
 
 ## Tech Stack
 
 - **Language:** Rust (edition 2021)
-- **Dependencies:** serde + serde_json (serialization), rand 0.8 (RNG), rayon 1.8 (parallelism)
+- **Dependencies:** serde + serde_json (serialization), rand 0.8 (RNG), rayon 1.8 (parallelism), ratatui + crossterm (TUI, optional), ureq (Scryfall API, optional)
 - **Structure:** Binary + library crate (`src/main.rs` + `src/lib.rs`)
 
 ## Build & Test
 
 ```bash
-cargo build          # Compile
-cargo test           # Run all tests (unit + integration)
-cargo run --release  # Run sample simulations
+cargo build                     # Compile
+cargo test                      # Run all tests (unit + integration, ~312 tests)
+cargo run --release --features tui --bin tui  # TUI goldfish player
+cargo run --release --bin goldfish -- --preset kinnan --trace  # CLI goldfish
 ```
 
 All tests must pass with 0 warnings before committing. Run `cargo test` after every change.
@@ -26,15 +27,21 @@ All tests must pass with 0 warnings before committing. Run `cargo test` after ev
 
 | Module | Path | Purpose |
 |--------|------|---------|
+| `tui` | `src/tui.rs` | Ratatui-based TUI: zone browser, action panel, undo |
 | `mana` | `src/mana/mod.rs` | Color, ManaCost, ManaPool |
 | `card` | `src/card/mod.rs` | CardDef, CardInstance, effects, abilities, keywords |
-| `card::sample` | `src/card/sample.rs` | Sample card definitions and prebuilt decks |
+| `card::sample` | `src/card/sample.rs` | 275+ card definitions and 4 Commander prebuilt decks |
 | `game` | `src/game/mod.rs` | GameState, phases, zones, stack, combat, CardDatabase |
 | `action` | `src/action/mod.rs` | Action enum, `legal_actions()` enumeration |
-| `rules` | `src/rules/mod.rs` | Turn loop, stack resolution, combat, SBA, triggers |
-| `strategy` | `src/strategy/mod.rs` | Strategy trait, RandomStrategy, GreedyStrategy |
+| `rules` | `src/rules/` | Turn loop, stack resolution, combat, SBA, triggers, effects, mana, tokens |
+| `layers` | `src/layers/mod.rs` | CR 613 layered continuous effects |
+| `replacement` | `src/replacement/mod.rs` | CR 614 replacement effects |
+| `events` | `src/events/mod.rs` | GameEvent enum, EventBus |
+| `strategy` | `src/strategy/mod.rs` | Strategy trait, RandomStrategy, GreedyStrategy, GoldfishStrategy, McfrStrategy |
 | `simulation` | `src/simulation/mod.rs` | Parallel game runner via Rayon |
-| tests | `tests/integration_test.rs` | End-to-end integration tests |
+| `solver` | `src/solver/` | MCCFR regret table, MCTS, training |
+| `combo` | `src/combo.rs` | Combo detection & macro-actions |
+| tests | `tests/` | Integration, MCCFR, rules, card regression, goldfish, deterministic tests |
 
 ## Critical Patterns
 
@@ -93,13 +100,13 @@ Add new `CardDef` entries to `src/card/sample.rs`:
 
 To add a new effect type:
 
-1. Add a variant to the `Effect` enum in `src/card/mod.rs`
-2. Handle it in `resolve_effect()` in `src/rules/mod.rs`
+1. Add a variant to the `Effect` enum in `src/card/effects.rs`
+2. Handle it in `resolve_effect()` in `src/rules/effects.rs`
 3. If it requires targeting, add a `TargetSpec` variant and handle in `targets_for_spec()` in `src/action/mod.rs`
 
 ## Adding Keywords
 
-1. Add to `KeywordAbility` enum in `src/card/mod.rs`
+1. Add to `KeywordAbility` enum in `src/card/keywords.rs`
 2. Implement the game rule in the relevant location:
    - Combat keywords: `resolve_combat_damage()` or `can_block()` in `src/action/mod.rs`
    - Targeting keywords: `can_target_permanent()` in `src/action/mod.rs`
@@ -107,12 +114,10 @@ To add a new effect type:
 
 ## Known Limitations
 
-- **Token creation is stubbed**: `CreateToken` effect is a no-op. Blade Splicer and Siege-Gang Commander triggers fire but produce no tokens.
-- **ETB watcher triggers not supported**: Only self-ETB ("when THIS enters") works. "Whenever A creature enters" (like Soul Warden) requires separate handling.
-- **Two players only**: `opponent()` assumes `1 - player`.
-- **Simplified mana**: Auto-tap is greedy, not optimal. No multi-color fixing.
-- **No mulligan**: Both players keep 7-card opening hands.
-- **Swords to Plowshares**: Modeled as destroy, not exile + life gain.
+- **Auto-tap heuristic**: Most-constrained-first, not optimal for all multi-color situations
+- **Copy effects not implemented**: Clone, Fork, Twincast, Spark Double
+- **No face-down state**: Morph, Manifest, Foretell require face-down CardInstance support
+- **Swords to Plowshares**: Modeled as destroy, not exile + life gain
 
 ## Testing Guidelines
 
