@@ -5,6 +5,8 @@ pub mod combo_discovery;
 pub mod deck_import;
 #[cfg(feature = "scryfall")]
 pub mod scryfall;
+#[cfg(feature = "scryfall")]
+pub mod moxfield;
 pub mod game;
 pub mod action;
 pub mod events;
