@@ -92,7 +92,7 @@ fn resolve_spell(
         }
     } else {
         if let Some(ref effect) = def.spell_effect {
-            super::effects::resolve_effect(state, effect, controller, targets);
+            super::effects::resolve_effect(state, effect, controller, targets, Some(obj_id));
         }
         // Commander redirect: non-permanent commander spells go to command zone
         if state.is_commander(obj_id) {
@@ -125,7 +125,7 @@ fn resolve_activated_ability(
     };
 
     if let Some(effect) = effect {
-        super::effects::resolve_effect(state, &effect, controller, targets);
+        super::effects::resolve_effect(state, &effect, controller, targets, Some(source_id));
     }
 }
 
@@ -146,6 +146,6 @@ fn resolve_triggered_ability(
     };
 
     if let Some((effect, controller)) = info {
-        super::effects::resolve_effect(state, &effect, controller, targets);
+        super::effects::resolve_effect(state, &effect, controller, targets, Some(source_id));
     }
 }

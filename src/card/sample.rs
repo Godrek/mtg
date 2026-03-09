@@ -3949,8 +3949,12 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::Attacks,
-                effect: Effect::Unimplemented("Other Rats you control get +2/+2 until end of turn.".into()),
-                description: "Whenever Ashcoat of the Shadow Swarm attacks, other Rats you control get +2/+2 until end of turn.".into(),
+                effect: Effect::BuffOtherSubtype {
+                    subtype: "Rat".into(),
+                    amount: DynamicValue::CreaturesWithSubtype("Rat".into()),
+                    until_eot: true,
+                },
+                description: "Whenever Ashcoat of the Shadow Swarm attacks, other Rats you control get +X/+X until end of turn, where X is the number of Rats you control.".into(),
             },
             TriggeredAbility {
                 trigger: TriggerCondition::ACreatureYouControlDies,

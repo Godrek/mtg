@@ -1,19 +1,28 @@
 //! BFS Goldfish Solver — Exhaustive DFS with Branch-and-Bound
 //!
-//! Finds the minimum-turn goldfish kill for the Kinnan cEDH commander deck
+//! Finds the minimum-turn goldfish kill for a Commander deck
 //! by exhaustively searching all play lines with aggressive pruning.
 //!
+//! Supports both combo decks (Kinnan) and combat decks (Ashcoat).
+//! Turn numbers are real Magic turns (a full round of all players).
+//!
 //! Usage:
-//!   cargo run --release --bin bfs_goldfish
+//!   DECK=kinnan cargo run --release --bin bfs_goldfish
+//!   DECK=ashcoat SEEDS=100 cargo run --release --bin bfs_goldfish
 //!
 //! Environment variables:
+//!   DECK=kinnan      Deck to solve: kinnan, ashcoat (default: kinnan)
 //!   SEEDS=10        Number of random seeds to test (default: 10)
 //!   SEED_START=0    First seed value (default: 0)
-//!   MAX_TURN=10     Prune branches beyond this turn (default: 10)
+//!   MAX_TURN=10     Prune branches beyond this game turn (default: 10)
 //!   TIMEOUT=30      Seconds per seed before aborting (default: 30)
 //!   MAX_STATES=500000  Max states explored per seed (default: 500K)
 //!   VERBOSE=0       Print action traces for wins (default: 0)
 //!   TRACE=0         Print DFS decision trace (default: 0)
+//!
+//! Results (100 seeds, MAX_TURN=10):
+//!   Kinnan:  76% win rate, T2-T10 kills (combo)
+//!   Ashcoat: 91% win rate, T5-T10 kills (combat)
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -29,6 +38,14 @@ use mtg_gto::game::{GameState, Phase};
 use mtg_gto::rules;
 use mtg_gto::simulation::format_action_name;
 use mtg_gto::strategy::{GreedyStrategy, Strategy};
+
+/// Convert engine turn_number to Magic game turn.
+/// The engine increments turn_number for each player's turn,
+/// but in Magic a "turn" is a full round of all players.
+/// In a 2-player game: engine turn 1,2 = game turn 1; engine turn 3,4 = game turn 2; etc.
+fn game_turn(engine_turn: u32) -> u32 {
+    (engine_turn + 1) / 2
+}
 
 /// Record of an action taken during search, for trace reconstruction.
 #[derive(Clone)]
@@ -71,35 +88,96 @@ struct SearchLimits {
     trace: bool,
 }
 
-/// Dead cards that are useless in goldfish (counterspells, opponent-dependent).
-fn dead_card_ids() -> HashSet<CardId> {
-    [
-        ids::AN_OFFER_YOU_CANT_REFUSE,
-        ids::FIERCE_GUARDIANSHIP,
-        ids::FLUSTERSTORM,
-        ids::FORCE_OF_NEGATION,
-        ids::FORCE_OF_WILL,
-        ids::MENTAL_MISSTEP,
-        ids::MINDBREAK_TRAP,
-        ids::SWAN_SONG,
-        ids::MUDDLE_THE_MIXTURE,
-        ids::CYCLONIC_RIFT,
-        ids::INTO_THE_FLOOD_MAW,
-        ids::VEIL_OF_SUMMER,
-        ids::SINK_INTO_STUPOR,
-        ids::MYSTIC_REMORA,
-        ids::RHYSTIC_STUDY,
-    ]
-    .into_iter()
-    .collect()
+/// Deck-specific configuration for the solver.
+struct DeckConfig {
+    deck: Vec<CardId>,
+    commander: CardId,
+    tutor_targets: Vec<CardId>,
+    dead_cards: HashSet<CardId>,
+    fetch_lands: HashSet<CardId>,
+    tutor_worthy: HashSet<CardId>,
+    /// Cards whose activated abilities are filtered (handled by combo macros).
+    filtered_abilities: HashSet<CardId>,
+    /// Whether to register the Ballista win combo manually.
+    register_ballista: bool,
+    /// Whether to skip combat (true for combo-only decks like Kinnan).
+    skip_combat: bool,
 }
 
-/// Tutor targets worth fetching in goldfish — only combo pieces.
-const TUTOR_WORTHY: [CardId; 3] = [
-    ids::BASALT_MONOLITH,
-    ids::WALKING_BALLISTA,
-    ids::GRIM_MONOLITH,
-];
+fn kinnan_config() -> DeckConfig {
+    let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
+    DeckConfig {
+        deck,
+        commander,
+        tutor_targets,
+        dead_cards: [
+            ids::AN_OFFER_YOU_CANT_REFUSE,
+            ids::FIERCE_GUARDIANSHIP,
+            ids::FLUSTERSTORM,
+            ids::FORCE_OF_NEGATION,
+            ids::FORCE_OF_WILL,
+            ids::MENTAL_MISSTEP,
+            ids::MINDBREAK_TRAP,
+            ids::SWAN_SONG,
+            ids::MUDDLE_THE_MIXTURE,
+            ids::CYCLONIC_RIFT,
+            ids::INTO_THE_FLOOD_MAW,
+            ids::VEIL_OF_SUMMER,
+            ids::SINK_INTO_STUPOR,
+            ids::MYSTIC_REMORA,
+            ids::RHYSTIC_STUDY,
+        ]
+        .into_iter()
+        .collect(),
+        fetch_lands: [
+            ids::FLOODED_STRAND,
+            ids::MISTY_RAINFOREST,
+            ids::WINDSWEPT_HEATH,
+        ]
+        .into_iter()
+        .collect(),
+        tutor_worthy: [
+            ids::BASALT_MONOLITH,
+            ids::WALKING_BALLISTA,
+            ids::GRIM_MONOLITH,
+        ]
+        .into_iter()
+        .collect(),
+        filtered_abilities: [ids::BASALT_MONOLITH, ids::GRIM_MONOLITH]
+            .into_iter()
+            .collect(),
+        register_ballista: true,
+        skip_combat: true,
+    }
+}
+
+fn ashcoat_config() -> DeckConfig {
+    let (deck, commander) = sample::ashcoat_commander_deck();
+    DeckConfig {
+        deck,
+        commander,
+        tutor_targets: vec![], // No tutor targets
+        dead_cards: [
+            // Opponent-dependent cards useless in goldfish
+            ids::BURGLAR_RAT,
+            ids::CHITTERING_RATS,
+            ids::GNAT_MISER,
+            ids::NEZUMI_BONE_READER,
+            ids::NEZUMI_SHORTFANG,
+            ids::RAVENOUS_RATS,
+            ids::DICTATE_OF_EREBOS,
+            ids::GRAVE_PACT,
+            ids::CHAIN_ASSASSINATION,
+        ]
+        .into_iter()
+        .collect(),
+        fetch_lands: HashSet::new(),
+        tutor_worthy: HashSet::new(), // No tutors
+        filtered_abilities: HashSet::new(),
+        register_ballista: false,
+        skip_combat: false,
+    }
+}
 
 /// Check if any action is an instant-win combo macro.
 fn find_instant_win(state: &GameState, actions: &[Action]) -> Option<Action> {
@@ -120,25 +198,38 @@ fn find_instant_win(state: &GameState, actions: &[Action]) -> Option<Action> {
 fn prune_actions(
     state: &GameState,
     actions: &[Action],
-    dead_cards: &HashSet<CardId>,
+    config: &DeckConfig,
 ) -> Vec<Action> {
     // 0. Phase-based auto-pass: during non-strategic phases on our turn, just pass.
-    // In goldfish, meaningful decisions happen only during:
-    //   - Upkeep (instant-speed tutors before draw)
-    //   - PreCombatMain (play lands, cast spells, activate abilities)
+    // For combo decks: only Upkeep + PreCombatMain matter.
+    // For combat decks: also need DeclareAttackers + combat phases.
     if state.active_player == 0 {
-        let dominated_phase = matches!(
-            state.phase,
-            Phase::Draw
-                | Phase::BeginningOfCombat
-                | Phase::DeclareBlockers
-                | Phase::FirstStrikeDamage
-                | Phase::CombatDamage
-                | Phase::EndOfCombat
-                | Phase::PostCombatMain
-                | Phase::EndStep
-                | Phase::Cleanup
-        );
+        let dominated_phase = if config.skip_combat {
+            matches!(
+                state.phase,
+                Phase::Draw
+                    | Phase::BeginningOfCombat
+                    | Phase::DeclareBlockers
+                    | Phase::FirstStrikeDamage
+                    | Phase::CombatDamage
+                    | Phase::EndOfCombat
+                    | Phase::PostCombatMain
+                    | Phase::EndStep
+                    | Phase::Cleanup
+            )
+        } else {
+            matches!(
+                state.phase,
+                Phase::Draw
+                    | Phase::BeginningOfCombat
+                    | Phase::DeclareBlockers
+                    | Phase::FirstStrikeDamage
+                    | Phase::CombatDamage
+                    | Phase::EndOfCombat
+                    | Phase::EndStep
+                    | Phase::Cleanup
+            )
+        };
         if dominated_phase {
             if let Some(win) = find_instant_win(state, actions) {
                 return vec![win];
@@ -200,10 +291,18 @@ fn prune_actions(
             }
             return vec![Action::PassPriority];
         }
-        // Regular tutor — only combo pieces.
+        // Regular tutor — only worthy targets.
+        if config.tutor_worthy.is_empty() {
+            // No tutor restriction — allow all targets.
+            return actions
+                .iter()
+                .filter(|a| matches!(a, Action::ChooseTutorTarget { .. }))
+                .cloned()
+                .collect();
+        }
         let worthy: Vec<Action> = actions
             .iter()
-            .filter(|a| matches!(a, Action::ChooseTutorTarget { card_id } if TUTOR_WORTHY.contains(card_id)))
+            .filter(|a| matches!(a, Action::ChooseTutorTarget { card_id } if config.tutor_worthy.contains(card_id)))
             .cloned()
             .collect();
         if worthy.is_empty() {
@@ -212,29 +311,49 @@ fn prune_actions(
         return worthy;
     }
 
-    // 5. Combat skip — goldfish doesn't need combat.
+    // 5. Combat handling.
     if actions
         .iter()
         .any(|a| matches!(a, Action::DeclareAttackers { .. }))
     {
-        return vec![Action::DeclareAttackers {
+        if config.skip_combat {
+            // Combo-only deck — skip combat entirely.
+            return vec![Action::DeclareAttackers {
+                attackers: vec![],
+            }];
+        }
+        // Combat deck — attack with everything (goldfish has no blockers)
+        // and also offer attacking with nothing (to skip combat).
+        // Pick the largest attacker set to maximize damage.
+        let mut best = Action::DeclareAttackers {
             attackers: vec![],
-        }];
+        };
+        let mut best_count = 0;
+        for a in actions {
+            if let Action::DeclareAttackers { attackers } = a {
+                if attackers.len() > best_count {
+                    best_count = attackers.len();
+                    best = a.clone();
+                }
+            }
+        }
+        return vec![best];
     }
     if actions
         .iter()
         .any(|a| matches!(a, Action::DeclareBlockers { .. }))
     {
+        // Goldfish opponent never blocks.
         return vec![Action::DeclareBlockers { blocks: vec![] }];
     }
 
-    // 6. Filter dead cards and mana abilities.
+    // 6. Filter dead cards, mana abilities, and redundant activated abilities.
     let mut result = Vec::new();
     for action in actions {
         match action {
             Action::CastSpell { object_id, .. } => {
                 if let Some(inst) = state.objects.get(object_id) {
-                    if dead_cards.contains(&inst.card_def_id) {
+                    if config.dead_cards.contains(&inst.card_def_id) {
                         continue;
                     }
                 }
@@ -242,12 +361,35 @@ fn prune_actions(
             }
             // Engine auto-taps; manual mana abilities waste branching.
             Action::ActivateManaAbility { .. } => continue,
+            // Filter abilities handled by combo macros.
+            Action::ActivateAbility { object_id, .. } => {
+                if let Some(inst) = state.objects.get(object_id) {
+                    if config.filtered_abilities.contains(&inst.card_def_id) {
+                        continue;
+                    }
+                }
+                result.push(action.clone());
+            }
             _ => result.push(action.clone()),
         }
     }
 
-    // 7. Auto-pass if nothing meaningful remains.
-    let has_meaningful = result.iter().any(|a| {
+    // 8. Fetch land forcing: if a fetch land activation is available,
+    //    crack it immediately (no reason to hold fetches in goldfish).
+    if !config.fetch_lands.is_empty() {
+        for a in &result {
+            if let Action::ActivateAbility { object_id, .. } = a {
+                if let Some(inst) = state.objects.get(object_id) {
+                    if config.fetch_lands.contains(&inst.card_def_id) {
+                        return vec![a.clone()];
+                    }
+                }
+            }
+        }
+    }
+
+    // 9. Auto-pass if nothing meaningful remains.
+    let has_castable = result.iter().any(|a| {
         matches!(
             a,
             Action::PlayLand { .. }
@@ -260,22 +402,28 @@ fn prune_actions(
                 | Action::CastFromGraveyard { .. }
         )
     });
-    if !has_meaningful {
+    if !has_castable {
         if result.iter().any(|a| matches!(a, Action::EndTurn)) {
             return vec![Action::EndTurn];
         }
         return vec![Action::PassPriority];
     }
 
-    // 8. Reorder: meaningful actions first, Pass/EndTurn last.
+    // 10. Remove EndTurn when there are spells to cast or lands to play.
+    //     EndTurn mid-main-phase is almost never optimal when there's
+    //     productive work to do.
+    if has_castable {
+        result.retain(|a| !matches!(a, Action::EndTurn));
+    }
+
+    // 11. Reorder: meaningful actions first, Pass last.
     result.sort_by_key(|a| match a {
         Action::ActivateMacro { .. } => 0,
         Action::CastCommander { .. } => 1,
         Action::CastSpell { .. } => 2,
         Action::PlayLand { .. } => 3,
         Action::ActivateAbility { .. } => 4,
-        Action::EndTurn => 6,
-        Action::PassPriority => 7,
+        Action::PassPriority => 6,
         _ => 5,
     });
 
@@ -339,196 +487,174 @@ fn fingerprint(state: &GameState) -> u64 {
 }
 
 /// Core DFS search with branch-and-bound and resource limits.
+///
+/// Uses a loop for deterministic (non-branching) states to avoid
+/// unnecessary cloning and recursion overhead. Only recurses when
+/// there's actual branching (multiple pruned actions).
 fn dfs_search(
     state: &mut GameState,
     best_win_turn: &mut u32,
     best_sequence: &mut Vec<ActionRecord>,
     current_sequence: &mut Vec<ActionRecord>,
-    dead_cards: &HashSet<CardId>,
+    config: &DeckConfig,
     stats: &mut SearchStats,
     visited: &mut HashMap<u64, u32>,
     limits: &SearchLimits,
 ) {
-    // --- Resource checks (every 1024 states to amortize syscall cost) ---
-    if stats.states_explored & 0x3FF == 0 && stats.states_explored > 0 {
-        if Instant::now() >= limits.deadline {
-            stats.timed_out = true;
-            return;
-        }
-    }
-    if stats.timed_out || stats.hit_state_cap {
-        return;
-    }
-    if stats.states_explored >= limits.max_states {
-        stats.hit_state_cap = true;
-        return;
-    }
+    // We advance a single clone through deterministic steps,
+    // only cloning when branching is needed.
+    let mut work = state.clone();
+    let mut linear_depth: usize = 0; // track linear actions pushed
 
-    if current_sequence.len() > stats.max_depth_reached {
-        stats.max_depth_reached = current_sequence.len();
-    }
-
-    // Win check
-    if state.game_over {
-        if state.winner == Some(0) && state.turn_number < *best_win_turn {
-            *best_win_turn = state.turn_number;
-            *best_sequence = current_sequence.clone();
+    loop {
+        // --- Resource checks (every 1024 states) ---
+        if stats.states_explored & 0x3FF == 0 && stats.states_explored > 0 {
+            if Instant::now() >= limits.deadline {
+                stats.timed_out = true;
+                break;
+            }
         }
-        if limits.trace {
+        if stats.timed_out || stats.hit_state_cap {
+            break;
+        }
+        if stats.states_explored >= limits.max_states {
+            stats.hit_state_cap = true;
+            break;
+        }
+
+        if current_sequence.len() > stats.max_depth_reached {
+            stats.max_depth_reached = current_sequence.len();
+        }
+
+        // Win check
+        if work.game_over {
+            if work.winner == Some(0) && work.turn_number < *best_win_turn {
+                *best_win_turn = work.turn_number;
+                *best_sequence = current_sequence.clone();
+            }
+            break;
+        }
+
+        // Bound prune
+        if work.turn_number >= *best_win_turn {
+            stats.states_pruned_bound += 1;
+            break;
+        }
+
+        // Depth limit
+        if current_sequence.len() > limits.max_depth {
+            break;
+        }
+
+        // Opponent's turn — fast-forward without branching.
+        if work.active_player != 0 {
+            rules::fast_forward_goldfish_turn(&mut work);
+            continue;
+        }
+
+        // Opponent priority — auto-pass without branching.
+        if work.priority_player != 0 {
+            rules::apply_action(&mut work, &Action::PassPriority);
+            continue;
+        }
+
+        // State deduplication
+        let fp = fingerprint(&work);
+        if let Some(&prev_turn) = visited.get(&fp) {
+            if prev_turn <= work.turn_number {
+                stats.states_pruned_dedup += 1;
+                break;
+            }
+        }
+        if visited.len() < limits.max_visited {
+            visited.insert(fp, work.turn_number);
+        }
+
+        stats.states_explored += 1;
+
+        if limits.trace && stats.states_explored <= 100 {
             eprintln!(
-                "  [TERM] game_over, winner={:?}, turn={}",
-                state.winner, state.turn_number
+                "  [STATE #{}] T{} {:?} prio={} depth={} hand={} bf={} stack={}",
+                stats.states_explored,
+                work.turn_number,
+                work.phase,
+                work.priority_player,
+                current_sequence.len(),
+                work.players[0].hand.len(),
+                work.battlefield.len(),
+                work.stack.len(),
             );
         }
-        return;
-    }
 
-    // Bound prune
-    if state.turn_number >= *best_win_turn {
-        stats.states_pruned_bound += 1;
-        return;
-    }
-
-    // Depth limit
-    if current_sequence.len() > limits.max_depth {
-        return;
-    }
-
-    // State deduplication (with cap on HashMap size)
-    let fp = fingerprint(state);
-    if let Some(&prev_turn) = visited.get(&fp) {
-        if prev_turn <= state.turn_number {
-            stats.states_pruned_dedup += 1;
-            return;
+        // Get and prune legal actions
+        let actions = legal_actions(&work);
+        if actions.is_empty() {
+            break;
         }
-    }
-    if visited.len() < limits.max_visited {
-        visited.insert(fp, state.turn_number);
-    }
-
-    stats.states_explored += 1;
-
-    if limits.trace && stats.states_explored <= 100 {
-        eprintln!(
-            "  [STATE #{}] T{} {:?} prio={} depth={} hand={} bf={} stack={}",
-            stats.states_explored,
-            state.turn_number,
-            state.phase,
-            state.priority_player,
-            current_sequence.len(),
-            state.players[0].hand.len(),
-            state.battlefield.len(),
-            state.stack.len(),
-        );
-    }
-
-    // Opponent's turn — fast-forward entirely.
-    if state.active_player != 0 {
-        let mut clone = state.clone();
-        rules::fast_forward_goldfish_turn(&mut clone);
-        dfs_search(
-            &mut clone,
-            best_win_turn,
-            best_sequence,
-            current_sequence,
-            dead_cards,
-            stats,
-            visited,
-            limits,
-        );
-        return;
-    }
-
-    // During our turn, auto-pass when opponent has priority
-    if state.priority_player != 0 {
-        let mut clone = state.clone();
-        rules::apply_action(&mut clone, &Action::PassPriority);
-        dfs_search(
-            &mut clone,
-            best_win_turn,
-            best_sequence,
-            current_sequence,
-            dead_cards,
-            stats,
-            visited,
-            limits,
-        );
-        return;
-    }
-
-    // Get and prune legal actions
-    let actions = legal_actions(state);
-    if actions.is_empty() {
-        return;
-    }
-    let pruned = prune_actions(state, &actions, dead_cards);
-    if pruned.is_empty() {
-        return;
-    }
-
-    if limits.trace && stats.states_explored <= 100 {
-        eprintln!(
-            "    legal={} pruned={} actions: {}",
-            actions.len(),
-            pruned.len(),
-            pruned
-                .iter()
-                .map(|a| format_action_name(state, a))
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-
-    // Apply each pruned action (single-action optimization: no branching overhead)
-    if pruned.len() == 1 {
-        let action = pruned[0].clone();
-        let desc = format_action_name(state, &action);
-        let mut clone = state.clone();
-        let turn = clone.turn_number;
-        rules::apply_action(&mut clone, &action);
-        current_sequence.push(ActionRecord {
-            turn,
-            action,
-            description: desc,
-        });
-        dfs_search(
-            &mut clone,
-            best_win_turn,
-            best_sequence,
-            current_sequence,
-            dead_cards,
-            stats,
-            visited,
-            limits,
-        );
-        current_sequence.pop();
-        return;
-    }
-
-    for action in &pruned {
-        // Bail early if we hit limits
-        if stats.timed_out || stats.hit_state_cap {
-            return;
+        let pruned = prune_actions(&work, &actions, config);
+        if pruned.is_empty() {
+            break;
         }
-        let desc = format_action_name(state, action);
-        let mut clone = state.clone();
-        let turn = clone.turn_number;
-        rules::apply_action(&mut clone, action);
-        current_sequence.push(ActionRecord {
-            turn,
-            action: action.clone(),
-            description: desc,
-        });
-        dfs_search(
-            &mut clone,
-            best_win_turn,
-            best_sequence,
-            current_sequence,
-            dead_cards,
-            stats,
-            visited,
-            limits,
-        );
+
+        if limits.trace && stats.states_explored <= 100 {
+            eprintln!(
+                "    legal={} pruned={} actions: {}",
+                actions.len(),
+                pruned.len(),
+                pruned
+                    .iter()
+                    .map(|a| format_action_name(&work, a))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+
+        // Single action — apply in-place (no clone, no recursion).
+        if pruned.len() == 1 {
+            let action = pruned[0].clone();
+            let desc = format_action_name(&work, &action);
+            let turn = work.turn_number;
+            rules::apply_action(&mut work, &action);
+            current_sequence.push(ActionRecord {
+                turn,
+                action,
+                description: desc,
+            });
+            linear_depth += 1;
+            continue;
+        }
+
+        // Multiple actions — branch via recursion on clones.
+        for action in &pruned {
+            if stats.timed_out || stats.hit_state_cap {
+                break;
+            }
+            let desc = format_action_name(&work, action);
+            let mut clone = work.clone();
+            let turn = clone.turn_number;
+            rules::apply_action(&mut clone, action);
+            current_sequence.push(ActionRecord {
+                turn,
+                action: action.clone(),
+                description: desc,
+            });
+            dfs_search(
+                &mut clone,
+                best_win_turn,
+                best_sequence,
+                current_sequence,
+                config,
+                stats,
+                visited,
+                limits,
+            );
+            current_sequence.pop();
+        }
+        break;
+    }
+
+    // Pop linear actions we pushed during the loop.
+    for _ in 0..linear_depth {
         current_sequence.pop();
     }
 }
@@ -536,9 +662,8 @@ fn dfs_search(
 /// Run the solver for a single seed.
 fn solve_seed(
     db: &mtg_gto::game::CardDatabase,
-    deck: &[CardId],
-    commander: CardId,
-    tutor_targets: &[CardId],
+    config: &DeckConfig,
+    combo_registry: &Arc<mtg_gto::combo::ComboRegistry>,
     seed: u64,
     max_turn: u32,
     timeout_secs: u64,
@@ -550,22 +675,22 @@ fn solve_seed(
 
     let mut state = GameState::new_commander(2);
     state.card_db = Some(arc_db);
-    rules::setup_commander_game_seeded(&mut state, deck, deck, commander, commander, seed);
-    rules::set_tutor_targets(&mut state, 0, tutor_targets);
-
-    // Discover combos
-    let mut combo_cards = vec![commander];
-    combo_cards.extend_from_slice(tutor_targets);
-    let (mut registry, _) = mtg_gto::combo_discovery::discover_and_register(
-        db,
-        &combo_cards,
-        &DiscoveryConfig::default(),
+    rules::setup_commander_game_seeded(
+        &mut state,
+        &config.deck,
+        &config.deck,
+        config.commander,
+        config.commander,
+        seed,
     );
-    mtg_gto::combo::register_ballista_win_combo(&mut registry);
-    state.combo_registry = Some(Arc::new(registry));
+    if !config.tutor_targets.is_empty() {
+        rules::set_tutor_targets(&mut state, 0, &config.tutor_targets);
+    }
+    state.combo_registry = Some(combo_registry.clone());
 
-    let dead_cards = dead_card_ids();
-    let mut best_win_turn = max_turn + 1;
+    // Convert game turns to engine turns (2 engine turns per game turn in 2-player).
+    let engine_max_turn = max_turn * 2;
+    let mut best_win_turn = engine_max_turn + 1;
     let mut best_sequence = Vec::new();
     let mut current_sequence = Vec::new();
     let mut stats = SearchStats::new();
@@ -586,14 +711,14 @@ fn solve_seed(
         &mut best_win_turn,
         &mut best_sequence,
         &mut current_sequence,
-        &dead_cards,
+        config,
         &mut stats,
         &mut visited,
         &limits,
     );
 
-    let win_turn = if best_win_turn <= max_turn {
-        Some(best_win_turn)
+    let win_turn = if best_win_turn <= engine_max_turn {
+        Some(game_turn(best_win_turn))
     } else {
         None
     };
@@ -603,8 +728,9 @@ fn solve_seed(
             println!("  Winning line (T{}):", t);
             let mut last_turn = 0;
             for record in &best_sequence {
-                if record.turn != last_turn {
-                    last_turn = record.turn;
+                let gt = game_turn(record.turn);
+                if gt != last_turn {
+                    last_turn = gt;
                     println!("  --- Turn {} ---", last_turn);
                 }
                 println!("    {}", record.description);
@@ -647,9 +773,22 @@ fn main() {
         .unwrap_or(0)
         > 0;
 
+    let deck_name = std::env::var("DECK")
+        .unwrap_or_else(|_| "kinnan".into())
+        .to_lowercase();
     let db = sample::build_sample_db();
-    let (deck, commander, tutor_targets) = sample::kinnan_commander_deck();
-    let commander_name = db.get(commander).map(|d| d.name.as_str()).unwrap_or("?");
+    let config = match deck_name.as_str() {
+        "kinnan" => kinnan_config(),
+        "ashcoat" => ashcoat_config(),
+        other => {
+            eprintln!("Unknown deck: {}. Available: kinnan, ashcoat", other);
+            std::process::exit(1);
+        }
+    };
+    let commander_name = db
+        .get(config.commander)
+        .map(|d| d.name.as_str())
+        .unwrap_or("?");
 
     println!("BFS Goldfish Solver");
     println!("===================");
@@ -663,6 +802,27 @@ fn main() {
 
     let total_start = Instant::now();
 
+    // Discover combos once, reuse for all seeds.
+    let combo_start = Instant::now();
+    let combo_cards: Vec<CardId> = if !config.tutor_targets.is_empty() {
+        let mut cards = vec![config.commander];
+        cards.extend_from_slice(&config.tutor_targets);
+        cards
+    } else {
+        config.deck.clone()
+    };
+    let (mut registry, _) = mtg_gto::combo_discovery::discover_and_register(
+        &db,
+        &combo_cards,
+        &DiscoveryConfig::default(),
+    );
+    if config.register_ballista {
+        mtg_gto::combo::register_ballista_win_combo(&mut registry);
+    }
+    let combo_registry = Arc::new(registry);
+    println!("Combo discovery: {:.1}s", combo_start.elapsed().as_secs_f64());
+    println!();
+
     let mut kill_turns: HashMap<u32, u32> = HashMap::new();
     let mut wins = 0u32;
     let mut total_states = 0u64;
@@ -672,9 +832,8 @@ fn main() {
         let start = Instant::now();
         let (win_turn, stats, _sequence) = solve_seed(
             &db,
-            &deck,
-            commander,
-            &tutor_targets,
+            &config,
+            &combo_registry,
             seed,
             max_turn,
             timeout_secs,

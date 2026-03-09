@@ -25,6 +25,9 @@ pub enum DynamicValue {
     DevotionTo(Color),
     /// Number of creature cards in the controller's graveyard (e.g., Crypt of Agadeem).
     CreaturesInGraveyard,
+    /// Number of creatures with a specific subtype the controller controls
+    /// (e.g., "number of Rats you control").
+    CreaturesWithSubtype(String),
     /// A fixed value (for testing / compatibility).
     Fixed(i32),
 }
@@ -131,6 +134,21 @@ impl DynamicValue {
             DynamicValue::CreaturesInGraveyard => {
                 ctx.map(|c| c.creatures_in_graveyard as i32).unwrap_or(0)
             }
+            DynamicValue::CreaturesWithSubtype(subtype_name) => battlefield
+                .iter()
+                .filter(|&&id| {
+                    if let Some(inst) = objects.get(&id) {
+                        if inst.controller != controller {
+                            return false;
+                        }
+                        if let Some(def) = card_db(inst.card_def_id) {
+                            return def.is_creature()
+                                && def.subtypes.iter().any(|s| s.0 == *subtype_name);
+                        }
+                    }
+                    false
+                })
+                .count() as i32,
             DynamicValue::Fixed(val) => *val,
         }
     }
@@ -353,6 +371,15 @@ pub enum Effect {
 
     /// Proliferate — for each permanent/player with a counter, add one more of that type.
     Proliferate,
+
+    /// Buff other creatures with a specific subtype you control by +X/+X
+    /// until end of turn, where X is a dynamic value.
+    /// (e.g., Ashcoat: "other Rats you control get +X/+X where X = rats you control")
+    BuffOtherSubtype {
+        subtype: String,
+        amount: DynamicValue,
+        until_eot: bool,
+    },
 
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
