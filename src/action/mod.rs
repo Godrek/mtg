@@ -954,6 +954,28 @@ fn enumerate_targets_for_spell(
                     }
                 }
             }
+            // --- Unimplemented TargetSpec variants: fall back to empty target list ---
+            TargetSpec::AnyLand
+            | TargetSpec::AnyArtifact
+            | TargetSpec::AnyEnchantment
+            | TargetSpec::AnyArtifactOrEnchantment
+            | TargetSpec::AnyCreatureYouControl
+            | TargetSpec::AnyCreatureOpponentControls
+            | TargetSpec::AnyInstantOrSorcery
+            | TargetSpec::NonTokenCreature
+            | TargetSpec::AnyNoncreaturePermanent
+            | TargetSpec::AnyPlaneswalker
+            | TargetSpec::CreatureOrLand
+            | TargetSpec::EachOpponent
+            | TargetSpec::EachPlayer
+            | TargetSpec::EachArtifact
+            | TargetSpec::EachEnchantment
+            | TargetSpec::EachNonlandPermanent
+            | TargetSpec::CreatureWithPowerAtMost(_)
+            | TargetSpec::CreatureWithToughnessAtMost(_)
+            | TargetSpec::SpellWithManaValueAtMost(_) => {
+                // UNIMPLEMENTED: targeting logic for these specs not yet written.
+            }
         }
         targets
     }

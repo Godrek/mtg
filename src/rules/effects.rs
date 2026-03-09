@@ -819,6 +819,45 @@ pub(super) fn resolve_effect(
             state.invalidate_characteristics_cache();
         }
 
+        // --- Unimplemented effect variants: declared for card definitions but not
+        // yet resolved by the rules engine. Each is a no-op until implemented. ---
+
+        Effect::Surveil { .. }
+        | Effect::LookAtTopN { .. }
+        | Effect::Discover { .. }
+        | Effect::CopySpell { .. }
+        | Effect::CopyPermanent { .. }
+        | Effect::TransformPermanent { .. }
+        | Effect::PhaseOut { .. }
+        | Effect::ExileAndReturnAtEOT { .. }
+        | Effect::Populate
+        | Effect::Investigate { .. }
+        | Effect::Explore { .. }
+        | Effect::Adapt { .. }
+        | Effect::AmassZombies { .. }
+        | Effect::Monstrous { .. }
+        | Effect::AddPoisonCounters { .. }
+        | Effect::AddEnergyCounters { .. }
+        | Effect::PayEnergyCounters { .. }
+        | Effect::AddExperienceCounters { .. }
+        | Effect::Regenerate { .. }
+        | Effect::PreventAllDamageToTarget { .. }
+        | Effect::RedirectDamage { .. }
+        | Effect::Manifest { .. }
+        | Effect::BecomeMonarch
+        | Effect::TakeInitiative
+        | Effect::Venture
+        | Effect::Learn
+        | Effect::FlipCoin { .. }
+        | Effect::UntapAllYouControl
+        | Effect::GainIndestructibleUntilEOT { .. }
+        | Effect::AttachTo { .. }
+        | Effect::GainControlPermanent { .. }
+        | Effect::EachPlayerDraws { .. }
+        | Effect::EachPlayerDiscardsAndDraws { .. } => {
+            // UNIMPLEMENTED: no-op — add resolution logic here when implementing.
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
@@ -865,5 +904,22 @@ fn evaluate_condition(
             matching >= *count as usize
         }
         Condition::Always => true,
+
+        // --- Unimplemented conditions: return false as a safe default ---
+        Condition::IsOpponentsTurn
+        | Condition::HandIsEmpty
+        | Condition::GraveyardHasNCards(_)
+        | Condition::ControlsArtifact
+        | Condition::ControlsEnchantment
+        | Condition::ControlsLandType(_)
+        | Condition::OpponentLifeAtOrBelow(_)
+        | Condition::IsAttacking
+        | Condition::IsBlocking
+        | Condition::HasCitysBlessing
+        | Condition::HasMonarch
+        | Condition::TargetHasCounter
+        | Condition::OpponentControlsMore { .. }
+        | Condition::CastHighValueSpellThisTurn(_)
+        | Condition::IsFirstTurn => false,
     }
 }
