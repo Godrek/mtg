@@ -136,8 +136,10 @@ pub fn extract_deck_id(url_or_id: &str) -> Result<String, MoxfieldError> {
     // If it contains "moxfield.com/decks/", extract the segment after that.
     if let Some(pos) = trimmed.find("moxfield.com/decks/") {
         let after = &trimmed[pos + "moxfield.com/decks/".len()..];
-        // The ID ends at the next '/' or end-of-string.
+        // The ID ends at the next '/', '?', or '#'.
         let id = after.split('/').next().unwrap_or("").trim();
+        // Strip query-string (?utm_source=...) or fragment (#comments).
+        let id = id.split(&['?', '#'] as &[char]).next().unwrap_or("").trim();
         if id.is_empty() {
             return Err(MoxfieldError::InvalidUrl(format!(
                 "could not extract deck ID from URL: {trimmed}"
@@ -250,7 +252,11 @@ pub fn import_moxfield_deck(
     // Step 2: fetch from Moxfield
     let mox_deck = fetch_moxfield_deck(&deck_id)?;
     let deck_name = mox_deck.name.clone();
-    let file_stem = sanitize_name(&deck_name);
+    let mut file_stem = sanitize_name(&deck_name);
+    if file_stem.is_empty() {
+        // Fall back to the raw deck ID so we always have a valid filename.
+        file_stem = deck_id.clone();
+    }
     eprintln!("Deck: {deck_name} → files: decks/{file_stem}.txt");
 
     // Step 3: collect all card names (commanders + mainboard, ignore sideboard)
@@ -377,10 +383,99 @@ pub fn import_moxfield_deck(
 // ---------------------------------------------------------------------------
 
 /// Load the extra card definitions saved by a previous `moxfield_import` run.
-/// Returns an empty vec if the file doesn't exist (all cards are in sample DB).
+///
+/// Delegates to `deck_import::load_extra_card_defs` — the canonical implementation
+/// that lives outside the `scryfall` feature gate so `goldfish` can use it too.
 pub fn load_extra_card_defs(json_path: &Path) -> Vec<CardDef> {
-    match std::fs::read_to_string(json_path) {
-        Ok(data) => serde_json::from_str::<Vec<CardDef>>(&data).unwrap_or_default(),
-        Err(_) => Vec::new(),
+    crate::deck_import::load_extra_card_defs(json_path)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- extract_deck_id ---
+
+    #[test]
+    fn test_extract_deck_id_full_url() {
+        let id = extract_deck_id("https://moxfield.com/decks/JHjwO92ZUEyNdPzE7D5d7A").unwrap();
+        assert_eq!(id, "JHjwO92ZUEyNdPzE7D5d7A");
+    }
+
+    #[test]
+    fn test_extract_deck_id_www_url() {
+        let id =
+            extract_deck_id("https://www.moxfield.com/decks/JHjwO92ZUEyNdPzE7D5d7A").unwrap();
+        assert_eq!(id, "JHjwO92ZUEyNdPzE7D5d7A");
+    }
+
+    #[test]
+    fn test_extract_deck_id_url_with_query_params() {
+        let id = extract_deck_id(
+            "https://moxfield.com/decks/JHjwO92ZUEyNdPzE7D5d7A?utm_source=share",
+        )
+        .unwrap();
+        assert_eq!(id, "JHjwO92ZUEyNdPzE7D5d7A");
+    }
+
+    #[test]
+    fn test_extract_deck_id_url_with_fragment() {
+        let id =
+            extract_deck_id("https://moxfield.com/decks/JHjwO92ZUEyNdPzE7D5d7A#comments")
+                .unwrap();
+        assert_eq!(id, "JHjwO92ZUEyNdPzE7D5d7A");
+    }
+
+    #[test]
+    fn test_extract_deck_id_bare_id() {
+        let id = extract_deck_id("JHjwO92ZUEyNdPzE7D5d7A").unwrap();
+        assert_eq!(id, "JHjwO92ZUEyNdPzE7D5d7A");
+    }
+
+    #[test]
+    fn test_extract_deck_id_empty() {
+        assert!(extract_deck_id("").is_err());
+        assert!(extract_deck_id("   ").is_err());
+    }
+
+    #[test]
+    fn test_extract_deck_id_url_missing_id() {
+        assert!(extract_deck_id("https://moxfield.com/decks/").is_err());
+    }
+
+    // --- sanitize_name ---
+
+    #[test]
+    fn test_sanitize_name_spaces_become_hyphens() {
+        assert_eq!(sanitize_name("My Cool Deck"), "my-cool-deck");
+    }
+
+    #[test]
+    fn test_sanitize_name_uppercase_lowercased() {
+        assert_eq!(sanitize_name("Kinnan GoodStuff"), "kinnan-goodstuff");
+    }
+
+    #[test]
+    fn test_sanitize_name_special_chars_dropped() {
+        assert_eq!(sanitize_name("Deck: The Gathering!"), "deck-the-gathering");
+    }
+
+    #[test]
+    fn test_sanitize_name_consecutive_separators_collapsed() {
+        assert_eq!(sanitize_name("a  --  b"), "a-b");
+    }
+
+    #[test]
+    fn test_sanitize_name_all_special_returns_empty() {
+        assert_eq!(sanitize_name("!!!"), "");
+    }
+
+    #[test]
+    fn test_sanitize_name_alphanumeric_preserved() {
+        assert_eq!(sanitize_name("deck42"), "deck42");
     }
 }

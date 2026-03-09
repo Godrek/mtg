@@ -178,7 +178,7 @@ fn load_saved_moxfield_preset(
     // Inject any extra card definitions saved by the importer.
     let json_p = std::path::Path::new(json_path);
     if json_p.exists() {
-        let extra = load_extra_card_defs(json_p);
+        let extra = mtg_gto::deck_import::load_extra_card_defs(json_p);
         for def in extra {
             // Only add if not already in the sample DB (never override hand-authored cards).
             if db.get(def.id).is_none() {
@@ -213,13 +213,6 @@ fn load_saved_moxfield_preset(
     }
 }
 
-/// Load extra `CardDef`s saved by the Moxfield importer.
-fn load_extra_card_defs(path: &std::path::Path) -> Vec<mtg_gto::card::CardDef> {
-    match std::fs::read_to_string(path) {
-        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
-        Err(_) => Vec::new(),
-    }
-}
 
 fn load_deck_from_file(path: &str) -> (CardDatabase, Vec<CardId>, CardId, Vec<CardId>, String) {
     let db = sample::build_sample_db();
