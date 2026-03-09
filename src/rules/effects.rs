@@ -3,11 +3,15 @@ use crate::events::GameEvent;
 use crate::game::{GameState, PlayerIndex, StackSource, Target};
 
 /// Resolve an effect.
+/// `source_id` is the ObjectId of the permanent that generated this effect
+/// (e.g., the creature whose triggered ability fired). Used by effects like
+/// `BuffOtherSubtype` that need to exclude "self" from the buff.
 pub(super) fn resolve_effect(
     state: &mut GameState,
     effect: &Effect,
     controller: PlayerIndex,
     targets: &[Target],
+    source_id: Option<ObjectId>,
 ) {
     match effect {
         Effect::DealDamage { amount, target: target_spec } => {
@@ -438,7 +442,7 @@ pub(super) fn resolve_effect(
 
         Effect::Multiple(effects) => {
             for e in effects {
-                resolve_effect(state, e, controller, targets);
+                resolve_effect(state, e, controller, targets, source_id);
             }
         }
 
@@ -745,16 +749,16 @@ pub(super) fn resolve_effect(
         Effect::Modal { choices, choose_count } => {
             // Simplified: for goldfish/AI, always choose the first N choices
             for effect in choices.iter().take(*choose_count as usize) {
-                resolve_effect(state, effect, controller, targets);
+                resolve_effect(state, effect, controller, targets, source_id);
             }
         }
 
         Effect::Conditional { condition, if_true, if_false } => {
             let met = evaluate_condition(state, condition, controller);
             if met {
-                resolve_effect(state, if_true, controller, targets);
+                resolve_effect(state, if_true, controller, targets, source_id);
             } else if let Some(else_effect) = if_false {
-                resolve_effect(state, else_effect, controller, targets);
+                resolve_effect(state, else_effect, controller, targets, source_id);
             }
         }
 
@@ -770,7 +774,7 @@ pub(super) fn resolve_effect(
                 Some(&ctx),
             );
             for _ in 0..n.max(0) {
-                resolve_effect(state, effect, controller, targets);
+                resolve_effect(state, effect, controller, targets, source_id);
             }
         }
 
@@ -817,6 +821,45 @@ pub(super) fn resolve_effect(
                 }
             }
             state.invalidate_characteristics_cache();
+        }
+
+        Effect::BuffOtherSubtype {
+            subtype,
+            amount,
+            until_eot,
+        } => {
+            use crate::layers::{
+                AffectedObjects, ContinuousEffect, Duration, LayerModification,
+            };
+            let ctx = super::tokens::build_dynamic_context(state, controller);
+            let card_db_arc = state.card_db.as_ref().expect("card_db required").clone();
+            let val = amount.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| card_db_arc.get(id),
+                Some(&ctx),
+            );
+            if val > 0 {
+                let ts = state.new_timestamp();
+                let duration = if *until_eot {
+                    Duration::UntilEndOfTurn
+                } else {
+                    Duration::Permanent
+                };
+                state.continuous_effects.push(ContinuousEffect {
+                    source_id: source_id.unwrap_or(0),
+                    controller,
+                    timestamp: ts,
+                    duration,
+                    affected: AffectedObjects::OtherCreaturesWithSubtypeControlledBy(
+                        subtype.clone(),
+                        controller,
+                    ),
+                    modification: LayerModification::ModifyPT(val, val),
+                });
+                state.invalidate_characteristics_cache();
+            }
         }
 
         // --- Unimplemented effect variants: declared for card definitions but not

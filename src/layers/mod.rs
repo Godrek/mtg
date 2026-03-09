@@ -83,6 +83,9 @@ pub enum AffectedObjects {
     AllPermanents,
     /// All permanents controlled by a specific player.
     PermanentsControlledBy(PlayerIndex),
+    /// Other creatures with a specific subtype controlled by a player
+    /// (e.g., Ashcoat: "other Rats you control").
+    OtherCreaturesWithSubtypeControlledBy(String, PlayerIndex),
     /// The permanent this source is attached to (equipment/aura buffs).
     AttachedTo,
 }
@@ -445,6 +448,15 @@ fn effect_applies_to(
                 && !card_db
                     .get(inst.card_def_id)
                     .map(|def| def.subtypes.iter().any(|s| s.0 == "Human"))
+                    .unwrap_or(false)
+        }
+        AffectedObjects::OtherCreaturesWithSubtypeControlledBy(subtype_name, player) => {
+            obj_id != effect.source_id
+                && inst.controller == *player
+                && is_creature_on_battlefield(obj_id, objects, battlefield, card_db)
+                && card_db
+                    .get(inst.card_def_id)
+                    .map(|def| def.subtypes.iter().any(|s| s.0 == *subtype_name))
                     .unwrap_or(false)
         }
         AffectedObjects::AllPermanents => battlefield.contains(&obj_id),
