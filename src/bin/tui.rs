@@ -145,7 +145,15 @@ fn handle_key(app: &mut App, code: KeyCode) {
                         app.active_zone = Zone::Actions;
                         app.zone_cursors.insert(Zone::Actions, relevant[0]);
                     } else {
-                        app.status_log.push("No actions available for this card.".into());
+                        let phase_hint = if !app.state.phase.is_main_phase() {
+                            format!(
+                                "No actions for this card in {:?}. Pass priority to advance.",
+                                app.state.phase
+                            )
+                        } else {
+                            "No actions available for this card.".into()
+                        };
+                        app.status_log.push(phase_hint);
                     }
                 }
             }

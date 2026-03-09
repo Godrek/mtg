@@ -168,6 +168,18 @@ impl App {
                 continue;
             }
 
+            // Auto-pass for player 0 when the only available actions beyond
+            // PassPriority are mana abilities. Tapping lands during non-main
+            // phases is almost never useful in goldfish mode, and without this
+            // the player gets stuck in every phase (Upkeep, Draw, etc.) once
+            // they have any untapped lands.
+            if only_pass_and_mana_abilities(&actions) {
+                rules::apply_action(&mut self.state, &Action::PassPriority);
+                self.actions_taken += 1;
+                passes += 1;
+                continue;
+            }
+
             break;
         }
 
@@ -252,6 +264,13 @@ impl App {
             .map(|(i, _)| i)
             .collect()
     }
+}
+
+/// Returns true if the only actions are PassPriority and/or mana abilities.
+/// Used by auto_advance to skip phases where the player has no meaningful
+/// choices beyond tapping lands.
+fn only_pass_and_mana_abilities(actions: &[Action]) -> bool {
+    actions.iter().all(|a| matches!(a, Action::PassPriority | Action::ActivateManaAbility { .. }))
 }
 
 /// Check if an action involves a specific object.
