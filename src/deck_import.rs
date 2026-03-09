@@ -1,4 +1,4 @@
-use crate::card::{DeckEntry, Decklist};
+use crate::card::{CardDef, DeckEntry, Decklist};
 use crate::game::CardDatabase;
 use std::collections::HashMap;
 use std::error::Error;
@@ -200,4 +200,15 @@ pub fn import_deck_from_file<P: AsRef<Path>>(
         commanders: commander_entries,
         tutor_targets: tutor_target_ids,
     })
+}
+
+/// Load extra `CardDef`s saved by the Moxfield importer's `.cards.json` sidecar.
+///
+/// Returns an empty vec if the file doesn't exist (all cards were in the sample DB)
+/// or if deserialization fails.
+pub fn load_extra_card_defs(json_path: &Path) -> Vec<CardDef> {
+    match fs::read_to_string(json_path) {
+        Ok(data) => serde_json::from_str::<Vec<CardDef>>(&data).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
 }
