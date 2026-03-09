@@ -30,6 +30,7 @@ use mtg_gto::simulation::{
     run_commander_goldfish_game_verbose, simulate_commander_goldfish, GoldfishResults,
 };
 use mtg_gto::strategy::{GreedyStrategy, RandomStrategy, Strategy};
+use mtg_gto::deck_import;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -128,20 +129,90 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn load_preset_deck(name: &str) -> (CardDatabase, Vec<CardId>, CardId, Vec<CardId>, String) {
-    let db = sample::build_sample_db();
-    let (deck, commander, tutor_targets) = match name {
+    // Built-in presets.
+    match name {
         "brimaz" => {
+            let db = sample::build_sample_db();
             let (d, c) = sample::brimaz_commander_deck();
-            (d, c, Vec::new())
+            return (db, d, c, Vec::new(), name.to_string());
         }
         "ashcoat" => {
+            let db = sample::build_sample_db();
             let (d, c) = sample::ashcoat_commander_deck();
-            (d, c, Vec::new())
+            return (db, d, c, Vec::new(), name.to_string());
         }
-        _ => sample::kinnan_commander_deck(),
-    };
-    (db, deck, commander, tutor_targets, name.to_string())
+        "kinnan" => {
+            let db = sample::build_sample_db();
+            let (d, c, t) = sample::kinnan_commander_deck();
+            return (db, d, c, t, name.to_string());
+        }
+        _ => {}
+    }
+
+    // Fall back to a saved deck file in `decks/`.
+    let txt_path = format!("decks/{name}.txt");
+    let json_path = format!("decks/{name}.cards.json");
+    if std::path::Path::new(&txt_path).exists() {
+        return load_saved_moxfield_preset(&txt_path, &json_path, name);
+    }
+
+    // Last resort: treat unknown name as kinnan.
+    eprintln!("Warning: unknown preset '{name}', falling back to kinnan.");
+    let db = sample::build_sample_db();
+    let (d, c, t) = sample::kinnan_commander_deck();
+    (db, d, c, t, "kinnan".to_string())
 }
+
+/// Load a deck from a saved `decks/{name}.txt` + optional `decks/{name}.cards.json`.
+///
+/// The `.cards.json` file is written by `moxfield_import` and contains
+/// `Vec<CardDef>` for cards not present in the sample DB.
+fn load_saved_moxfield_preset(
+    txt_path: &str,
+    json_path: &str,
+    name: &str,
+) -> (CardDatabase, Vec<CardId>, CardId, Vec<CardId>, String) {
+    // Start from the full sample DB so hand-authored card implementations are used.
+    let mut db = sample::build_sample_db();
+
+    // Inject any extra card definitions saved by the importer.
+    let json_p = std::path::Path::new(json_path);
+    if json_p.exists() {
+        let extra = mtg_gto::deck_import::load_extra_card_defs(json_p);
+        for def in extra {
+            // Only add if not already in the sample DB (never override hand-authored cards).
+            if db.get(def.id).is_none() {
+                db.insert(def);
+            }
+        }
+    }
+
+    match deck_import::import_deck_from_file(txt_path, &db) {
+        Ok(decklist) => {
+            let commander = if !decklist.commanders.is_empty() {
+                decklist.commanders[0].card_id
+            } else {
+                eprintln!(
+                    "Warning: no commander section in '{txt_path}'. Using first card."
+                );
+                if decklist.cards.is_empty() {
+                    eprintln!("Error: deck file is empty.");
+                    std::process::exit(1);
+                }
+                decklist.cards[0].card_id
+            };
+            let deck = decklist.expand();
+            let tutor_targets = decklist.tutor_targets.clone();
+            let deck_name = decklist.name.clone();
+            (db, deck, commander, tutor_targets, deck_name)
+        }
+        Err(e) => {
+            eprintln!("Error loading preset '{name}' from '{txt_path}': {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 
 fn load_deck_from_file(path: &str) -> (CardDatabase, Vec<CardId>, CardId, Vec<CardId>, String) {
     let db = sample::build_sample_db();

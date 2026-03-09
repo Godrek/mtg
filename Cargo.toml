@@ -19,6 +19,11 @@ ratatui = { version = "0.28", optional = true }
 crossterm = { version = "0.28", optional = true }
 
 [[bin]]
+name = "moxfield_import"
+path = "src/bin/moxfield_import.rs"
+required-features = ["scryfall"]
+
+[[bin]]
 name = "tui"
 path = "src/bin/tui.rs"
 required-features = ["tui"]
