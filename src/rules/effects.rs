@@ -819,6 +819,51 @@ pub(super) fn resolve_effect(
             state.invalidate_characteristics_cache();
         }
 
+        Effect::BuffOtherSubtype {
+            subtype,
+            amount,
+            until_eot,
+        } => {
+            use crate::card::effects::DynamicContext;
+            use crate::layers::{
+                AffectedObjects, ContinuousEffect, Duration, LayerModification,
+            };
+            // Evaluate the dynamic amount from the current board state
+            let ctx = DynamicContext {
+                hand_size: state.players[controller].hand.len(),
+                graveyard_card_types: vec![],
+                creatures_in_graveyard: 0,
+            };
+            let card_db_arc = state.card_db.as_ref().unwrap().clone();
+            let val = amount.evaluate(
+                controller,
+                &state.objects,
+                &state.battlefield,
+                &|id| card_db_arc.get(id),
+                Some(&ctx),
+            );
+            if val > 0 {
+                let ts = state.new_timestamp();
+                let duration = if *until_eot {
+                    Duration::UntilEndOfTurn
+                } else {
+                    Duration::Permanent
+                };
+                state.continuous_effects.push(ContinuousEffect {
+                    source_id: 0, // No specific source object
+                    controller,
+                    timestamp: ts,
+                    duration,
+                    affected: AffectedObjects::OtherCreaturesWithSubtypeControlledBy(
+                        subtype.clone(),
+                        controller,
+                    ),
+                    modification: LayerModification::ModifyPT(val, val),
+                });
+                state.invalidate_characteristics_cache();
+            }
+        }
+
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
