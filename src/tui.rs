@@ -249,8 +249,8 @@ impl App {
         if self.state.game_over {
             self.mode = UiMode::GameOver;
             let msg = match self.state.winner {
-                Some(0) => format!("YOU WIN on turn {}!", self.state.turn_number),
-                Some(_) => format!("You lost on turn {}.", self.state.turn_number),
+                Some(0) => format!("YOU WIN on turn {}!", self.state.game_turn()),
+                Some(_) => format!("You lost on turn {}.", self.state.game_turn()),
                 None => "Draw (turn limit reached).".into(),
             };
             self.status_log.push(msg);
@@ -270,7 +270,7 @@ impl App {
 
         self.action_log.push(format!(
             "T{} {:?}: {}",
-            self.state.turn_number, self.state.phase, desc
+            self.state.game_turn(), self.state.phase, desc
         ));
 
         self.status_log.push(format!("> {}", desc));
@@ -446,7 +446,7 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let header_text = format!(
         " Turn {} | Phase: {} | Life: {} | Opp Life: {} | Mana: {} | Actions: {} ",
-        app.state.turn_number,
+        app.state.game_turn(),
         phase_str,
         app.state.players[0].life,
         opp_life,

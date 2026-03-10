@@ -206,7 +206,7 @@ fn run_game_loop(
 
     GameResult {
         winner: state.winner,
-        turns: state.turn_number,
+        turns: state.game_turn(),
         actions_taken,
         final_life: [state.players[0].life, state.players[1].life],
     }
@@ -503,7 +503,7 @@ fn run_goldfish_loop(
 
     GameResult {
         winner: state.winner,
-        turns: state.turn_number,
+        turns: state.game_turn(),
         actions_taken,
         final_life: [state.players[0].life, state.players[1].life],
     }

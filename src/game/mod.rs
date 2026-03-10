@@ -1109,6 +1109,16 @@ impl GameState {
         self.opponents(player).into_iter().next().unwrap_or(0)
     }
 
+    /// Convert engine turn number to a Magic "game turn" for display.
+    ///
+    /// The engine increments `turn_number` for each player's turn, but in
+    /// Magic a "turn" is a full round of all players.  In a 2-player game:
+    /// engine turns 1,2 = game turn 1; engine turns 3,4 = game turn 2; etc.
+    pub fn game_turn(&self) -> u32 {
+        let n = self.players.len() as u32;
+        (self.turn_number + n - 1) / n
+    }
+
     /// All opponents of the given player (all non-eliminated players except self).
     pub fn opponents(&self, player: PlayerIndex) -> Vec<PlayerIndex> {
         (0..self.players.len())

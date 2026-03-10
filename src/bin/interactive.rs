@@ -176,7 +176,7 @@ fn main() {
 
                     action_log.push(format!(
                         "[T{} {:?} P{}] {}",
-                        state.turn_number, state.phase, player, desc
+                        state.game_turn(), state.phase, player, desc
                     ));
 
                     rules::apply_action(&mut state, chosen);
@@ -206,8 +206,8 @@ fn main() {
     display_game_state(&state, &db);
 
     match state.winner {
-        Some(0) => println!("*** YOU WIN on turn {}! ***", state.turn_number),
-        Some(_) => println!("*** YOU LOST on turn {}. ***", state.turn_number),
+        Some(0) => println!("*** YOU WIN on turn {}! ***", state.game_turn()),
+        Some(_) => println!("*** YOU LOST on turn {}. ***", state.game_turn()),
         None => println!("*** DRAW (turn limit reached). ***"),
     }
     println!(
@@ -231,7 +231,7 @@ fn display_game_state(state: &GameState, db: &CardDatabase) {
     println!("========================================");
     println!(
         "Turn {} | Phase: {:?} | Priority: P{}",
-        state.turn_number, state.phase, state.priority_player
+        state.game_turn(), state.phase, state.priority_player
     );
     println!("========================================");
 
