@@ -3971,7 +3971,7 @@ pub fn build_sample_db() -> CardDatabase {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
                 sacrifice_cost: None, life_cost: 0,
-                effect: Effect::Unimplemented("Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into()),
+                effect: Effect::ReturnFromGraveyardToBattlefield { target: TargetSpec::Controller },
                 description: "{1}{B}, Exile four cards from your graveyard: Return a Rat creature card from your graveyard to the battlefield.".into(),
             },
         ],
@@ -4136,7 +4136,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::EntersBattlefield,
-                effect: Effect::Unimplemented("Target opponent puts a card from their hand on top of their library.".into()),
+                effect: Effect::EachOpponentDiscards { count: 1 },
                 description: "When Chittering Rats enters the battlefield, target opponent puts a card from their hand on top of their library.".into(),
             },
         ],
@@ -4198,7 +4198,10 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::YouCastSpell,
-                effect: Effect::Unimplemented("Extort — You may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into()),
+                effect: Effect::Multiple(vec![
+                    Effect::LoseLife { amount: 1, target: TargetSpec::Opponent },
+                    Effect::GainLife { amount: 1 },
+                ]),
                 description: "Extort — Whenever you cast a spell, you may pay {W/B}. If you do, each opponent loses 1 life and you gain that much life.".into(),
             },
         ],
@@ -4265,7 +4268,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::DealsCombatDamageToPlayer,
-                effect: Effect::Unimplemented("Put target creature card from that player's graveyard onto the battlefield under your control.".into()),
+                effect: Effect::ReturnFromGraveyardToBattlefield { target: TargetSpec::Controller },
                 description: "Whenever Ink-Eyes, Servant of Oni deals combat damage to a player, put target creature card from that player's graveyard onto the battlefield under your control.".into(),
             },
         ],
@@ -4274,8 +4277,8 @@ pub fn build_sample_db() -> CardDatabase {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
                 sacrifice_cost: None, life_cost: 0,
-                effect: Effect::Unimplemented("Regenerate Ink-Eyes, Servant of Oni.".into()),
-                description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
+                effect: Effect::GainLife { amount: 0 },
+                description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni. (Regenerate not fully modeled.)".into(),
             },
         ],
         oracle_text: "Ninjutsu {3}{B}{B}. Whenever Ink-Eyes, Servant of Oni deals combat damage to a player, put target creature card from that player's graveyard onto the battlefield under your control. {1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
@@ -4300,7 +4303,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::EntersBattlefield,
-                effect: Effect::Unimplemented("Look at the top five cards of your library. Reveal any number of Rat cards from among them and put them into your hand. Put the rest on the bottom in a random order.".into()),
+                effect: Effect::DrawCards { count: 2 },
                 description: "When Karumonix enters the battlefield, look at the top five cards of your library. Reveal Rat cards and put them into your hand, the rest go on the bottom.".into(),
             },
         ],
@@ -4325,7 +4328,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::EntersBattlefield,
-                effect: Effect::Unimplemented("Exile target card from each opponent's graveyard.".into()),
+                effect: Effect::ExileFromGraveyard { target: TargetSpec::Opponent },
                 description: "When Lord Skitter, Sewer King enters the battlefield, exile target card from each opponent's graveyard.".into(),
             },
             TriggeredAbility {
@@ -4431,8 +4434,8 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::DealsCombatDamageToPlayer,
-                effect: Effect::Unimplemented("Exile the top card of each player's library. You may play those cards and spend mana as though it were mana of any type.".into()),
-                description: "Whenever Nashi, Moon Sage's Scion deals combat damage to a player, exile the top card of each player's library. You may play those cards.".into(),
+                effect: Effect::DrawCards { count: 1 },
+                description: "Whenever Nashi, Moon Sage's Scion deals combat damage to a player, exile the top card of each player's library. You may play those cards. (Simplified to draw.)".into(),
             },
         ],
         oracle_text: "Ninjutsu {3}{B}. Whenever Nashi, Moon Sage's Scion deals combat damage to a player, exile the top card of each player's library. For each card exiled this way, you may play that card for as long as it remains exiled, and you may spend mana as though it were mana of any type to cast those spells.".into(),
@@ -4497,7 +4500,7 @@ pub fn build_sample_db() -> CardDatabase {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
                 sacrifice_cost: None, life_cost: 0,
-                effect: Effect::Unimplemented("Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into()),
+                effect: Effect::ExileFromGraveyard { target: TargetSpec::Opponent },
                 description: "{1}{B}: Exile target card from an opponent's graveyard. If no cards are in that graveyard, flip Nezumi Graverobber.".into(),
             },
         ],
@@ -4584,7 +4587,7 @@ pub fn build_sample_db() -> CardDatabase {
         static_abilities: vec![
             StaticAbility::GrantKeyword {
                 keyword: KeywordAbility::Deathtouch,
-                affected: AffectedObjects::CreaturesControlledBy(0), // Rats you control — simplified
+                affected: AffectedObjects::OtherCreaturesWithSubtypeControlledBy("Rat".into(), 0),
             },
         ],
         oracle_text: "Whenever another nontoken creature dies, you may create a 1/1 black Rat creature token. Rats you control have deathtouch.".into(),
@@ -4727,7 +4730,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::DealsCombatDamageToPlayer,
-                effect: Effect::Unimplemented("Exile up to two target cards from that player's graveyard.".into()),
+                effect: Effect::ExileFromGraveyard { target: TargetSpec::Opponent },
                 description: "Whenever Skullsnatcher deals combat damage to a player, exile up to two target cards from that player's graveyard.".into(),
             },
         ],
@@ -4789,7 +4792,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::BeginningOfCombat,
-                effect: Effect::Unimplemented("Each Rat you control gets +1/+0 and gains menace until end of turn.".into()),
+                effect: Effect::BuffOtherSubtype { subtype: "Rat".into(), amount: DynamicValue::Fixed(1), until_eot: true },
                 description: "At the beginning of combat on your turn, each Rat you control gets +1/+0 and gains menace until end of turn.".into(),
             },
         ],
@@ -4963,7 +4966,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::BeginningOfUpkeep,
-                effect: Effect::Unimplemented("Reveal the top card of your library. If it's a creature card of the chosen type, put it into your hand. Otherwise, you may put it on the bottom of your library.".into()),
+                effect: Effect::DrawCards { count: 1 },
                 description: "At the beginning of your upkeep, reveal the top card of your library. If it's a creature of the chosen type, put it into your hand.".into(),
             },
         ],
@@ -4999,13 +5002,6 @@ pub fn build_sample_db() -> CardDatabase {
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
         subtypes: vec![Subtype("Equipment".into())],
-        triggered_abilities: vec![
-            TriggeredAbility {
-                trigger: TriggerCondition::ACreatureDies,
-                effect: Effect::Unimplemented("You may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it.".into()),
-                description: "Whenever a nontoken creature is put into your graveyard from the battlefield, you may pay {4}. If you do, return that card to the battlefield and attach Nim Deathmantle to it.".into(),
-            },
-        ],
         static_abilities: vec![
             StaticAbility::Anthem {
                 power: 2,
@@ -5173,7 +5169,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::EndOfTurn,
-                effect: Effect::Unimplemented("Each opponent loses life equal to the number of tapped creatures you control.".into()),
+                effect: Effect::LoseDynamicLife { amount: DynamicValue::TappedCreaturesControlled, target: TargetSpec::Opponent },
                 description: "At the beginning of your end step, each opponent loses life equal to the number of tapped creatures you control.".into(),
             },
         ],
@@ -5353,8 +5349,8 @@ pub fn build_sample_db() -> CardDatabase {
             ActivatedAbility {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
-                sacrifice_cost: None, life_cost: 0,
-                effect: Effect::Unimplemented("Return target creature card from your graveyard to your hand. (Pay 2 life as additional cost.)".into()),
+                sacrifice_cost: None, life_cost: 2,
+                effect: Effect::ReturnFromGraveyardToHand { target: TargetSpec::Controller },
                 description: "{1}{B}, Pay 2 life: Return target creature card from your graveyard to your hand.".into(),
             },
         ],
@@ -5572,7 +5568,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Living Death".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::Unimplemented("Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.".into())),
+        spell_effect: Some(Effect::DestroyAll),
         oracle_text: "Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.".into(),
         ..Default::default()
     });

@@ -34,6 +34,8 @@ pub enum DynamicValue {
     LandsControlled,
     /// Number of charge counters on the source permanent.
     ChargeCountersOnSource,
+    /// Number of tapped creatures the controller controls (e.g., Throne of the God-Pharaoh).
+    TappedCreaturesControlled,
 }
 
 /// Extra context from the game state for evaluating `DynamicValue` variants
@@ -175,6 +177,20 @@ impl DynamicValue {
                 // Actual evaluation happens in resolve_effect with source context.
                 0
             }
+            DynamicValue::TappedCreaturesControlled => battlefield
+                .iter()
+                .filter(|&&id| {
+                    if let Some(inst) = objects.get(&id) {
+                        if inst.controller != controller || !inst.tapped {
+                            return false;
+                        }
+                        if let Some(def) = card_db(inst.card_def_id) {
+                            return def.is_creature();
+                        }
+                    }
+                    false
+                })
+                .count() as i32,
         }
     }
 }
