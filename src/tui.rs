@@ -213,6 +213,14 @@ impl App {
             && self.actions_taken < MAX_ACTIONS
             && passes < 200
         {
+            // Fast-forward entire opponent turn without calling legal_actions().
+            if self.state.active_player != 0 {
+                let ff = rules::fast_forward_goldfish_turn(&mut self.state);
+                self.actions_taken += ff;
+                passes += ff as usize;
+                continue;
+            }
+
             let player = self.state.priority_player;
             let actions = legal_actions(&self.state);
 
