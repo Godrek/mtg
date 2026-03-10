@@ -225,6 +225,20 @@ impl App {
                 continue;
             }
 
+            // During opponent's turn, auto-pass for all players (goldfish has
+            // no meaningful actions and neither does the human pilot).
+            if self.state.active_player != 0 {
+                let action = if player != 0 {
+                    self.goldfish.choose_action(&self.state, player)
+                } else {
+                    Action::PassPriority
+                };
+                rules::apply_action(&mut self.state, &action);
+                self.actions_taken += 1;
+                passes += 1;
+                continue;
+            }
+
             if player != 0 {
                 let action = self.goldfish.choose_action(&self.state, player);
                 rules::apply_action(&mut self.state, &action);
