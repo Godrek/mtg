@@ -200,6 +200,33 @@ pub(super) fn mana_from_nonland_bonus_count(state: &GameState, player: PlayerInd
     count
 }
 
+/// Count how many permanents a player controls that have the
+/// `ManaFromSwampBonus` static ability (e.g., Nirkana Revenant, Crypt Ghast).
+/// Returns the total bonus amount (typically 1 per source).
+pub(super) fn mana_from_swamp_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
+    let db = state.card_db();
+    let mut count = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = match state.objects.get(&obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+        if inst.controller != player {
+            continue;
+        }
+        let def = match db.get(inst.card_def_id) {
+            Some(d) => d,
+            None => continue,
+        };
+        for sa in &def.static_abilities {
+            if matches!(sa, crate::layers::StaticAbility::ManaFromSwampBonus) {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
 /// Fire spell-cast triggers for a spell that was just cast.
 /// `caster` is the player who cast the spell. `is_creature` indicates whether
 /// the spell is a creature spell (relevant for OpponentCastsNoncreatureSpell).

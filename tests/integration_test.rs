@@ -5227,3 +5227,81 @@ fn test_mcts_parallel_goldfish_produces_valid_results() {
     // Sanity: parallel path should still find wins with a reasonable deck
     assert!(results.wins > 0, "Parallel MCTS should win at least one goldfish game");
 }
+
+#[test]
+fn test_nirkana_revenant_swamp_mana_bonus() {
+    // Nirkana Revenant: "Whenever you tap a Swamp for mana, add an additional {B}."
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::SWAMP, 1, ZoneType::Library);
+    }
+
+    // Put Nirkana Revenant on the battlefield
+    state.create_card_in_zone(sample::ids::NIRKANA_REVENANT, 0, ZoneType::Battlefield);
+    let swamp = state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Tap swamp for mana
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateManaAbility {
+            object_id: swamp,
+            ability_index: 0,
+        },
+    );
+
+    // Should produce 1 (base) + 1 (Nirkana bonus) = 2 black mana
+    assert_eq!(
+        state.players[0].mana_pool.black, 2,
+        "Swamp should produce 2 black mana with Nirkana Revenant (1 base + 1 bonus)"
+    );
+}
+
+#[test]
+fn test_nirkana_revenant_no_bonus_on_non_swamp() {
+    // Nirkana Revenant's bonus should NOT apply to non-Swamp lands.
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::SWAMP, 1, ZoneType::Library);
+    }
+
+    // Nirkana Revenant on battlefield
+    state.create_card_in_zone(sample::ids::NIRKANA_REVENANT, 0, ZoneType::Battlefield);
+    let island = state.create_card_in_zone(sample::ids::ISLAND, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Tap Island for mana
+    rules::apply_action(
+        &mut state,
+        &Action::ActivateManaAbility {
+            object_id: island,
+            ability_index: 0,
+        },
+    );
+
+    // Should produce only 1 blue mana, no bonus
+    assert_eq!(
+        state.players[0].mana_pool.blue, 1,
+        "Island should produce only 1 blue mana (no Nirkana bonus on non-Swamps)"
+    );
+    assert_eq!(
+        state.players[0].mana_pool.black, 0,
+        "No black mana bonus should be added for non-Swamp lands"
+    );
+}
