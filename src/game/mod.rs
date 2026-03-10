@@ -952,6 +952,27 @@ impl GameState {
             inst.zone_change_count += 1;
         }
 
+        // When a permanent leaves the battlefield, move all cards exiled by it
+        // to their owner's graveyard (e.g., Gustha's Scepter, Tidehollow Sculler).
+        if from == ZoneType::Battlefield {
+            let linked_exiles: Vec<(ObjectId, usize)> = self.players.iter().enumerate()
+                .flat_map(|(pi, p)| {
+                    p.exile.iter()
+                        .filter(|&&eid| self.objects.get(&eid).and_then(|i| i.exiled_by) == Some(obj_id))
+                        .map(move |&eid| (eid, pi))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            for (eid, player_idx) in linked_exiles {
+                if let Some(inst) = self.objects.get_mut(&eid) {
+                    inst.exiled_by = None;
+                }
+                self.players[player_idx].exile.retain(|&id| id != eid);
+                let owner_idx = self.objects[&eid].owner;
+                self.players[owner_idx].graveyard.push(eid);
+            }
+        }
+
         // Remove from all zones (brute force but correct)
         let owner = self.objects[&obj_id].owner;
         let controller = self.objects[&obj_id].controller;

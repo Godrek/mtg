@@ -299,6 +299,12 @@ pub enum Effect {
     ExileFromGraveyard {
         target: TargetSpec,
     },
+    /// Exile a card from controller's hand, linked to the source permanent
+    /// (e.g., Gustha's Scepter). The exiled card's `exiled_by` is set to the source.
+    ExileFromHandLinked,
+    /// Return a card exiled with the source permanent to its owner's hand
+    /// (e.g., Gustha's Scepter second ability).
+    ReturnLinkedExileToHand,
     /// Shuffle target(s) into their owner's library.
     ShuffleIntoLibrary {
         target: TargetSpec,
@@ -606,6 +612,10 @@ pub enum TargetSpec {
     NoTarget,
     /// Each creature on the battlefield (no targeting — affects all).
     EachCreature,
+    /// A card in the controller's hand (for effects that choose a hand card).
+    CardInHand,
+    /// A card in exile that was exiled by the source permanent.
+    CardInExileBySource,
 }
 
 /// Token creature definition.

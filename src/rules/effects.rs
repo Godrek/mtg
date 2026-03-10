@@ -565,6 +565,44 @@ pub(super) fn resolve_effect(
             }
         }
 
+        Effect::ExileFromHandLinked => {
+            // Exile a card from controller's hand, linked to the source permanent.
+            if let Some(source) = source_id {
+                for target in targets {
+                    if let Target::Object(id) = target {
+                        let controller = state.objects.get(&source)
+                            .map(|i| i.controller)
+                            .unwrap_or(0);
+                        if state.players[controller].hand.contains(id) {
+                            state.move_object(*id, ZoneType::Hand, ZoneType::Exile);
+                            if let Some(inst) = state.objects.get_mut(id) {
+                                inst.exiled_by = Some(source);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::ReturnLinkedExileToHand => {
+            // Return a card exiled by the source permanent to its owner's hand.
+            if let Some(source) = source_id {
+                for target in targets {
+                    if let Target::Object(id) = target {
+                        let owner = state.objects.get(id).map(|i| i.owner).unwrap_or(0);
+                        if state.players[owner].exile.contains(id)
+                            && state.objects.get(id).and_then(|i| i.exiled_by) == Some(source)
+                        {
+                            if let Some(inst) = state.objects.get_mut(id) {
+                                inst.exiled_by = None;
+                            }
+                            state.move_object(*id, ZoneType::Exile, ZoneType::Hand);
+                        }
+                    }
+                }
+            }
+        }
+
         Effect::ShuffleIntoLibrary { .. } => {
             use rand::seq::SliceRandom;
             for target in targets {

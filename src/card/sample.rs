@@ -5983,8 +5983,7 @@ pub fn build_sample_db() -> CardDatabase {
     // Artifact
     // {T}: Exile a card from your hand face down.
     // {T}: Return a card exiled with Gustha's Scepter to hand.
-    // When leaves: exiled cards go to graveyard.
-    // Simplified: {T}: discard a card (gets cards out of hand for Flubs)
+    // When leaves: exiled cards go to graveyard (handled by move_object linked exile cleanup).
     db.insert(CardDef {
         id: ids::GUSTHAS_SCEPTER,
         name: "Gustha's Scepter".into(),
@@ -5996,8 +5995,16 @@ pub fn build_sample_db() -> CardDatabase {
                 requires_tap: true,
                 sacrifice_cost: None,
                 life_cost: 0,
-                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Controller },
-                description: "{T}: Exile a card from your hand face down (simplified: discard).".into(),
+                effect: Effect::ExileFromHandLinked,
+                description: "{T}: Exile a card from your hand face down.".into(),
+            },
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::ReturnLinkedExileToHand,
+                description: "{T}: Return a card exiled with Gustha's Scepter to your hand.".into(),
             },
         ],
         oracle_text: "{T}: Exile a card from your hand face down. You may look at it for as long as it remains exiled. {T}: Return a card you own exiled with Gustha's Scepter to your hand.".into(),
