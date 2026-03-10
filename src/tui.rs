@@ -213,6 +213,14 @@ impl App {
             && self.actions_taken < MAX_ACTIONS
             && passes < 200
         {
+            // Fast-forward entire opponent turn without calling legal_actions().
+            if self.state.active_player != 0 {
+                let ff = rules::fast_forward_goldfish_turn(&mut self.state);
+                self.actions_taken += ff;
+                passes += ff as usize;
+                continue;
+            }
+
             let player = self.state.priority_player;
             let actions = legal_actions(&self.state);
 
@@ -220,20 +228,6 @@ impl App {
                 || (actions.len() == 1 && actions[0] == Action::PassPriority)
             {
                 rules::apply_action(&mut self.state, &Action::PassPriority);
-                self.actions_taken += 1;
-                passes += 1;
-                continue;
-            }
-
-            // During opponent's turn, auto-pass for all players (goldfish has
-            // no meaningful actions and neither does the human pilot).
-            if self.state.active_player != 0 {
-                let action = if player != 0 {
-                    self.goldfish.choose_action(&self.state, player)
-                } else {
-                    Action::PassPriority
-                };
-                rules::apply_action(&mut self.state, &action);
                 self.actions_taken += 1;
                 passes += 1;
                 continue;
