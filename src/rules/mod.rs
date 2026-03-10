@@ -177,12 +177,16 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let idx = *ability_index;
             let player = state.priority_player;
 
-            // Clone the mana ability to avoid borrow conflict
-            let ma = {
+            // Read mana ability and source properties in one borrow scope
+            let (ma, source_is_nonland, source_is_swamp) = {
                 let db = state.card_db();
                 let inst = &state.objects[&obj_id];
                 let def = db.get(inst.card_def_id).unwrap();
-                def.mana_abilities.get(idx).cloned()
+                (
+                    def.mana_abilities.get(idx).cloned(),
+                    !def.card_types.contains(&CardType::Land),
+                    def.subtypes.iter().any(|s| s.0 == "Swamp"),
+                )
             };
 
             if let Some(ma) = ma {
@@ -216,14 +220,6 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 }
 
                 // Check for ManaFromNonlandBonus (e.g., Kinnan, Bonder Prodigy)
-                let (source_is_nonland, source_is_swamp) = {
-                    let db = state.card_db();
-                    let inst = &state.objects[&obj_id];
-                    let def = db.get(inst.card_def_id).unwrap();
-                    let is_nonland = !def.card_types.contains(&CardType::Land);
-                    let is_swamp = def.subtypes.iter().any(|s| s.0 == "Swamp");
-                    (is_nonland, is_swamp)
-                };
                 if source_is_nonland {
                     let bonus = triggers::mana_from_nonland_bonus_count(state, player);
                     if bonus > 0 {
