@@ -943,6 +943,52 @@ pub(super) fn resolve_effect(
             // Evaluated with full context in the card-specific handlers
             // For now, this is a no-op placeholder
         }
+
+        Effect::CreateTokenCopyOfSource => {
+            // Create a token that is a copy of the source permanent (same card_def_id).
+            // The token inherits all abilities (e.g., Scute Swarm copies get landfall).
+            if let Some(sid) = source_id {
+                let card_def_id = state.objects.get(&sid).map(|i| i.card_def_id);
+                if let Some(cid) = card_def_id {
+                    let obj_id = state.create_card_in_zone(cid, controller, ZoneType::Battlefield);
+                    if let Some(inst) = state.objects.get_mut(&obj_id) {
+                        inst.controller = controller;
+                        inst.is_token = true;
+                        inst.summoning_sick = true;
+                    }
+                    state.refresh_continuous_effects();
+                    let _ = super::triggers::fire_triggers(
+                        state,
+                        TriggerCondition::EntersBattlefield,
+                        Some(obj_id),
+                    );
+                    super::triggers::check_triggers(
+                        state,
+                        TriggerCondition::ACreatureEnters,
+                        None,
+                    );
+                    let _ = super::triggers::flush_triggers(state);
+                }
+            }
+        }
+
+        Effect::CreateTokenFromDef { card_def_id } => {
+            // Create a token from a pre-registered CardDef in the database.
+            let obj_id = state.create_card_in_zone(*card_def_id, controller, ZoneType::Battlefield);
+            if let Some(inst) = state.objects.get_mut(&obj_id) {
+                inst.controller = controller;
+                inst.is_token = true;
+                inst.summoning_sick = true;
+            }
+            state.refresh_continuous_effects();
+            let _ = super::triggers::fire_triggers(
+                state,
+                TriggerCondition::EntersBattlefield,
+                Some(obj_id),
+            );
+            super::triggers::check_triggers(state, TriggerCondition::ACreatureEnters, None);
+            let _ = super::triggers::flush_triggers(state);
+        }
     }
 }
 
@@ -988,6 +1034,12 @@ fn evaluate_condition(
         Condition::Always => true,
         Condition::HandIsEmpty => {
             state.players[controller].hand.is_empty()
+        }
+        Condition::ControlNOrMorePermanents { count } => {
+            let matching = state.battlefield.iter().filter(|&&id| {
+                state.objects.get(&id).map_or(false, |inst| inst.controller == controller)
+            }).count();
+            matching >= *count as usize
         }
     }
 }

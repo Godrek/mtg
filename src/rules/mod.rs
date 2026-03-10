@@ -706,25 +706,134 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
     }
 }
 
-/// Draw cards for a player.
+/// Check if a player controls a permanent with a given static ability.
+fn has_static_ability_on_battlefield(
+    state: &GameState,
+    player: PlayerIndex,
+    target_ability: &crate::layers::StaticAbility,
+) -> bool {
+    let db = state.card_db();
+    state.battlefield.iter().any(|&obj_id| {
+        state.objects.get(&obj_id).map_or(false, |inst| {
+            if inst.controller != player {
+                return false;
+            }
+            db.get(inst.card_def_id).map_or(false, |def| {
+                def.static_abilities.iter().any(|sa| {
+                    std::mem::discriminant(sa) == std::mem::discriminant(target_ability)
+                })
+            })
+        })
+    })
+}
+
+/// Draw cards for a player, applying draw replacement effects.
 pub fn draw_cards(state: &mut GameState, player: PlayerIndex, count: usize) {
+    // Check for draw replacement effects on the battlefield
+    let has_renfield = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::RenfieldDrawReplacement,
+    );
+    let has_abundance = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::AbundanceReplacement,
+    );
+    let has_phial = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::PhialDrawDoubler,
+    );
+
     for _ in 0..count {
         if state.players[player].library.is_empty() {
             // Player loses for drawing from empty library
             state.players[player].has_lost = true;
             return;
         }
-        let card_id = state.players[player].library.remove(0);
-        state.players[player].hand.push(card_id);
-        state.emit_event(GameEvent::CardDrawn {
-            player,
-            object: card_id,
-        });
-        state.emit_event(GameEvent::ZoneChange {
-            object: card_id,
-            from: Zone::Library,
-            to: Zone::Hand,
-        });
+
+        let hand_was_empty = state.players[player].hand.is_empty();
+
+        if has_renfield {
+            // Renfield replacement: exile top 2 to hand instead of drawing 1.
+            // Simplified: draw 2 cards (in practice they'd be exiled and playable this turn).
+            for _ in 0..2 {
+                if state.players[player].library.is_empty() {
+                    break;
+                }
+                let card_id = state.players[player].library.remove(0);
+                state.players[player].hand.push(card_id);
+                state.emit_event(GameEvent::CardDrawn {
+                    player,
+                    object: card_id,
+                });
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            }
+        } else if has_abundance {
+            // Abundance replacement: reveal cards until you find a land, put it in hand.
+            // In a lands deck, always choose "land" for maximum land drops.
+            let land_idx = {
+                let db = state.card_db();
+                state.players[player].library.iter().position(|&id| {
+                    state.objects.get(&id)
+                        .and_then(|inst| db.get(inst.card_def_id))
+                        .map_or(false, |def| def.is_land())
+                })
+            };
+            if let Some(idx) = land_idx {
+                let card_id = state.players[player].library.remove(idx);
+                state.players[player].hand.push(card_id);
+                state.emit_event(GameEvent::CardDrawn {
+                    player,
+                    object: card_id,
+                });
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            } else {
+                // No lands left, draw normally
+                let card_id = state.players[player].library.remove(0);
+                state.players[player].hand.push(card_id);
+                state.emit_event(GameEvent::CardDrawn {
+                    player,
+                    object: card_id,
+                });
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            }
+        } else {
+            // Normal draw
+            let card_id = state.players[player].library.remove(0);
+            state.players[player].hand.push(card_id);
+            state.emit_event(GameEvent::CardDrawn {
+                player,
+                object: card_id,
+            });
+            state.emit_event(GameEvent::ZoneChange {
+                object: card_id,
+                from: Zone::Library,
+                to: Zone::Hand,
+            });
+        }
+
+        // Phial of Galadriel: draw an extra card if hand was empty before this draw
+        if has_phial && hand_was_empty && !state.players[player].library.is_empty() {
+            let card_id = state.players[player].library.remove(0);
+            state.players[player].hand.push(card_id);
+            state.emit_event(GameEvent::CardDrawn {
+                player,
+                object: card_id,
+            });
+            state.emit_event(GameEvent::ZoneChange {
+                object: card_id,
+                from: Zone::Library,
+                to: Zone::Hand,
+            });
+        }
 
         // Fire OpponentDrawsCard triggers (e.g. Consecrated Sphinx)
         triggers::fire_card_draw_triggers(state, player);

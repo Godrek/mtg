@@ -436,6 +436,16 @@ pub enum Effect {
         target: TargetSpec,
     },
 
+    /// Create a token that is a copy of the source permanent (e.g., Scute Swarm at 6+ lands).
+    /// The token inherits the source's card_def_id and all its abilities.
+    CreateTokenCopyOfSource,
+
+    /// Create a token from a specific CardDef in the database (e.g., Chocobo token with
+    /// landfall trigger). The CardDef must already be registered.
+    CreateTokenFromDef {
+        card_def_id: u64,
+    },
+
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
@@ -462,6 +472,10 @@ pub enum Condition {
     Always,
     /// Controller has no cards in hand (hellbent).
     HandIsEmpty,
+    /// Controller controls N or more total permanents (for ascend/city's blessing).
+    ControlNOrMorePermanents {
+        count: u32,
+    },
 }
 
 /// Predefined token types used across many cards.

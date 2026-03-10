@@ -59,6 +59,8 @@ pub enum Duration {
     UntilEndOfTurn,
     /// Permanent modification (e.g., from a resolved spell like Riding the Dilu Horse).
     Permanent,
+    /// Lasts as long as the source card is in a graveyard (e.g., Wonder).
+    WhileSourceInGraveyard,
 }
 
 /// What objects a continuous effect applies to.
@@ -550,6 +552,28 @@ pub enum StaticAbility {
     /// "Creatures with power greater than the number of cards in your hand can't attack"
     /// (e.g., Ensnaring Bridge)
     EnsnaringBridge,
+    /// While this card is in the graveyard and you control an Island, creatures you
+    /// control have flying. (Wonder)
+    /// Checked in refresh_continuous_effects from graveyard, not via to_continuous_effects.
+    WonderInGraveyard,
+    /// Replaces draws: instead of drawing, reveal cards until you find a land (or nonland).
+    /// Put that card in hand, rest on bottom. (Abundance)
+    /// Checked directly in draw_cards.
+    AbundanceReplacement,
+    /// Doubles draws when hand is empty: if you would draw with no cards in hand,
+    /// draw two instead. (Phial of Galadriel)
+    /// Checked directly in draw_cards.
+    PhialDrawDoubler,
+    /// Replaces draws: exile the top two cards instead of drawing one.
+    /// You may play those cards this turn. (Renfield / Eruth)
+    /// Checked directly in draw_cards — simplified as drawing 2 cards.
+    RenfieldDrawReplacement,
+    /// Grants each land you control "{T}: Mill a card." (Six)
+    /// Checked directly in legal_actions.
+    GrantLandsTapMill,
+    /// You may play lands from exile that were exiled by this source. (Six)
+    /// Checked directly in legal_actions.
+    PlayLandsFromExileBySource,
 }
 
 impl StaticAbility {
@@ -631,6 +655,13 @@ impl StaticAbility {
             StaticAbility::LandsAreAllBasicTypes => vec![],
             StaticAbility::AllLandsAreForests => vec![],
             StaticAbility::EnsnaringBridge => vec![],
+            // These are checked directly in specific game logic:
+            StaticAbility::WonderInGraveyard => vec![],
+            StaticAbility::AbundanceReplacement => vec![],
+            StaticAbility::PhialDrawDoubler => vec![],
+            StaticAbility::RenfieldDrawReplacement => vec![],
+            StaticAbility::GrantLandsTapMill => vec![],
+            StaticAbility::PlayLandsFromExileBySource => vec![],
         }
     }
 }

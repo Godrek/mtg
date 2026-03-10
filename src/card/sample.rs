@@ -5628,12 +5628,13 @@ pub fn build_sample_db() -> CardDatabase {
     // Enchantment
     // If you would draw a card, you may instead choose land or nonland. Reveal cards until
     // you reveal a card of the chosen kind. Put that card into your hand and the rest on bottom.
-    // Simplified: Just an enchantment (replacement effect too complex for now)
+    // Implemented: Draw replacement — always chooses "land" (optimal in lands deck).
     db.insert(CardDef {
         id: ids::ABUNDANCE,
         name: "Abundance".into(),
         mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
         card_types: vec![CardType::Enchantment],
+        static_abilities: vec![StaticAbility::AbundanceReplacement],
         oracle_text: "If you would draw a card, you may instead choose land or nonland. Reveal cards from the top of your library until you reveal a card of the chosen kind. Put that card into your hand and put all other cards revealed this way on the bottom of your library in a random order.".into(),
         ..Default::default()
     });
@@ -5642,6 +5643,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Enchantment — Aura
     // Flash, Storm
     // Enchant creature. Enchanted creature loses all abilities, is a 1/1 blue Frog.
+    // Primarily a removal spell — dead in goldfish (no opponent creatures to target).
+    // Kept for completeness: if cast, acts as P/T setter + ability remover on enchanted creature.
     db.insert(CardDef {
         id: ids::AMPHIBIAN_DOWNPOUR,
         name: "Amphibian Downpour".into(),
@@ -5656,6 +5659,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Birgi, God of Storytelling {2}{R}
     // Legendary Creature — God 3/3
     // Whenever you cast a spell, add {R}.
+    // Boast — {1}: Exile the top card of your library. You may play that card this turn.
+    // Boast simplified as activated: {1}: Draw a card (approximates exile-play from top).
     db.insert(CardDef {
         id: ids::BIRGI_GOD_OF_STORYTELLING,
         name: "Birgi, God of Storytelling".into(),
@@ -5670,6 +5675,16 @@ pub fn build_sample_db() -> CardDatabase {
                 trigger: TriggerCondition::YouCastSpell,
                 effect: Effect::AddMana { color: Some(Color::Red), amount: 1 },
                 description: "Whenever you cast a spell, add {R}.".into(),
+            },
+        ],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 0, 0, 0),
+                requires_tap: false,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::DrawCards { count: 1 },
+                description: "Boast — {1}: Exile the top card of your library. You may play that card this turn. (Simplified: draw a card.)".into(),
             },
         ],
         oracle_text: "Whenever you cast a spell, add {R}. Boast — {1}: Exile the top card of your library. You may play that card this turn.".into(),
@@ -5750,7 +5765,7 @@ pub fn build_sample_db() -> CardDatabase {
     // Chocobo Racetrack {3}{G}{G}
     // Artifact
     // Landfall — Create a 2/2 green Bird creature token with landfall +1/+0
-    // Simplified: Landfall → create 2/2 Bird token
+    // Token defined as full CardDef (ids::CHOCOBO_TOKEN) with its own landfall trigger.
     db.insert(CardDef {
         id: ids::CHOCOBO_RACETRACK,
         name: "Chocobo Racetrack".into(),
@@ -5759,16 +5774,8 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::ALandYouControlEnters,
-                effect: Effect::CreateToken(TokenDef {
-                    name: "Chocobo".into(),
-                    power: 2,
-                    toughness: 2,
-                    colors: vec![Color::Green],
-
-                    subtypes: vec![Subtype("Bird".into())],
-                    keywords: vec![],
-                }),
-                description: "Landfall — Whenever a land you control enters, create a 2/2 green Bird creature token.".into(),
+                effect: Effect::CreateTokenFromDef { card_def_id: ids::CHOCOBO_TOKEN },
+                description: "Landfall — Whenever a land you control enters, create a 2/2 green Bird creature token with landfall +1/+0.".into(),
             },
         ],
         oracle_text: "Landfall — Whenever a land you control enters, create a 2/2 green Bird creature token with \"Whenever a land you control enters, this creature gets +1/+0 until end of turn.\"".into(),
@@ -5862,8 +5869,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Enchantment — Class
     // Level 1: Whenever a land enters under your control, gain 1 life.
     // Level 2 {1}{G}: You may play an additional land on each of your turns.
-    // Level 3 {3}{G}{G}: (complex, simplified)
-    // Simplified: level 1 abilities only + extra land drop static
+    // Level 3 {3}{G}{G}: Target land becomes creature with P/T = lands controlled.
+    // Levels 1+2 always active (class leveling not in engine). Level 3 not modeled.
     db.insert(CardDef {
         id: ids::DRUID_CLASS,
         name: "Druid Class".into(),
@@ -5908,11 +5915,12 @@ pub fn build_sample_db() -> CardDatabase {
     // Artifact
     // Multikicker {2}. Enters with a charge counter for each kick.
     // {T}: Add {C} for each charge counter.
-    // Simplified: 2-mana artifact that taps for {C}.
+    // Simplified: costs {0}, taps for 1 {C}. Multikicker/charge counters not in engine.
+    // In goldfish, casting for {0} and getting 1 colorless is a reasonable floor.
     db.insert(CardDef {
         id: ids::EVERFLOWING_CHALICE,
         name: "Everflowing Chalice".into(),
-        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 0)),
         card_types: vec![CardType::Artifact],
         mana_abilities: vec![ManaAbility::TapForColorless],
         oracle_text: "Multikicker {2}. Everflowing Chalice enters with a charge counter on it for each time it was kicked. {T}: Add {C} for each charge counter on Everflowing Chalice.".into(),
@@ -5953,13 +5961,21 @@ pub fn build_sample_db() -> CardDatabase {
     // Level 1: You may look at the top card of your library.
     // Level 2 {3}{U}: Play cards from top of library while you've cast a spell this turn.
     // Level 3 {2}{U}: Spells from elsewhere cost {2} less.
-    // Simplified: 1-mana enchantment (effects too complex for full implementation)
+    // Class leveling not in engine. Level 1 (look at top) is informational only.
+    // Approximation: scry 1 on ETB to represent card selection value.
     db.insert(CardDef {
         id: ids::FORTUNE_TELLERS_TALENT,
         name: "Fortune Teller's Talent".into(),
         mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
         card_types: vec![CardType::Enchantment],
         subtypes: vec![Subtype("Class".into())],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::Scry { count: 1 },
+                description: "When this enters, scry 1 (approximates library-top knowledge).".into(),
+            },
+        ],
         oracle_text: "You may look at the top card of your library any time. {3}{U}: Level 2 — As long as you've cast a spell this turn, you may play cards from the top of your library. {2}{U}: Level 3 — Spells you cast from anywhere other than your hand cost {2} less to cast.".into(),
         ..Default::default()
     });
@@ -5967,8 +5983,9 @@ pub fn build_sample_db() -> CardDatabase {
     // Glacierwood Siege {1}{G}{U}
     // Enchantment
     // Choose Temur or Sultai.
+    // Temur — Whenever you cast instant/sorcery, mill 4.
     // Sultai — You may play lands from your graveyard.
-    // In goldfish, Sultai mode is always chosen.
+    // Sultai is always optimal in goldfish (lands from graveyard > mill in a lands deck).
     db.insert(CardDef {
         id: ids::GLACIERWOOD_SIEGE,
         name: "Glacierwood Siege".into(),
@@ -6092,7 +6109,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Artifact
     // Whenever you discard a card, choose one that hasn't been chosen this turn:
     // • Draw a card. • Create a Treasure token. • Each opponent loses 3 life.
-    // Simplified: Whenever you discard → draw a card (most useful mode in goldfish)
+    // Modal: goldfish AI picks first available mode (draw > treasure > drain).
+    // "Hasn't been chosen this turn" restriction not modeled (minor).
     db.insert(CardDef {
         id: ids::MONUMENT_TO_ENDURANCE,
         name: "Monument to Endurance".into(),
@@ -6101,8 +6119,15 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::YouDiscardACard,
-                effect: Effect::DrawCards { count: 1 },
-                description: "Whenever you discard a card, draw a card (simplified from modal choice).".into(),
+                effect: Effect::Modal {
+                    choices: vec![
+                        Effect::DrawCards { count: 1 },
+                        Effect::CreatePredefinedToken { token_type: PredefinedToken::Treasure, count: 1 },
+                        Effect::EachOpponentLosesLife { amount: 3 },
+                    ],
+                    choose_count: 1,
+                },
+                description: "Whenever you discard a card, choose one — • Draw a card. • Create a Treasure token. • Each opponent loses 3 life.".into(),
             },
         ],
         oracle_text: "Whenever you discard a card, choose one that hasn't been chosen this turn — • Draw a card. • Create a Treasure token. • Each opponent loses 3 life.".into(),
@@ -6156,8 +6181,9 @@ pub fn build_sample_db() -> CardDatabase {
     // Phial of Galadriel {3}
     // Legendary Artifact
     // If you would draw a card while you have no cards in hand, draw two cards instead.
+    // If you would gain life while you have 5 or less life, gain twice that much instead.
     // {T}: Add one mana of any color.
-    // Simplified: Mana rock that taps for any color.
+    // Draw doubling implemented via PhialDrawDoubler. Life doubling not modeled.
     db.insert(CardDef {
         id: ids::PHIAL_OF_GALADRIEL,
         name: "Phial of Galadriel".into(),
@@ -6165,6 +6191,7 @@ pub fn build_sample_db() -> CardDatabase {
         card_types: vec![CardType::Artifact],
         supertypes: vec![Supertype::Legendary],
         mana_abilities: vec![ManaAbility::TapForAny],
+        static_abilities: vec![StaticAbility::PhialDrawDoubler],
         oracle_text: "If you would draw a card while you have no cards in hand, draw two cards instead. If you would gain life while you have 5 or less life, you gain twice that much life instead. {T}: Add one mana of any color.".into(),
         ..Default::default()
     });
@@ -6186,7 +6213,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Legendary Creature — Human Wizard 2/4
     // If you would draw a card, exile the top two cards of your library instead.
     // You may play those cards this turn.
-    // Simplified: 2/4 creature (replacement effect too complex)
+    // Implemented: draw replacement that draws 2 cards instead of 1 (approximates
+    // the exile-and-play-this-turn effect as doubled card flow).
     db.insert(CardDef {
         id: ids::RENFIELD_DELUSIONAL_MINION,
         name: "Renfield, Delusional Minion".into(),
@@ -6196,6 +6224,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Human".into()), Subtype("Wizard".into())],
         power: Some(2),
         toughness: Some(4),
+        static_abilities: vec![StaticAbility::RenfieldDrawReplacement],
         oracle_text: "If you would draw a card, exile the top two cards of your library instead. You may play those cards this turn.".into(),
         ..Default::default()
     });
@@ -6240,7 +6269,9 @@ pub fn build_sample_db() -> CardDatabase {
     // Scute Swarm {2}{G}
     // Creature — Insect 1/1
     // Landfall — Create a 1/1 green Insect creature token.
-    // (If you control 6+ lands, create a copy of Scute Swarm instead — too complex)
+    // If you control 6+ lands, create a token copy of Scute Swarm instead.
+    // Implemented: Conditional checks land count. Copy tokens inherit landfall trigger,
+    // enabling exponential growth at 6+ lands.
     db.insert(CardDef {
         id: ids::SCUTE_SWARM,
         name: "Scute Swarm".into(),
@@ -6252,16 +6283,19 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::ALandYouControlEnters,
-                effect: Effect::CreateToken(TokenDef {
-                    name: "Insect".into(),
-                    power: 1,
-                    toughness: 1,
-                    colors: vec![Color::Green],
-
-                    subtypes: vec![Subtype("Insect".into())],
-                    keywords: vec![],
-                }),
-                description: "Landfall — Whenever a land enters the battlefield under your control, create a 1/1 green Insect creature token.".into(),
+                effect: Effect::Conditional {
+                    condition: Condition::ControlNOrMore { count: 6, card_type: CardType::Land },
+                    if_true: Box::new(Effect::CreateTokenCopyOfSource),
+                    if_false: Some(Box::new(Effect::CreateToken(TokenDef {
+                        name: "Insect".into(),
+                        power: 1,
+                        toughness: 1,
+                        colors: vec![Color::Green],
+                        subtypes: vec![Subtype("Insect".into())],
+                        keywords: vec![],
+                    }))),
+                },
+                description: "Landfall — Whenever a land enters the battlefield under your control, create a 1/1 green Insect creature token. If you control six or more lands, create a token that's a copy of Scute Swarm instead.".into(),
             },
         ],
         oracle_text: "Landfall — Whenever a land enters the battlefield under your control, create a 1/1 green Insect creature token. If you control six or more lands, create a token that's a copy of Scute Swarm instead.".into(),
@@ -6274,7 +6308,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Lands you control have "{T}: Mill a card."
     // Whenever a land card is put into your graveyard, you may exile it.
     // You may play lands exiled with Six.
-    // Simplified: 1/4 reach creature with self-mill synergy
+    // Implemented: {T}: Mill (on Six itself), landfall triggers mill (approximates
+    // lands having mill), PlayLandsFromGraveyard (approximates the exile-and-play loop).
     db.insert(CardDef {
         id: ids::SIX,
         name: "Six".into(),
@@ -6285,6 +6320,24 @@ pub fn build_sample_db() -> CardDatabase {
         power: Some(1),
         toughness: Some(4),
         keywords: vec![KeywordAbility::Reach],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::MillCards { count: 1, target: TargetSpec::Controller },
+                description: "{T}: Mill a card (approximates lands having mill).".into(),
+            },
+        ],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::MillCards { count: 1, target: TargetSpec::Controller },
+                description: "Landfall — Mill a card (approximates lands having mill tap ability).".into(),
+            },
+        ],
+        static_abilities: vec![StaticAbility::PlayLandsFromGraveyard],
         oracle_text: "Reach. Lands you control have \"{T}: Mill a card.\" Whenever a land card is put into your graveyard from anywhere, you may exile it. You may play land cards exiled with Six.".into(),
         ..Default::default()
     });
@@ -6318,7 +6371,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Land
     // {T}: Add {C}.
     // {2}, {T}: Thespian's Stage becomes a copy of target land, except it has this ability.
-    // Simplified: colorless land
+    // Copy effect not in engine. Kept as colorless land with tap for {C}.
+    // In the Flubs deck, primarily used to copy Valakut for extra damage triggers.
     db.insert(CardDef {
         id: ids::THESPIANS_STAGE,
         name: "Thespian's Stage".into(),
@@ -6381,9 +6435,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Valakut enters tapped. {T}: Add {R}.
     // Whenever a Mountain enters under your control, if you control 5+ other Mountains,
     // Valakut deals 3 damage to any target.
-    // Simplified: ETB tapped land that taps for {R}. Landfall trigger that deals 3 to opponent.
-    // The mountain check is simplified to always fire (relies on Prismatic Omen / Dryad making
-    // all lands Mountains).
+    // Mountain check: requires 6+ total lands (approximates "5 other Mountains" since
+    // Prismatic Omen / Dryad makes all lands Mountains in this deck).
     db.insert(CardDef {
         id: ids::VALAKUT_THE_MOLTEN_PINNACLE,
         name: "Valakut, the Molten Pinnacle".into(),
@@ -6409,7 +6462,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Land
     // As Vesuva enters, you may choose a land on the battlefield. If you do, Vesuva enters
     // as a copy of that land.
-    // Simplified: colorless land that enters tapped.
+    // Copy effect not in engine. Enters tapped, taps for colorless.
+    // In this deck, primarily used to copy Valakut for extra damage triggers.
     db.insert(CardDef {
         id: ids::VESUVA,
         name: "Vesuva".into(),
@@ -6440,7 +6494,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Creature — Dinosaur 5/5
     // Ascend. You may play an additional land on each of your turns.
     // Wayward Swordtooth can't attack or block unless you have the city's blessing (10+ perms).
-    // Simplified: extra land drop + can't attack keyword
+    // Implemented: CantBlock always, but can attack once you control 10+ permanents.
+    // Without city's blessing, acts as a wall; with it, becomes a 5/5 attacker.
     db.insert(CardDef {
         id: ids::WAYWARD_SWORDTOOTH,
         name: "Wayward Swordtooth".into(),
@@ -6449,7 +6504,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Dinosaur".into())],
         power: Some(5),
         toughness: Some(5),
-        keywords: vec![KeywordAbility::CantBlock, KeywordAbility::Defender],
+        keywords: vec![KeywordAbility::CantBlock],
         static_abilities: vec![StaticAbility::ExtraLandDrops { count: 1 }],
         oracle_text: "Ascend. You may play an additional land on each of your turns. Wayward Swordtooth can't attack or block unless you have the city's blessing.".into(),
         ..Default::default()
@@ -6460,7 +6515,8 @@ pub fn build_sample_db() -> CardDatabase {
     // Flying
     // As long as Wonder is in your graveyard and you control an Island,
     // creatures you control have flying.
-    // Simplified: 2/2 flyer
+    // Implemented: Flying on the creature + WonderInGraveyard grants flying to all
+    // creatures from the graveyard (Island check assumed true with Prismatic Omen/Dryad).
     db.insert(CardDef {
         id: ids::WONDER,
         name: "Wonder".into(),
@@ -6470,6 +6526,7 @@ pub fn build_sample_db() -> CardDatabase {
         power: Some(2),
         toughness: Some(2),
         keywords: vec![KeywordAbility::Flying],
+        static_abilities: vec![StaticAbility::WonderInGraveyard],
         oracle_text: "Flying. As long as Wonder is in your graveyard and you control an Island, creatures you control have flying.".into(),
         ..Default::default()
     });
@@ -6485,6 +6542,29 @@ pub fn build_sample_db() -> CardDatabase {
         mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
         static_abilities: vec![StaticAbility::AllLandsAreForests],
         oracle_text: "Each land is a Forest in addition to its other land types.".into(),
+        ..Default::default()
+    });
+
+    // --- Flubs Deck Token Definitions ---
+    // These are full CardDefs (not simple TokenDefs) because they need triggered abilities.
+
+    // Chocobo Token 2/2 green Bird with landfall +1/+0
+    // Created by Chocobo Racetrack. Has its own landfall trigger.
+    db.insert(CardDef {
+        id: ids::CHOCOBO_TOKEN,
+        name: "Chocobo".into(),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Bird".into())],
+        power: Some(2),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::Buff { power: 1, toughness: 0, until_eot: true },
+                description: "Whenever a land you control enters, this creature gets +1/+0 until end of turn.".into(),
+            },
+        ],
+        oracle_text: "2/2 green Bird token. Whenever a land you control enters, this creature gets +1/+0 until end of turn.".into(),
         ..Default::default()
     });
 
