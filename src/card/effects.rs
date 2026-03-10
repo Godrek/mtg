@@ -30,6 +30,10 @@ pub enum DynamicValue {
     CreaturesWithSubtype(String),
     /// A fixed value (for testing / compatibility).
     Fixed(i32),
+    /// Number of lands the controller controls.
+    LandsControlled,
+    /// Number of charge counters on the source permanent.
+    ChargeCountersOnSource,
 }
 
 /// Extra context from the game state for evaluating `DynamicValue` variants
@@ -150,6 +154,27 @@ impl DynamicValue {
                 })
                 .count() as i32,
             DynamicValue::Fixed(val) => *val,
+            DynamicValue::LandsControlled => {
+                battlefield
+                    .iter()
+                    .filter(|&&id| {
+                        if let Some(inst) = objects.get(&id) {
+                            if inst.controller != controller {
+                                return false;
+                            }
+                            if let Some(def) = card_db(inst.card_def_id) {
+                                return def.is_land();
+                            }
+                        }
+                        false
+                    })
+                    .count() as i32
+            }
+            DynamicValue::ChargeCountersOnSource => {
+                // This needs source_id context; return 0 as fallback.
+                // Actual evaluation happens in resolve_effect with source context.
+                0
+            }
         }
     }
 }
@@ -381,6 +406,30 @@ pub enum Effect {
         until_eot: bool,
     },
 
+    /// Grant an extra land play for this turn (e.g., Explore sorcery).
+    ExtraLandDrop,
+
+    /// Surveil N — look at top N cards, put any into graveyard, rest on top.
+    Surveil {
+        count: u32,
+    },
+
+    /// Add mana of any color (e.g., Lotus Cobra landfall).
+    AddManaOfAnyColor {
+        amount: u32,
+    },
+
+    /// Double the power of the source/attached creature until end of turn.
+    DoublePowerUntilEOT {
+        target: TargetSpec,
+    },
+
+    /// Deal dynamic damage (e.g., Valakut deals 3 per mountain).
+    DealDynamicDamage {
+        amount: DynamicValue,
+        target: TargetSpec,
+    },
+
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
@@ -405,6 +454,8 @@ pub enum Condition {
     },
     /// Always true (for testing / default).
     Always,
+    /// Controller has no cards in hand (hellbent).
+    HandIsEmpty,
 }
 
 /// Predefined token types used across many cards.

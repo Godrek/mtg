@@ -1,6 +1,7 @@
 //! Sample card definitions for testing — classic MTG cards.
 
 use crate::card::*;
+use crate::card::effects::{Condition, PredefinedToken};
 use crate::game::CardDatabase;
 use crate::layers::{AffectedObjects, StaticAbility};
 use crate::mana::{Color, ManaCost};
@@ -5576,6 +5577,910 @@ pub fn build_sample_db() -> CardDatabase {
         ..Default::default()
     });
 
+    // =========================================================================
+    // Flubs, the Fool Commander Deck cards
+    // =========================================================================
+
+    // --- Commander ---
+
+    // Flubs, the Fool {G}{U}{R}
+    // Legendary Creature — Frog Scout 0/5
+    // You may play an additional land on each of your turns.
+    // Whenever you play a land or cast a spell, draw a card if you have no cards in hand.
+    // Otherwise, discard a card.
+    db.insert(CardDef {
+        id: ids::FLUBS_THE_FOOL,
+        name: "Flubs, the Fool".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 1, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Frog".into()), Subtype("Scout".into())],
+        power: Some(0),
+        toughness: Some(5),
+        static_abilities: vec![
+            StaticAbility::ExtraLandDrops { count: 1 },
+        ],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouPlayALand,
+                effect: Effect::Conditional {
+                    condition: Condition::HandIsEmpty,
+                    if_true: Box::new(Effect::DrawCards { count: 1 }),
+                    if_false: Some(Box::new(Effect::DiscardCards { count: 1, target: TargetSpec::Controller })),
+                },
+                description: "Whenever you play a land, draw a card if you have no cards in hand. Otherwise, discard a card.".into(),
+            },
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::Conditional {
+                    condition: Condition::HandIsEmpty,
+                    if_true: Box::new(Effect::DrawCards { count: 1 }),
+                    if_false: Some(Box::new(Effect::DiscardCards { count: 1, target: TargetSpec::Controller })),
+                },
+                description: "Whenever you cast a spell, draw a card if you have no cards in hand. Otherwise, discard a card.".into(),
+            },
+        ],
+        oracle_text: "You may play an additional land on each of your turns. Whenever you play a land or cast a spell, draw a card if you have no cards in hand. Otherwise, discard a card.".into(),
+        ..Default::default()
+    });
+
+    // Abundance {2}{G}{G}
+    // Enchantment
+    // If you would draw a card, you may instead choose land or nonland. Reveal cards until
+    // you reveal a card of the chosen kind. Put that card into your hand and the rest on bottom.
+    // Simplified: Just an enchantment (replacement effect too complex for now)
+    db.insert(CardDef {
+        id: ids::ABUNDANCE,
+        name: "Abundance".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        oracle_text: "If you would draw a card, you may instead choose land or nonland. Reveal cards from the top of your library until you reveal a card of the chosen kind. Put that card into your hand and put all other cards revealed this way on the bottom of your library in a random order.".into(),
+        ..Default::default()
+    });
+
+    // Amphibian Downpour {2}{U}
+    // Enchantment — Aura
+    // Flash, Storm
+    // Enchant creature. Enchanted creature loses all abilities, is a 1/1 blue Frog.
+    db.insert(CardDef {
+        id: ids::AMPHIBIAN_DOWNPOUR,
+        name: "Amphibian Downpour".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        subtypes: vec![Subtype("Aura".into())],
+        keywords: vec![KeywordAbility::Flash],
+        oracle_text: "Flash. Storm. Enchant creature. Enchanted creature loses all abilities and is a blue Frog with base power and toughness 1/1.".into(),
+        ..Default::default()
+    });
+
+    // Birgi, God of Storytelling {2}{R}
+    // Legendary Creature — God 3/3
+    // Whenever you cast a spell, add {R}.
+    db.insert(CardDef {
+        id: ids::BIRGI_GOD_OF_STORYTELLING,
+        name: "Birgi, God of Storytelling".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("God".into())],
+        power: Some(3),
+        toughness: Some(3),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouCastSpell,
+                effect: Effect::AddMana { color: Some(Color::Red), amount: 1 },
+                description: "Whenever you cast a spell, add {R}.".into(),
+            },
+        ],
+        oracle_text: "Whenever you cast a spell, add {R}. Boast — {1}: Exile the top card of your library. You may play that card this turn.".into(),
+        ..Default::default()
+    });
+
+    // Blackblade Reforged {2}
+    // Legendary Artifact — Equipment
+    // Equipped creature gets +1/+1 for each land you control.
+    // Equip legendary creature {3}. Equip {7}.
+    db.insert(CardDef {
+        id: ids::BLACKBLADE_REFORGED,
+        name: "Blackblade Reforged".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Equipment".into())],
+        equip_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        oracle_text: "Equipped creature gets +1/+1 for each land you control. Equip legendary creature {3}. Equip {7}.".into(),
+        ..Default::default()
+    });
+
+    // Bridge of Khazad-dûm (Ensnaring Bridge) {3}
+    // Artifact
+    // Creatures with power greater than the number of cards in your hand can't attack.
+    db.insert(CardDef {
+        id: ids::BRIDGE_OF_KHAZAD_DUM,
+        name: "Bridge of Khazad-dum".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        static_abilities: vec![StaticAbility::EnsnaringBridge],
+        oracle_text: "Creatures with power greater than the number of cards in your hand can't attack.".into(),
+        ..Default::default()
+    });
+
+    // Bucklebury Ferry (Oboro, Palace in the Clouds)
+    // Legendary Land
+    // {T}: Add {U}. {1}: Return to owner's hand.
+    db.insert(CardDef {
+        id: ids::BUCKLEBURY_FERRY,
+        name: "Bucklebury Ferry".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(1, 0, 0, 0, 0, 0),
+                requires_tap: false,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::BounceTo { zone: ZoneType::Hand, target: TargetSpec::NoTarget },
+                description: "{1}: Return Bucklebury Ferry to its owner's hand.".into(),
+            },
+        ],
+        oracle_text: "{T}: Add {U}. {1}: Return Bucklebury Ferry to its owner's hand.".into(),
+        ..Default::default()
+    });
+
+    // Case of the Locked Hothouse {3}{G}
+    // Enchantment — Case
+    // You may play an additional land on each of your turns.
+    // To solve — You control seven or more lands.
+    // Solved — play lands/creatures/enchantments from top of library.
+    // Simplified: Extra land drop enchantment
+    db.insert(CardDef {
+        id: ids::CASE_OF_THE_LOCKED_HOTHOUSE,
+        name: "Case of the Locked Hothouse".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        subtypes: vec![Subtype("Case".into())],
+        static_abilities: vec![
+            StaticAbility::ExtraLandDrops { count: 1 },
+        ],
+        oracle_text: "You may play an additional land on each of your turns. To solve — You control seven or more lands. Solved — You may look at the top card of your library any time, and you may play lands and cast creature and enchantment spells from the top of your library.".into(),
+        ..Default::default()
+    });
+
+    // Chocobo Racetrack {3}{G}{G}
+    // Artifact
+    // Landfall — Create a 2/2 green Bird creature token with landfall +1/+0
+    // Simplified: Landfall → create 2/2 Bird token
+    db.insert(CardDef {
+        id: ids::CHOCOBO_RACETRACK,
+        name: "Chocobo Racetrack".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Artifact],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Chocobo".into(),
+                    power: 2,
+                    toughness: 2,
+                    colors: vec![Color::Green],
+
+                    subtypes: vec![Subtype("Bird".into())],
+                    keywords: vec![],
+                }),
+                description: "Landfall — Whenever a land you control enters, create a 2/2 green Bird creature token.".into(),
+            },
+        ],
+        oracle_text: "Landfall — Whenever a land you control enters, create a 2/2 green Bird creature token with \"Whenever a land you control enters, this creature gets +1/+0 until end of turn.\"".into(),
+        ..Default::default()
+    });
+
+    // Codex Shredder {1}
+    // Artifact
+    // {T}: Target player mills a card.
+    // {5}, {T}, Sacrifice: Return target card from your graveyard to your hand.
+    db.insert(CardDef {
+        id: ids::CODEX_SHREDDER,
+        name: "Codex Shredder".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::MillCards { count: 1, target: TargetSpec::Controller },
+                description: "{T}: Target player mills a card.".into(),
+            },
+        ],
+        oracle_text: "{T}: Target player mills a card. {5}, {T}, Sacrifice Codex Shredder: Return target card from your graveyard to your hand.".into(),
+        ..Default::default()
+    });
+
+    // Conduit of Worlds {2}{G}{G}
+    // Artifact
+    // You may play lands from your graveyard.
+    // Once each turn, you may cast a permanent from GY (exile a card from GY as extra cost).
+    db.insert(CardDef {
+        id: ids::CONDUIT_OF_WORLDS,
+        name: "Conduit of Worlds".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 2)),
+        card_types: vec![CardType::Artifact],
+        static_abilities: vec![StaticAbility::PlayLandsFromGraveyard],
+        oracle_text: "You may play lands from your graveyard. Once during each of your turns, you may cast a permanent spell from your graveyard by paying its mana cost and exiling another permanent card from your graveyard rather than paying any additional costs.".into(),
+        ..Default::default()
+    });
+
+    // Crucible of Worlds {3}
+    // Artifact
+    // You may play lands from your graveyard.
+    db.insert(CardDef {
+        id: ids::CRUCIBLE_OF_WORLDS,
+        name: "Crucible of Worlds".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        static_abilities: vec![StaticAbility::PlayLandsFromGraveyard],
+        oracle_text: "You may play lands from your graveyard.".into(),
+        ..Default::default()
+    });
+
+    // Dragonback Assault {3}{G}{U}{R}
+    // Enchantment
+    // ETB: deals 3 damage to each creature and each planeswalker.
+    // Landfall — create a 4/4 red Dragon creature token with flying.
+    db.insert(CardDef {
+        id: ids::DRAGONBACK_ASSAULT,
+        name: "Dragonback Assault".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 1, 0, 1, 1)),
+        card_types: vec![CardType::Enchantment],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::EntersBattlefield,
+                effect: Effect::DealDamage { amount: 3, target: TargetSpec::EachCreature },
+                description: "When Dragonback Assault enters, it deals 3 damage to each creature and each planeswalker.".into(),
+            },
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Dragon".into(),
+                    power: 4,
+                    toughness: 4,
+                    colors: vec![Color::Red],
+
+                    subtypes: vec![Subtype("Dragon".into())],
+                    keywords: vec![KeywordAbility::Flying],
+                }),
+                description: "Landfall — Whenever a land you control enters, create a 4/4 red Dragon creature token with flying.".into(),
+            },
+        ],
+        oracle_text: "When Dragonback Assault enters, it deals 3 damage to each creature and each planeswalker. Landfall — Whenever a land you control enters, create a 4/4 red Dragon creature token with flying.".into(),
+        ..Default::default()
+    });
+
+    // Druid Class {G}
+    // Enchantment — Class
+    // Level 1: Whenever a land enters under your control, gain 1 life.
+    // Level 2 {1}{G}: You may play an additional land on each of your turns.
+    // Level 3 {3}{G}{G}: (complex, simplified)
+    // Simplified: level 1 abilities only + extra land drop static
+    db.insert(CardDef {
+        id: ids::DRUID_CLASS,
+        name: "Druid Class".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        subtypes: vec![Subtype("Class".into())],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::GainLife { amount: 1 },
+                description: "Whenever a land enters the battlefield under your control, you gain 1 life.".into(),
+            },
+        ],
+        static_abilities: vec![
+            StaticAbility::ExtraLandDrops { count: 1 },
+        ],
+        oracle_text: "Whenever a land enters the battlefield under your control, you gain 1 life. {1}{G}: Level 2 — You may play an additional land on each of your turns. {3}{G}{G}: Level 3 — When this Class becomes level 3, target land you control becomes a creature with haste and \"This creature's power and toughness are each equal to the number of lands you control.\"".into(),
+        ..Default::default()
+    });
+
+    // Dryad of the Ilysian Grove {2}{G}
+    // Enchantment Creature — Nymph Dryad 2/4
+    // You may play an additional land on each of your turns.
+    // Lands you control are every basic land type in addition to their other types.
+    db.insert(CardDef {
+        id: ids::DRYAD_OF_THE_ILYSIAN_GROVE,
+        name: "Dryad of the Ilysian Grove".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment, CardType::Creature],
+        subtypes: vec![Subtype("Nymph".into()), Subtype("Dryad".into())],
+        power: Some(2),
+        toughness: Some(4),
+        static_abilities: vec![
+            StaticAbility::ExtraLandDrops { count: 1 },
+            StaticAbility::LandsAreAllBasicTypes,
+        ],
+        oracle_text: "You may play an additional land on each of your turns. Lands you control are every basic land type in addition to their other types.".into(),
+        ..Default::default()
+    });
+
+    // Everflowing Chalice {0}
+    // Artifact
+    // Multikicker {2}. Enters with a charge counter for each kick.
+    // {T}: Add {C} for each charge counter.
+    // Simplified: 2-mana artifact that taps for {C}.
+    db.insert(CardDef {
+        id: ids::EVERFLOWING_CHALICE,
+        name: "Everflowing Chalice".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "Multikicker {2}. Everflowing Chalice enters with a charge counter on it for each time it was kicked. {T}: Add {C} for each charge counter on Everflowing Chalice.".into(),
+        ..Default::default()
+    });
+
+    // Exploration {G}
+    // Enchantment
+    // You may play an additional land on each of your turns.
+    db.insert(CardDef {
+        id: ids::EXPLORATION,
+        name: "Exploration".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        static_abilities: vec![StaticAbility::ExtraLandDrops { count: 1 }],
+        oracle_text: "You may play an additional land on each of your turns.".into(),
+        ..Default::default()
+    });
+
+    // Explore {1}{G}
+    // Sorcery
+    // Draw a card. You may play an additional land this turn.
+    db.insert(CardDef {
+        id: ids::EXPLORE_CARD,
+        name: "Explore".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Sorcery],
+        spell_effect: Some(Effect::Multiple(vec![
+            Effect::DrawCards { count: 1 },
+            Effect::ExtraLandDrop,
+        ])),
+        oracle_text: "Draw a card. You may play an additional land this turn.".into(),
+        ..Default::default()
+    });
+
+    // Fortune Teller's Talent {U}
+    // Enchantment — Class
+    // Level 1: You may look at the top card of your library.
+    // Level 2 {3}{U}: Play cards from top of library while you've cast a spell this turn.
+    // Level 3 {2}{U}: Spells from elsewhere cost {2} less.
+    // Simplified: 1-mana enchantment (effects too complex for full implementation)
+    db.insert(CardDef {
+        id: ids::FORTUNE_TELLERS_TALENT,
+        name: "Fortune Teller's Talent".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Enchantment],
+        subtypes: vec![Subtype("Class".into())],
+        oracle_text: "You may look at the top card of your library any time. {3}{U}: Level 2 — As long as you've cast a spell this turn, you may play cards from the top of your library. {2}{U}: Level 3 — Spells you cast from anywhere other than your hand cost {2} less to cast.".into(),
+        ..Default::default()
+    });
+
+    // Glacierwood Siege {1}{G}{U}
+    // Enchantment
+    // Choose Temur or Sultai.
+    // Sultai — You may play lands from your graveyard.
+    // In goldfish, Sultai mode is always chosen.
+    db.insert(CardDef {
+        id: ids::GLACIERWOOD_SIEGE,
+        name: "Glacierwood Siege".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        static_abilities: vec![StaticAbility::PlayLandsFromGraveyard],
+        oracle_text: "As Glacierwood Siege enters, choose Temur or Sultai. Temur — Whenever you cast an instant or sorcery spell, target player mills four cards. Sultai — You may play lands from your graveyard.".into(),
+        ..Default::default()
+    });
+
+    // Gustha's Scepter {0}
+    // Artifact
+    // {T}: Exile a card from your hand face down.
+    // {T}: Return a card exiled with Gustha's Scepter to hand.
+    // When leaves: exiled cards go to graveyard.
+    // Simplified: {T}: discard a card (gets cards out of hand for Flubs)
+    db.insert(CardDef {
+        id: ids::GUSTHAS_SCEPTER,
+        name: "Gustha's Scepter".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        activated_abilities: vec![
+            ActivatedAbility {
+                cost: ManaCost::new(0, 0, 0, 0, 0, 0),
+                requires_tap: true,
+                sacrifice_cost: None,
+                life_cost: 0,
+                effect: Effect::DiscardCards { count: 1, target: TargetSpec::Controller },
+                description: "{T}: Exile a card from your hand face down (simplified: discard).".into(),
+            },
+        ],
+        oracle_text: "{T}: Exile a card from your hand face down. You may look at it for as long as it remains exiled. {T}: Return a card you own exiled with Gustha's Scepter to your hand.".into(),
+        ..Default::default()
+    });
+
+    // Lantern of Insight {1}
+    // Artifact
+    // Each player plays with the top card of their library revealed.
+    // {T}, Sacrifice: Target player shuffles.
+    db.insert(CardDef {
+        id: ids::LANTERN_OF_INSIGHT,
+        name: "Lantern of Insight".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "Each player plays with the top card of their library revealed. {T}, Sacrifice Lantern of Insight: Target player shuffles.".into(),
+        ..Default::default()
+    });
+
+    // Lightning Greaves {2}
+    // Artifact — Equipment
+    // Equipped creature has haste and shroud.
+    // Equip {0}.
+    db.insert(CardDef {
+        id: ids::LIGHTNING_GREAVES,
+        name: "Lightning Greaves".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        static_abilities: vec![
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Haste,
+                affected: AffectedObjects::AttachedTo,
+            },
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Shroud,
+                affected: AffectedObjects::AttachedTo,
+            },
+        ],
+        equip_cost: Some(ManaCost::new(0, 0, 0, 0, 0, 0)),
+        oracle_text: "Equipped creature has haste and shroud. Equip {0}.".into(),
+        ..Default::default()
+    });
+
+    // Lotus Cobra {1}{G}
+    // Creature — Snake 2/1
+    // Landfall — Whenever a land enters under your control, add one mana of any color.
+    db.insert(CardDef {
+        id: ids::LOTUS_COBRA,
+        name: "Lotus Cobra".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Snake".into())],
+        power: Some(2),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::AddManaOfAnyColor { amount: 1 },
+                description: "Landfall — Whenever a land enters the battlefield under your control, add one mana of any color.".into(),
+            },
+        ],
+        oracle_text: "Landfall — Whenever a land enters the battlefield under your control, add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Miku, Lost but Singing (Azusa, Lost but Seeking) {2}{G}
+    // Legendary Creature — Human Monk 1/2
+    // You may play two additional lands on each of your turns.
+    db.insert(CardDef {
+        id: ids::MIKU_LOST_BUT_SINGING,
+        name: "Miku, Lost but Singing".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into()), Subtype("Monk".into())],
+        power: Some(1),
+        toughness: Some(2),
+        static_abilities: vec![StaticAbility::ExtraLandDrops { count: 2 }],
+        oracle_text: "You may play two additional lands on each of your turns.".into(),
+        ..Default::default()
+    });
+
+    // Monument to Endurance {3}
+    // Artifact
+    // Whenever you discard a card, choose one that hasn't been chosen this turn:
+    // • Draw a card. • Create a Treasure token. • Each opponent loses 3 life.
+    // Simplified: Whenever you discard → draw a card (most useful mode in goldfish)
+    db.insert(CardDef {
+        id: ids::MONUMENT_TO_ENDURANCE,
+        name: "Monument to Endurance".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::YouDiscardACard,
+                effect: Effect::DrawCards { count: 1 },
+                description: "Whenever you discard a card, draw a card (simplified from modal choice).".into(),
+            },
+        ],
+        oracle_text: "Whenever you discard a card, choose one that hasn't been chosen this turn — • Draw a card. • Create a Treasure token. • Each opponent loses 3 life.".into(),
+        ..Default::default()
+    });
+
+    // Mystic Sanctuary
+    // Land — Island
+    // Mystic Sanctuary enters tapped unless you control three or more other Islands.
+    // When Mystic Sanctuary enters, you may put target instant or sorcery from your graveyard
+    // on top of your library.
+    db.insert(CardDef {
+        id: ids::MYSTIC_SANCTUARY,
+        name: "Mystic Sanctuary".into(),
+        card_types: vec![CardType::Land],
+        subtypes: vec![Subtype("Island".into())],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Blue)],
+        enters_tapped: true,
+        oracle_text: "Mystic Sanctuary enters tapped unless you control three or more other Islands. When Mystic Sanctuary enters, if you control three or more other Islands, you may put target instant or sorcery card from your graveyard on top of your library.".into(),
+        ..Default::default()
+    });
+
+    // Null Brooch {2}
+    // Artifact
+    // {2}, Discard your hand, {T}: Counter target noncreature spell.
+    // Dead in goldfish but still needs to be in the deck.
+    db.insert(CardDef {
+        id: ids::NULL_BROOCH,
+        name: "Null Brooch".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        oracle_text: "{2}, {T}, Discard your hand: Counter target noncreature spell.".into(),
+        ..Default::default()
+    });
+
+    // Otherworldly Gaze {U}
+    // Instant
+    // Surveil 3.
+    // Flashback {1}{U}.
+    db.insert(CardDef {
+        id: ids::OTHERWORLDLY_GAZE,
+        name: "Otherworldly Gaze".into(),
+        mana_cost: Some(ManaCost::new(0, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Surveil { count: 3 }),
+        flashback_cost: Some(ManaCost::new(1, 0, 1, 0, 0, 0)),
+        oracle_text: "Surveil 3. Flashback {1}{U}.".into(),
+        ..Default::default()
+    });
+
+    // Phial of Galadriel {3}
+    // Legendary Artifact
+    // If you would draw a card while you have no cards in hand, draw two cards instead.
+    // {T}: Add one mana of any color.
+    // Simplified: Mana rock that taps for any color.
+    db.insert(CardDef {
+        id: ids::PHIAL_OF_GALADRIEL,
+        name: "Phial of Galadriel".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForAny],
+        oracle_text: "If you would draw a card while you have no cards in hand, draw two cards instead. If you would gain life while you have 5 or less life, you gain twice that much life instead. {T}: Add one mana of any color.".into(),
+        ..Default::default()
+    });
+
+    // Prismatic Omen {1}{G}
+    // Enchantment
+    // Lands you control are every basic land type in addition to their other types.
+    db.insert(CardDef {
+        id: ids::PRISMATIC_OMEN,
+        name: "Prismatic Omen".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        static_abilities: vec![StaticAbility::LandsAreAllBasicTypes],
+        oracle_text: "Lands you control are every basic land type in addition to their other types.".into(),
+        ..Default::default()
+    });
+
+    // Renfield, Delusional Minion (Eruth, Tormented Prophet) {1}{U}{R}
+    // Legendary Creature — Human Wizard 2/4
+    // If you would draw a card, exile the top two cards of your library instead.
+    // You may play those cards this turn.
+    // Simplified: 2/4 creature (replacement effect too complex)
+    db.insert(CardDef {
+        id: ids::RENFIELD_DELUSIONAL_MINION,
+        name: "Renfield, Delusional Minion".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 1, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into()), Subtype("Wizard".into())],
+        power: Some(2),
+        toughness: Some(4),
+        oracle_text: "If you would draw a card, exile the top two cards of your library instead. You may play those cards this turn.".into(),
+        ..Default::default()
+    });
+
+    // Sabotender {1}{R}
+    // Creature — Plant 2/1
+    // Reach
+    // Landfall — deals 1 damage to each opponent.
+    db.insert(CardDef {
+        id: ids::SABOTENDER,
+        name: "Sabotender".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 1, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Plant".into())],
+        power: Some(2),
+        toughness: Some(1),
+        keywords: vec![KeywordAbility::Reach],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::EachOpponentLosesLife { amount: 1 },
+                description: "Landfall — Whenever a land you control enters, Sabotender deals 1 damage to each opponent.".into(),
+            },
+        ],
+        oracle_text: "Reach. Landfall — Whenever a land you control enters, Sabotender deals 1 damage to each opponent.".into(),
+        ..Default::default()
+    });
+
+    // Saw It Coming {1}{U}{U}
+    // Instant
+    // Counter target spell. Foretell {1}{U}.
+    db.insert(CardDef {
+        id: ids::SAW_IT_COMING,
+        name: "Saw It Coming".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 2, 0, 0, 0)),
+        card_types: vec![CardType::Instant],
+        spell_effect: Some(Effect::Counter { target: TargetSpec::AnySpell }),
+        oracle_text: "Counter target spell. Foretell {1}{U}.".into(),
+        ..Default::default()
+    });
+
+    // Scute Swarm {2}{G}
+    // Creature — Insect 1/1
+    // Landfall — Create a 1/1 green Insect creature token.
+    // (If you control 6+ lands, create a copy of Scute Swarm instead — too complex)
+    db.insert(CardDef {
+        id: ids::SCUTE_SWARM,
+        name: "Scute Swarm".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Insect".into())],
+        power: Some(1),
+        toughness: Some(1),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::CreateToken(TokenDef {
+                    name: "Insect".into(),
+                    power: 1,
+                    toughness: 1,
+                    colors: vec![Color::Green],
+
+                    subtypes: vec![Subtype("Insect".into())],
+                    keywords: vec![],
+                }),
+                description: "Landfall — Whenever a land enters the battlefield under your control, create a 1/1 green Insect creature token.".into(),
+            },
+        ],
+        oracle_text: "Landfall — Whenever a land enters the battlefield under your control, create a 1/1 green Insect creature token. If you control six or more lands, create a token that's a copy of Scute Swarm instead.".into(),
+        ..Default::default()
+    });
+
+    // Six {1}{G}
+    // Legendary Creature — Treefolk 1/4
+    // Reach
+    // Lands you control have "{T}: Mill a card."
+    // Whenever a land card is put into your graveyard, you may exile it.
+    // You may play lands exiled with Six.
+    // Simplified: 1/4 reach creature with self-mill synergy
+    db.insert(CardDef {
+        id: ids::SIX,
+        name: "Six".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Treefolk".into())],
+        power: Some(1),
+        toughness: Some(4),
+        keywords: vec![KeywordAbility::Reach],
+        oracle_text: "Reach. Lands you control have \"{T}: Mill a card.\" Whenever a land card is put into your graveyard from anywhere, you may exile it. You may play land cards exiled with Six.".into(),
+        ..Default::default()
+    });
+
+    // Swiftfoot Boots {2}
+    // Artifact — Equipment
+    // Equipped creature has hexproof and haste.
+    // Equip {1}.
+    db.insert(CardDef {
+        id: ids::SWIFTFOOT_BOOTS,
+        name: "Swiftfoot Boots".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 0)),
+        card_types: vec![CardType::Artifact],
+        subtypes: vec![Subtype("Equipment".into())],
+        static_abilities: vec![
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Hexproof,
+                affected: AffectedObjects::AttachedTo,
+            },
+            StaticAbility::GrantKeyword {
+                keyword: KeywordAbility::Haste,
+                affected: AffectedObjects::AttachedTo,
+            },
+        ],
+        equip_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 0)),
+        oracle_text: "Equipped creature has hexproof and haste. Equip {1}.".into(),
+        ..Default::default()
+    });
+
+    // Thespian's Stage
+    // Land
+    // {T}: Add {C}.
+    // {2}, {T}: Thespian's Stage becomes a copy of target land, except it has this ability.
+    // Simplified: colorless land
+    db.insert(CardDef {
+        id: ids::THESPIANS_STAGE,
+        name: "Thespian's Stage".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        oracle_text: "{T}: Add {C}. {2}, {T}: Thespian's Stage becomes a copy of target land, except it has this ability.".into(),
+        ..Default::default()
+    });
+
+    // Tifa Lockhart {1}{G}
+    // Legendary Creature — Human Monk 1/2
+    // Trample
+    // Landfall — Double Tifa's power until end of turn.
+    db.insert(CardDef {
+        id: ids::TIFA_LOCKHART,
+        name: "Tifa Lockhart".into(),
+        mana_cost: Some(ManaCost::new(1, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        supertypes: vec![Supertype::Legendary],
+        subtypes: vec![Subtype("Human".into()), Subtype("Monk".into())],
+        power: Some(1),
+        toughness: Some(2),
+        keywords: vec![KeywordAbility::Trample],
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::DoublePowerUntilEOT { target: TargetSpec::NoTarget },
+                description: "Landfall — Whenever a land you control enters, double Tifa Lockhart's power until end of turn.".into(),
+            },
+        ],
+        oracle_text: "Trample. Landfall — Whenever a land you control enters, double Tifa Lockhart's power until end of turn.".into(),
+        ..Default::default()
+    });
+
+    // Tireless Provisioner {2}{G}
+    // Creature — Elf Scout 3/2
+    // Landfall — create a Treasure token or a Food token.
+    // Simplified: Landfall → create Treasure
+    db.insert(CardDef {
+        id: ids::TIRELESS_PROVISIONER,
+        name: "Tireless Provisioner".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Elf".into()), Subtype("Scout".into())],
+        power: Some(3),
+        toughness: Some(2),
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::CreatePredefinedToken { token_type: PredefinedToken::Treasure, count: 1 },
+                description: "Landfall — Whenever a land enters the battlefield under your control, create a Treasure token.".into(),
+            },
+        ],
+        oracle_text: "Landfall — Whenever a land enters the battlefield under your control, create a Treasure token or a Food token.".into(),
+        ..Default::default()
+    });
+
+    // Valakut, the Molten Pinnacle
+    // Land
+    // Valakut enters tapped. {T}: Add {R}.
+    // Whenever a Mountain enters under your control, if you control 5+ other Mountains,
+    // Valakut deals 3 damage to any target.
+    // Simplified: ETB tapped land that taps for {R}. Landfall trigger that deals 3 to opponent.
+    // The mountain check is simplified to always fire (relies on Prismatic Omen / Dryad making
+    // all lands Mountains).
+    db.insert(CardDef {
+        id: ids::VALAKUT_THE_MOLTEN_PINNACLE,
+        name: "Valakut, the Molten Pinnacle".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Red)],
+        enters_tapped: true,
+        triggered_abilities: vec![
+            TriggeredAbility {
+                trigger: TriggerCondition::ALandYouControlEnters,
+                effect: Effect::Conditional {
+                    condition: Condition::ControlNOrMore { count: 6, card_type: CardType::Land },
+                    if_true: Box::new(Effect::DealDamage { amount: 3, target: TargetSpec::Opponent }),
+                    if_false: None,
+                },
+                description: "Whenever a Mountain enters the battlefield under your control, if you control at least five other Mountains, Valakut deals 3 damage to any target.".into(),
+            },
+        ],
+        oracle_text: "Valakut, the Molten Pinnacle enters tapped. {T}: Add {R}. Whenever a Mountain enters the battlefield under your control, if you control at least five other Mountains, Valakut, the Molten Pinnacle deals 3 damage to any target.".into(),
+        ..Default::default()
+    });
+
+    // Vesuva
+    // Land
+    // As Vesuva enters, you may choose a land on the battlefield. If you do, Vesuva enters
+    // as a copy of that land.
+    // Simplified: colorless land that enters tapped.
+    db.insert(CardDef {
+        id: ids::VESUVA,
+        name: "Vesuva".into(),
+        card_types: vec![CardType::Land],
+        mana_abilities: vec![ManaAbility::TapForColorless],
+        enters_tapped: true,
+        oracle_text: "As Vesuva enters, you may choose a land on the battlefield. If you do, Vesuva enters as a copy of that land.".into(),
+        ..Default::default()
+    });
+
+    // Walk-In Closet {2}{G}
+    // Enchantment — Room
+    // You may play lands from your graveyard.
+    // (Forgotten Cellar door: {3}{G}{G} to unlock)
+    // Simplified: PlayLandsFromGraveyard enchantment
+    db.insert(CardDef {
+        id: ids::WALK_IN_CLOSET,
+        name: "Walk-In Closet".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Enchantment],
+        subtypes: vec![Subtype("Room".into())],
+        static_abilities: vec![StaticAbility::PlayLandsFromGraveyard],
+        oracle_text: "You may play lands from your graveyard. // Forgotten Cellar {3}{G}{G}: When you unlock this door, you may cast spells from your graveyard this turn.".into(),
+        ..Default::default()
+    });
+
+    // Wayward Swordtooth {2}{G}
+    // Creature — Dinosaur 5/5
+    // Ascend. You may play an additional land on each of your turns.
+    // Wayward Swordtooth can't attack or block unless you have the city's blessing (10+ perms).
+    // Simplified: extra land drop + can't attack keyword
+    db.insert(CardDef {
+        id: ids::WAYWARD_SWORDTOOTH,
+        name: "Wayward Swordtooth".into(),
+        mana_cost: Some(ManaCost::new(2, 0, 0, 0, 0, 1)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Dinosaur".into())],
+        power: Some(5),
+        toughness: Some(5),
+        keywords: vec![KeywordAbility::CantBlock, KeywordAbility::Defender],
+        static_abilities: vec![StaticAbility::ExtraLandDrops { count: 1 }],
+        oracle_text: "Ascend. You may play an additional land on each of your turns. Wayward Swordtooth can't attack or block unless you have the city's blessing.".into(),
+        ..Default::default()
+    });
+
+    // Wonder {3}{U}
+    // Creature — Incarnation 2/2
+    // Flying
+    // As long as Wonder is in your graveyard and you control an Island,
+    // creatures you control have flying.
+    // Simplified: 2/2 flyer
+    db.insert(CardDef {
+        id: ids::WONDER,
+        name: "Wonder".into(),
+        mana_cost: Some(ManaCost::new(3, 0, 1, 0, 0, 0)),
+        card_types: vec![CardType::Creature],
+        subtypes: vec![Subtype("Incarnation".into())],
+        power: Some(2),
+        toughness: Some(2),
+        keywords: vec![KeywordAbility::Flying],
+        oracle_text: "Flying. As long as Wonder is in your graveyard and you control an Island, creatures you control have flying.".into(),
+        ..Default::default()
+    });
+
+    // Yavimaya, Cradle of Growth
+    // Legendary Land
+    // Each land is a Forest in addition to its other land types.
+    db.insert(CardDef {
+        id: ids::YAVIMAYA_CRADLE_OF_GROWTH,
+        name: "Yavimaya, Cradle of Growth".into(),
+        card_types: vec![CardType::Land],
+        supertypes: vec![Supertype::Legendary],
+        mana_abilities: vec![ManaAbility::TapForColor(Color::Green)],
+        static_abilities: vec![StaticAbility::AllLandsAreForests],
+        oracle_text: "Each land is a Forest in addition to its other land types.".into(),
+        ..Default::default()
+    });
+
     db
 }
 
@@ -6085,5 +6990,95 @@ pub fn ashcoat_commander_deck() -> (Vec<CardId>, CardId) {
     }
 
     assert_eq!(deck.len(), 100);
+    (deck, commander)
+}
+
+/// Build a Flubs, the Fool Commander deck (Temur Lands).
+/// Commander: Flubs, the Fool
+pub fn flubs_commander_deck() -> (Vec<CardId>, CardId) {
+    let commander = ids::FLUBS_THE_FOOL;
+    let mut deck = Vec::new();
+
+    // Creatures (14)
+    deck.push(ids::BIRGI_GOD_OF_STORYTELLING);
+    deck.push(ids::DRYAD_OF_THE_ILYSIAN_GROVE);
+    deck.push(ids::LOTUS_COBRA);
+    deck.push(ids::MIKU_LOST_BUT_SINGING);
+    deck.push(ids::RENFIELD_DELUSIONAL_MINION);
+    deck.push(ids::SABOTENDER);
+    deck.push(ids::SCUTE_SWARM);
+    deck.push(ids::SIX);
+    deck.push(ids::TIFA_LOCKHART);
+    deck.push(ids::TIRELESS_PROVISIONER);
+    deck.push(ids::WAYWARD_SWORDTOOTH);
+    deck.push(ids::WONDER);
+
+    // Enchantments (10)
+    deck.push(ids::ABUNDANCE);
+    deck.push(ids::AMPHIBIAN_DOWNPOUR);
+    deck.push(ids::CASE_OF_THE_LOCKED_HOTHOUSE);
+    deck.push(ids::DRAGONBACK_ASSAULT);
+    deck.push(ids::DRUID_CLASS);
+    deck.push(ids::EXPLORATION);
+    deck.push(ids::FORTUNE_TELLERS_TALENT);
+    deck.push(ids::GLACIERWOOD_SIEGE);
+    deck.push(ids::PRISMATIC_OMEN);
+    deck.push(ids::WALK_IN_CLOSET);
+
+    // Artifacts (13)
+    deck.push(ids::ARCANE_SIGNET);
+    deck.push(ids::BLACKBLADE_REFORGED);
+    deck.push(ids::BRIDGE_OF_KHAZAD_DUM);
+    deck.push(ids::CHOCOBO_RACETRACK);
+    deck.push(ids::CODEX_SHREDDER);
+    deck.push(ids::CONDUIT_OF_WORLDS);
+    deck.push(ids::CRUCIBLE_OF_WORLDS);
+    deck.push(ids::EVERFLOWING_CHALICE);
+    deck.push(ids::GUSTHAS_SCEPTER);
+    deck.push(ids::LANTERN_OF_INSIGHT);
+    deck.push(ids::LIGHTNING_GREAVES);
+    deck.push(ids::MONUMENT_TO_ENDURANCE);
+    deck.push(ids::NULL_BROOCH);
+    deck.push(ids::PHIAL_OF_GALADRIEL);
+    deck.push(ids::SWIFTFOOT_BOOTS);
+
+    // Instants / Sorceries (5)
+    deck.push(ids::BRAINSTORM);
+    deck.push(ids::EXPLORE_CARD);
+    deck.push(ids::OTHERWORLDLY_GAZE);
+    deck.push(ids::SAW_IT_COMING);
+
+    // Lands (36)
+    deck.push(ids::BOSEIJU_WHO_ENDURES);
+    deck.push(ids::BUCKLEBURY_FERRY);
+    deck.push(ids::COMMAND_TOWER);
+    deck.push(ids::MISTRISE_VILLAGE);
+    deck.push(ids::MYSTIC_SANCTUARY);
+    deck.push(ids::OTAWARA_SOARING_CITY);
+    deck.push(ids::SHIFTING_WOODLAND);
+    deck.push(ids::THESPIANS_STAGE);
+    deck.push(ids::VALAKUT_THE_MOLTEN_PINNACLE);
+    deck.push(ids::VESUVA);
+    deck.push(ids::YAVIMAYA_CRADLE_OF_GROWTH);
+
+    // 3 Forest
+    for _ in 0..3 {
+        deck.push(ids::FOREST);
+    }
+    // 9 Island
+    for _ in 0..9 {
+        deck.push(ids::ISLAND);
+    }
+    // 8 Mountain
+    for _ in 0..8 {
+        deck.push(ids::MOUNTAIN);
+    }
+
+    // Pad to 99 with additional basics
+    while deck.len() < 99 {
+        deck.push(ids::FOREST);
+    }
+
+    assert_eq!(deck.len(), 99, "Flubs deck should have 99 cards (commander is separate)");
     (deck, commander)
 }

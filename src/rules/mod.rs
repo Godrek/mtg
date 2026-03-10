@@ -65,21 +65,53 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.consecutive_passes = 0;
             state.priority_player = player;
 
+            // Fire discard triggers (e.g., Monument to Endurance)
+            triggers::check_triggers(state, TriggerCondition::YouDiscardACard, None);
+            let _ = triggers::flush_triggers(state);
+
             if state.players[player].hand.len() <= 7 {
                 phases::finalize_cleanup(state);
             }
-            // TODO: if discard triggers exist, start another cleanup step (CR 514.3a).
         }
 
         Action::PlayLand { object_id } => {
             let obj_id = *object_id;
-            state.players[state.priority_player].land_plays_remaining -= 1;
+            let player = state.priority_player;
+            state.players[player].land_plays_remaining -= 1;
             state.move_object(obj_id, ZoneType::Hand, ZoneType::Battlefield);
             // Lands enter untapped by default (we'd check for "enters tapped" later)
             if let Some(inst) = state.objects.get_mut(&obj_id) {
                 inst.tapped = false;
                 inst.summoning_sick = false; // lands don't have summoning sickness
             }
+            state.refresh_continuous_effects();
+            // Fire ETB triggers on the land itself (e.g., Mystic Sanctuary)
+            let _ = triggers::fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+            // Fire landfall triggers on all permanents
+            triggers::check_triggers(state, TriggerCondition::ALandYouControlEnters, None);
+            // Fire "whenever you play a land" triggers
+            triggers::check_triggers(state, TriggerCondition::YouPlayALand, None);
+            let _ = triggers::flush_triggers(state);
+            state.consecutive_passes = 0;
+        }
+
+        Action::PlayLandFromGraveyard { object_id } => {
+            let obj_id = *object_id;
+            let player = state.priority_player;
+            state.players[player].land_plays_remaining -= 1;
+            state.move_object(obj_id, ZoneType::Graveyard, ZoneType::Battlefield);
+            if let Some(inst) = state.objects.get_mut(&obj_id) {
+                inst.tapped = false;
+                inst.summoning_sick = false;
+            }
+            state.refresh_continuous_effects();
+            // Fire ETB triggers on the land itself
+            let _ = triggers::fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+            // Fire landfall triggers on all permanents
+            triggers::check_triggers(state, TriggerCondition::ALandYouControlEnters, None);
+            // Fire "whenever you play a land" triggers
+            triggers::check_triggers(state, TriggerCondition::YouPlayALand, None);
+            let _ = triggers::flush_triggers(state);
             state.consecutive_passes = 0;
         }
 
@@ -670,6 +702,7 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
         Action::EndTurn => {
             fast_forward_end_of_turn(state);
         }
+
     }
 }
 
@@ -708,6 +741,9 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
         let idx = rng.gen_range(0..state.players[player].hand.len());
         let obj_id = state.players[player].hand.remove(idx);
         state.players[player].graveyard.push(obj_id);
+        // Fire discard triggers (e.g., Monument to Endurance)
+        triggers::check_triggers(state, TriggerCondition::YouDiscardACard, None);
+        let _ = triggers::flush_triggers(state);
     }
 }
 

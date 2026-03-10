@@ -140,6 +140,9 @@ pub enum Action {
     /// This collapses O(phases) PassPriority actions into a single action,
     /// dramatically reducing search depth when the optimal play is "do nothing."
     EndTurn,
+
+    /// Play a land from the graveyard (Crucible of Worlds, Conduit of Worlds, etc.).
+    PlayLandFromGraveyard { object_id: ObjectId },
 }
 
 impl fmt::Display for Action {
@@ -193,6 +196,9 @@ impl fmt::Display for Action {
                 write!(f, "Activate combo #{}", combo_id)
             }
             Action::EndTurn => write!(f, "End turn"),
+            Action::PlayLandFromGraveyard { object_id } => {
+                write!(f, "Play land from graveyard (obj {})", object_id)
+            }
         }
     }
 }
@@ -556,6 +562,34 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                                     });
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Play lands from graveyard (Crucible of Worlds, Conduit of Worlds, etc.)
+            if is_main && state.players[player].land_plays_remaining > 0 {
+                let has_gy_land_play = state.battlefield.iter().any(|&bid| {
+                    let binst = &state.objects[&bid];
+                    if binst.controller != player { return false; }
+                    if let Some(bdef) = db.get(binst.card_def_id) {
+                        bdef.static_abilities.iter().any(|sa| {
+                            matches!(sa, crate::layers::StaticAbility::PlayLandsFromGraveyard)
+                        })
+                    } else {
+                        false
+                    }
+                });
+                if has_gy_land_play {
+                    let graveyard = state.players[player].graveyard.clone();
+                    for &obj_id in &graveyard {
+                        let inst = &state.objects[&obj_id];
+                        let def = match db.get(inst.card_def_id) {
+                            Some(d) => d,
+                            None => continue,
+                        };
+                        if def.is_land() {
+                            actions.push(Action::PlayLandFromGraveyard { object_id: obj_id });
                         }
                     }
                 }

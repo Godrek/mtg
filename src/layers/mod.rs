@@ -533,6 +533,23 @@ pub enum StaticAbility {
     /// additional mana of any type that permanent produced.
     /// (e.g., Kinnan, Bonder Prodigy)
     ManaFromNonlandBonus,
+    /// "You may play an additional land on each of your turns"
+    /// (e.g., Exploration, Dryad of the Ilysian Grove, Azusa)
+    ExtraLandDrops {
+        count: u32,
+    },
+    /// "You may play lands from your graveyard"
+    /// (e.g., Crucible of Worlds, Conduit of Worlds)
+    PlayLandsFromGraveyard,
+    /// "Each land you control is every basic land type in addition to its other types"
+    /// (e.g., Prismatic Omen, Dryad of the Ilysian Grove)
+    LandsAreAllBasicTypes,
+    /// "Each land is a Forest in addition to its other land types"
+    /// (e.g., Yavimaya, Cradle of Growth)
+    AllLandsAreForests,
+    /// "Creatures with power greater than the number of cards in your hand can't attack"
+    /// (e.g., Ensnaring Bridge)
+    EnsnaringBridge,
 }
 
 impl StaticAbility {
@@ -608,6 +625,12 @@ impl StaticAbility {
             // it's checked directly during mana ability activation in
             // rules::apply_action (ActivateManaAbility handler).
             StaticAbility::ManaFromNonlandBonus => vec![],
+            // These are checked directly in game logic, not via continuous effects:
+            StaticAbility::ExtraLandDrops { .. } => vec![],
+            StaticAbility::PlayLandsFromGraveyard => vec![],
+            StaticAbility::LandsAreAllBasicTypes => vec![],
+            StaticAbility::AllLandsAreForests => vec![],
+            StaticAbility::EnsnaringBridge => vec![],
         }
     }
 }

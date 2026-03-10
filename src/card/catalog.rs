@@ -310,6 +310,57 @@ pub mod ids {
     // --- Instants / Sorceries ---
     pub const CHAIN_ASSASSINATION: u64 = 1010;
     pub const LIVING_DEATH: u64 = 1011;
+
+    // --- Flubs deck cards ---
+    pub const FLUBS_THE_FOOL: u64 = 1100;
+    pub const ABUNDANCE: u64 = 1101;
+    pub const AMPHIBIAN_DOWNPOUR: u64 = 1102;
+    pub const BIRGI_GOD_OF_STORYTELLING: u64 = 1103;
+    pub const BLACKBLADE_REFORGED: u64 = 1104;
+    pub const BRIDGE_OF_KHAZAD_DUM: u64 = 1105;
+    pub const BUCKLEBURY_FERRY: u64 = 1106;
+    pub const CASE_OF_THE_LOCKED_HOTHOUSE: u64 = 1107;
+    pub const CHOCOBO_RACETRACK: u64 = 1108;
+    pub const CODEX_SHREDDER: u64 = 1109;
+    pub const CONDUIT_OF_WORLDS: u64 = 1110;
+    pub const CRUCIBLE_OF_WORLDS: u64 = 1111;
+    pub const DRAGONBACK_ASSAULT: u64 = 1112;
+    pub const DRUID_CLASS: u64 = 1113;
+    pub const DRYAD_OF_THE_ILYSIAN_GROVE: u64 = 1114;
+    pub const EVERFLOWING_CHALICE: u64 = 1115;
+    pub const EXPLORATION: u64 = 1116;
+    pub const EXPLORE_CARD: u64 = 1117;
+    pub const FORTUNE_TELLERS_TALENT: u64 = 1118;
+    pub const GLACIERWOOD_SIEGE: u64 = 1119;
+    pub const GUSTHAS_SCEPTER: u64 = 1120;
+    pub const LANTERN_OF_INSIGHT: u64 = 1121;
+    pub const LIGHTNING_GREAVES: u64 = 1122;
+    pub const LOTUS_COBRA: u64 = 1123;
+    pub const MIKU_LOST_BUT_SINGING: u64 = 1124;
+    pub const MONUMENT_TO_ENDURANCE: u64 = 1125;
+    pub const MYSTIC_SANCTUARY: u64 = 1126;
+    pub const NULL_BROOCH: u64 = 1127;
+    pub const OTHERWORLDLY_GAZE: u64 = 1128;
+    pub const PHIAL_OF_GALADRIEL: u64 = 1129;
+    pub const PRISMATIC_OMEN: u64 = 1130;
+    pub const RENFIELD_DELUSIONAL_MINION: u64 = 1131;
+    pub const SABOTENDER: u64 = 1132;
+    pub const SAW_IT_COMING: u64 = 1133;
+    pub const SCUTE_SWARM: u64 = 1134;
+    pub const SIX: u64 = 1135;
+    pub const SWIFTFOOT_BOOTS: u64 = 1136;
+    pub const THESPIANS_STAGE: u64 = 1137;
+    pub const TIFA_LOCKHART: u64 = 1138;
+    pub const TIRELESS_PROVISIONER: u64 = 1139;
+    pub const VALAKUT_THE_MOLTEN_PINNACLE: u64 = 1140;
+    pub const VESUVA: u64 = 1141;
+    pub const WALK_IN_CLOSET: u64 = 1142;
+    pub const WAYWARD_SWORDTOOTH: u64 = 1143;
+    pub const WONDER: u64 = 1144;
+    pub const YAVIMAYA_CRADLE_OF_GROWTH: u64 = 1145;
+    pub const DRAGONBACK_ASSAULT_TOKEN: u64 = 1146;
+    pub const SCUTE_SWARM_INSECT_TOKEN: u64 = 1147;
+    pub const CHOCOBO_TOKEN: u64 = 1148;
 }
 
 pub const ALL_CARDS: &[CardCatalogEntry] = &[
@@ -1412,6 +1463,53 @@ pub const ALL_CARDS: &[CardCatalogEntry] = &[
     CardCatalogEntry { id: ids::SWARMYARD, key: "SWARMYARD", name: "Swarmyard" },
     CardCatalogEntry { id: ids::CHAIN_ASSASSINATION, key: "CHAIN_ASSASSINATION", name: "Chain Assassination" },
     CardCatalogEntry { id: ids::LIVING_DEATH, key: "LIVING_DEATH", name: "Living Death" },
+    // --- Flubs deck ---
+    CardCatalogEntry { id: ids::FLUBS_THE_FOOL, key: "FLUBS_THE_FOOL", name: "Flubs, the Fool" },
+    CardCatalogEntry { id: ids::ABUNDANCE, key: "ABUNDANCE", name: "Abundance" },
+    CardCatalogEntry { id: ids::AMPHIBIAN_DOWNPOUR, key: "AMPHIBIAN_DOWNPOUR", name: "Amphibian Downpour" },
+    CardCatalogEntry { id: ids::BIRGI_GOD_OF_STORYTELLING, key: "BIRGI_GOD_OF_STORYTELLING", name: "Birgi, God of Storytelling" },
+    CardCatalogEntry { id: ids::BLACKBLADE_REFORGED, key: "BLACKBLADE_REFORGED", name: "Blackblade Reforged" },
+    CardCatalogEntry { id: ids::BRIDGE_OF_KHAZAD_DUM, key: "BRIDGE_OF_KHAZAD_DUM", name: "Bridge of Khazad-dum" },
+    CardCatalogEntry { id: ids::BUCKLEBURY_FERRY, key: "BUCKLEBURY_FERRY", name: "Bucklebury Ferry" },
+    CardCatalogEntry { id: ids::CASE_OF_THE_LOCKED_HOTHOUSE, key: "CASE_OF_THE_LOCKED_HOTHOUSE", name: "Case of the Locked Hothouse" },
+    CardCatalogEntry { id: ids::CHOCOBO_RACETRACK, key: "CHOCOBO_RACETRACK", name: "Chocobo Racetrack" },
+    CardCatalogEntry { id: ids::CODEX_SHREDDER, key: "CODEX_SHREDDER", name: "Codex Shredder" },
+    CardCatalogEntry { id: ids::CONDUIT_OF_WORLDS, key: "CONDUIT_OF_WORLDS", name: "Conduit of Worlds" },
+    CardCatalogEntry { id: ids::CRUCIBLE_OF_WORLDS, key: "CRUCIBLE_OF_WORLDS", name: "Crucible of Worlds" },
+    CardCatalogEntry { id: ids::DRAGONBACK_ASSAULT, key: "DRAGONBACK_ASSAULT", name: "Dragonback Assault" },
+    CardCatalogEntry { id: ids::DRUID_CLASS, key: "DRUID_CLASS", name: "Druid Class" },
+    CardCatalogEntry { id: ids::DRYAD_OF_THE_ILYSIAN_GROVE, key: "DRYAD_OF_THE_ILYSIAN_GROVE", name: "Dryad of the Ilysian Grove" },
+    CardCatalogEntry { id: ids::EVERFLOWING_CHALICE, key: "EVERFLOWING_CHALICE", name: "Everflowing Chalice" },
+    CardCatalogEntry { id: ids::EXPLORATION, key: "EXPLORATION", name: "Exploration" },
+    CardCatalogEntry { id: ids::EXPLORE_CARD, key: "EXPLORE_CARD", name: "Explore" },
+    CardCatalogEntry { id: ids::FORTUNE_TELLERS_TALENT, key: "FORTUNE_TELLERS_TALENT", name: "Fortune Teller's Talent" },
+    CardCatalogEntry { id: ids::GLACIERWOOD_SIEGE, key: "GLACIERWOOD_SIEGE", name: "Glacierwood Siege" },
+    CardCatalogEntry { id: ids::GUSTHAS_SCEPTER, key: "GUSTHAS_SCEPTER", name: "Gustha's Scepter" },
+    CardCatalogEntry { id: ids::LANTERN_OF_INSIGHT, key: "LANTERN_OF_INSIGHT", name: "Lantern of Insight" },
+    CardCatalogEntry { id: ids::LIGHTNING_GREAVES, key: "LIGHTNING_GREAVES", name: "Lightning Greaves" },
+    CardCatalogEntry { id: ids::LOTUS_COBRA, key: "LOTUS_COBRA", name: "Lotus Cobra" },
+    CardCatalogEntry { id: ids::MIKU_LOST_BUT_SINGING, key: "MIKU_LOST_BUT_SINGING", name: "Miku, Lost but Singing" },
+    CardCatalogEntry { id: ids::MONUMENT_TO_ENDURANCE, key: "MONUMENT_TO_ENDURANCE", name: "Monument to Endurance" },
+    CardCatalogEntry { id: ids::MYSTIC_SANCTUARY, key: "MYSTIC_SANCTUARY", name: "Mystic Sanctuary" },
+    CardCatalogEntry { id: ids::NULL_BROOCH, key: "NULL_BROOCH", name: "Null Brooch" },
+    CardCatalogEntry { id: ids::OTHERWORLDLY_GAZE, key: "OTHERWORLDLY_GAZE", name: "Otherworldly Gaze" },
+    CardCatalogEntry { id: ids::PHIAL_OF_GALADRIEL, key: "PHIAL_OF_GALADRIEL", name: "Phial of Galadriel" },
+    CardCatalogEntry { id: ids::PRISMATIC_OMEN, key: "PRISMATIC_OMEN", name: "Prismatic Omen" },
+    CardCatalogEntry { id: ids::RENFIELD_DELUSIONAL_MINION, key: "RENFIELD_DELUSIONAL_MINION", name: "Renfield, Delusional Minion" },
+    CardCatalogEntry { id: ids::SABOTENDER, key: "SABOTENDER", name: "Sabotender" },
+    CardCatalogEntry { id: ids::SAW_IT_COMING, key: "SAW_IT_COMING", name: "Saw It Coming" },
+    CardCatalogEntry { id: ids::SCUTE_SWARM, key: "SCUTE_SWARM", name: "Scute Swarm" },
+    CardCatalogEntry { id: ids::SIX, key: "SIX", name: "Six" },
+    CardCatalogEntry { id: ids::SWIFTFOOT_BOOTS, key: "SWIFTFOOT_BOOTS", name: "Swiftfoot Boots" },
+    CardCatalogEntry { id: ids::THESPIANS_STAGE, key: "THESPIANS_STAGE", name: "Thespian's Stage" },
+    CardCatalogEntry { id: ids::TIFA_LOCKHART, key: "TIFA_LOCKHART", name: "Tifa Lockhart" },
+    CardCatalogEntry { id: ids::TIRELESS_PROVISIONER, key: "TIRELESS_PROVISIONER", name: "Tireless Provisioner" },
+    CardCatalogEntry { id: ids::VALAKUT_THE_MOLTEN_PINNACLE, key: "VALAKUT_THE_MOLTEN_PINNACLE", name: "Valakut, the Molten Pinnacle" },
+    CardCatalogEntry { id: ids::VESUVA, key: "VESUVA", name: "Vesuva" },
+    CardCatalogEntry { id: ids::WALK_IN_CLOSET, key: "WALK_IN_CLOSET", name: "Walk-In Closet" },
+    CardCatalogEntry { id: ids::WAYWARD_SWORDTOOTH, key: "WAYWARD_SWORDTOOTH", name: "Wayward Swordtooth" },
+    CardCatalogEntry { id: ids::WONDER, key: "WONDER", name: "Wonder" },
+    CardCatalogEntry { id: ids::YAVIMAYA_CRADLE_OF_GROWTH, key: "YAVIMAYA_CRADLE_OF_GROWTH", name: "Yavimaya, Cradle of Growth" },
 ];
 
 /// Returns catalog entries annotated with whether the card currently has

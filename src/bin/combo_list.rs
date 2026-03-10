@@ -64,6 +64,12 @@ fn main() {
             cards.push(commander);
             (cards, "Thrun Commander")
         }
+        "flubs" => {
+            let (deck, commander) = sample::flubs_commander_deck();
+            let mut cards = deck;
+            cards.push(commander);
+            (cards, "Flubs Commander")
+        }
         _ => {
             let (deck, commander, _tutor_targets) = sample::kinnan_commander_deck();
             let mut cards = deck;

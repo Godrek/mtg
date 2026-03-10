@@ -161,6 +161,12 @@ pub enum CanonicalAction {
 
     /// End the turn, fast-forwarding through remaining phases.
     EndTurn,
+
+    /// Play a land from the graveyard (Crucible of Worlds, etc.).
+    PlayLandFromGraveyard {
+        card_id: CardId,
+        graveyard_index: usize,
+    },
 }
 
 /// Convert a concrete `Action` (with ObjectIds) into a `CanonicalAction`
@@ -386,6 +392,16 @@ pub fn canonicalize(action: &Action, state: &GameState) -> CanonicalAction {
         }
 
         Action::EndTurn => CanonicalAction::EndTurn,
+
+        Action::PlayLandFromGraveyard { object_id } => {
+            let inst = &state.objects[object_id];
+            let card_id = inst.card_def_id;
+            let graveyard_index = graveyard_instance_index(state, inst.owner, *object_id);
+            CanonicalAction::PlayLandFromGraveyard {
+                card_id,
+                graveyard_index,
+            }
+        }
     }
 }
 
@@ -621,6 +637,14 @@ pub fn resolve(
         }
 
         CanonicalAction::EndTurn => Some(Action::EndTurn),
+
+        CanonicalAction::PlayLandFromGraveyard {
+            card_id,
+            graveyard_index,
+        } => {
+            let obj_id = find_in_graveyard_by_index(state, player, *card_id, *graveyard_index)?;
+            Some(Action::PlayLandFromGraveyard { object_id: obj_id })
+        }
     }
 }
 

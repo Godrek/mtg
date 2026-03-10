@@ -865,6 +865,46 @@ pub(super) fn resolve_effect(
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
+
+        Effect::ExtraLandDrop => {
+            state.players[controller].land_plays_remaining += 1;
+        }
+
+        Effect::Surveil { count } => {
+            // Simplified surveil: mill N cards (put top N into graveyard).
+            // Full surveil would let you choose which go to GY vs stay on top.
+            let n = (*count).min(state.players[controller].library.len() as u32);
+            for _ in 0..n {
+                if let Some(card_id) = state.players[controller].library.pop() {
+                    state.players[controller].graveyard.push(card_id);
+                }
+            }
+        }
+
+        Effect::AddManaOfAnyColor { amount } => {
+            // In goldfish/solver context, add green mana as default for "any color"
+            state.players[controller].mana_pool.green += *amount;
+        }
+
+        Effect::DoublePowerUntilEOT { target: _ } => {
+            // Double the source creature's power until EOT
+            if let Some(sid) = source_id {
+                let card_def_id = state.objects.get(&sid).map(|i| i.card_def_id);
+                let base_power = card_def_id.and_then(|cid| {
+                    let db = state.card_db();
+                    db.get(cid).and_then(|d| d.power)
+                }).unwrap_or(0);
+                if let Some(inst) = state.objects.get_mut(&sid) {
+                    let current_power = base_power + inst.temp_power_mod;
+                    inst.temp_power_mod += current_power;
+                }
+            }
+        }
+
+        Effect::DealDynamicDamage { amount: _, target: _ } => {
+            // Evaluated with full context in the card-specific handlers
+            // For now, this is a no-op placeholder
+        }
     }
 }
 
@@ -908,5 +948,8 @@ fn evaluate_condition(
             matching >= *count as usize
         }
         Condition::Always => true,
+        Condition::HandIsEmpty => {
+            state.players[controller].hand.is_empty()
+        }
     }
 }

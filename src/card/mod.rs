@@ -139,6 +139,12 @@ pub enum TriggerCondition {
     OpponentCastsSpell,
     /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
     OpponentDrawsCard,
+    /// Landfall — "Whenever a land enters the battlefield under your control".
+    ALandYouControlEnters,
+    /// "Whenever you play a land" (e.g., Flubs, the Fool).
+    YouPlayALand,
+    /// "Whenever you discard a card" (e.g., Monument to Endurance).
+    YouDiscardACard,
 }
 
 /// What spells a cost reduction applies to.
