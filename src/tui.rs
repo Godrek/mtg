@@ -106,6 +106,16 @@ impl MenuState {
         MenuState { cursor: 0 }
     }
 
+    pub fn move_up(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    pub fn move_down(&mut self) {
+        if self.cursor + 1 < DECK_OPTIONS.len() {
+            self.cursor += 1;
+        }
+    }
+
     pub fn selected_preset(&self) -> &'static str {
         DECK_OPTIONS[self.cursor].key
     }
@@ -377,10 +387,16 @@ pub fn render_menu(f: &mut Frame, menu: &MenuState) {
         .iter()
         .enumerate()
         .map(|(i, opt)| {
-            let marker = if i == menu.cursor { "> " } else { "  " };
+            let selected = i == menu.cursor;
+            let marker = if selected { "> " } else { "  " };
+            let label_style = if selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
             let line = Line::from(vec![
                 Span::styled(marker, Style::default().fg(Color::Cyan)),
-                Span::styled(opt.label, Style::default().fg(if i == menu.cursor { Color::White } else { Color::Gray }).add_modifier(if i == menu.cursor { Modifier::BOLD } else { Modifier::empty() })),
+                Span::styled(opt.label, label_style),
                 Span::styled(format!("  ({})", opt.description), Style::default().fg(Color::DarkGray)),
             ]);
             ListItem::new(line)
@@ -1018,10 +1034,57 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
         .and_then(|i| args.get(i + 1).cloned())
 }
 
+/// Resolve a preset name to (deck, optional commander, is_commander).
+fn resolve_preset(preset: &str) -> (Vec<crate::card::CardId>, Option<crate::card::CardId>, bool) {
+    match preset {
+        "red" => (sample::red_aggro_deck(), None, false),
+        "green" => (sample::green_stompy_deck(), None, false),
+        "brimaz" => {
+            let (d, c) = sample::brimaz_commander_deck();
+            (d, Some(c), true)
+        }
+        "ashcoat" => {
+            let (d, c) = sample::ashcoat_commander_deck();
+            (d, Some(c), true)
+        }
+        "flubs" => {
+            let (d, c) = sample::flubs_commander_deck();
+            (d, Some(c), true)
+        }
+        "thrun" => {
+            let (d, c) = sample::thrun_commander_deck();
+            (d, Some(c), true)
+        }
+        _ => {
+            let (d, c, _) = sample::kinnan_commander_deck();
+            (d, Some(c), true)
+        }
+    }
+}
+
+/// Build a GameState + CardDatabase from resolved deck components.
+fn build_game(deck: Vec<crate::card::CardId>, commander: Option<crate::card::CardId>, is_commander: bool, db: CardDatabase) -> (GameState, CardDatabase) {
+    let db_arc = Arc::new(db.clone());
+    let state = if is_commander {
+        let mut s = GameState::new_commander(2);
+        s.card_db = Some(db_arc);
+        let cmd = commander.unwrap();
+        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
+        s
+    } else {
+        let mut s = GameState::new(2);
+        s.card_db = Some(db_arc);
+        rules::setup_game(&mut s, &deck, &deck);
+        s
+    };
+    (state, db)
+}
+
 /// Load a game from a preset name (used by the menu selection flow).
 pub fn load_preset(preset: &str) -> (GameState, CardDatabase) {
-    let args = vec![String::new(), "--preset".into(), preset.into()];
-    load_game(&args)
+    let db = sample::build_sample_db();
+    let (deck, commander, is_commander) = resolve_preset(preset);
+    build_game(deck, commander, is_commander, db)
 }
 
 pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
@@ -1048,47 +1111,10 @@ pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
             }
         }
     } else {
-        match preset.as_str() {
-            "red" => (sample::red_aggro_deck(), None, false),
-            "green" => (sample::green_stompy_deck(), None, false),
-            "brimaz" => {
-                let (d, c) = sample::brimaz_commander_deck();
-                (d, Some(c), true)
-            }
-            "ashcoat" => {
-                let (d, c) = sample::ashcoat_commander_deck();
-                (d, Some(c), true)
-            }
-            "flubs" => {
-                let (d, c) = sample::flubs_commander_deck();
-                (d, Some(c), true)
-            }
-            "thrun" => {
-                let (d, c) = sample::thrun_commander_deck();
-                (d, Some(c), true)
-            }
-            _ => {
-                let (d, c, _) = sample::kinnan_commander_deck();
-                (d, Some(c), true)
-            }
-        }
+        resolve_preset(&preset)
     };
 
-    let db_arc = Arc::new(db.clone());
-    let state = if is_commander {
-        let mut s = GameState::new_commander(2);
-        s.card_db = Some(db_arc);
-        let cmd = commander.unwrap();
-        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
-        s
-    } else {
-        let mut s = GameState::new(2);
-        s.card_db = Some(db_arc);
-        rules::setup_game(&mut s, &deck, &deck);
-        s
-    };
-
-    (state, db)
+    build_game(deck, commander, is_commander, db)
 }
 
 // ---------------------------------------------------------------------------

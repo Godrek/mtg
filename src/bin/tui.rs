@@ -22,7 +22,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use mtg_gto::tui::{self, App, MenuState, UiMode, Zone, DECK_OPTIONS};
+use mtg_gto::tui::{self, App, MenuState, UiMode, Zone};
 
 /// Whether we are in the startup menu or playing a game.
 enum Phase {
@@ -75,14 +75,10 @@ fn main() -> io::Result<()> {
                     Phase::Menu(menu) => {
                         match key.code {
                             KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Up => {
-                                if menu.cursor > 0 {
-                                    menu.cursor -= 1;
-                                }
+                                menu.move_up();
                             }
                             KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Down => {
-                                if menu.cursor + 1 < DECK_OPTIONS.len() {
-                                    menu.cursor += 1;
-                                }
+                                menu.move_down();
                             }
                             KeyCode::Char(' ') | KeyCode::Enter => {
                                 let preset = menu.selected_preset();
