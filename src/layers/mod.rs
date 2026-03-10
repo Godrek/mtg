@@ -59,6 +59,8 @@ pub enum Duration {
     UntilEndOfTurn,
     /// Permanent modification (e.g., from a resolved spell like Riding the Dilu Horse).
     Permanent,
+    /// Lasts as long as the source card is in a graveyard (e.g., Wonder).
+    WhileSourceInGraveyard,
 }
 
 /// What objects a continuous effect applies to.
@@ -533,6 +535,45 @@ pub enum StaticAbility {
     /// additional mana of any type that permanent produced.
     /// (e.g., Kinnan, Bonder Prodigy)
     ManaFromNonlandBonus,
+    /// "You may play an additional land on each of your turns"
+    /// (e.g., Exploration, Dryad of the Ilysian Grove, Azusa)
+    ExtraLandDrops {
+        count: u32,
+    },
+    /// "You may play lands from your graveyard"
+    /// (e.g., Crucible of Worlds, Conduit of Worlds)
+    PlayLandsFromGraveyard,
+    /// "Each land you control is every basic land type in addition to its other types"
+    /// (e.g., Prismatic Omen, Dryad of the Ilysian Grove)
+    LandsAreAllBasicTypes,
+    /// "Each land is a Forest in addition to its other land types"
+    /// (e.g., Yavimaya, Cradle of Growth)
+    AllLandsAreForests,
+    /// "Creatures with power greater than the number of cards in your hand can't attack"
+    /// (e.g., Ensnaring Bridge)
+    EnsnaringBridge,
+    /// While this card is in the graveyard and you control an Island, creatures you
+    /// control have flying. (Wonder)
+    /// Checked in refresh_continuous_effects from graveyard, not via to_continuous_effects.
+    WonderInGraveyard,
+    /// Replaces draws: instead of drawing, reveal cards until you find a land (or nonland).
+    /// Put that card in hand, rest on bottom. (Abundance)
+    /// Checked directly in draw_cards.
+    AbundanceReplacement,
+    /// Doubles draws when hand is empty: if you would draw with no cards in hand,
+    /// draw two instead. (Phial of Galadriel)
+    /// Checked directly in draw_cards.
+    PhialDrawDoubler,
+    /// Replaces draws: exile the top two cards instead of drawing one.
+    /// You may play those cards this turn. (Renfield / Eruth)
+    /// Checked directly in draw_cards — simplified as drawing 2 cards.
+    RenfieldDrawReplacement,
+    /// Grants each land you control "{T}: Mill a card." (Six)
+    /// Checked directly in legal_actions.
+    GrantLandsTapMill,
+    /// You may play lands from exile that were exiled by this source. (Six)
+    /// Checked directly in legal_actions.
+    PlayLandsFromExileBySource,
 }
 
 impl StaticAbility {
@@ -608,6 +649,19 @@ impl StaticAbility {
             // it's checked directly during mana ability activation in
             // rules::apply_action (ActivateManaAbility handler).
             StaticAbility::ManaFromNonlandBonus => vec![],
+            // These are checked directly in game logic, not via continuous effects:
+            StaticAbility::ExtraLandDrops { .. } => vec![],
+            StaticAbility::PlayLandsFromGraveyard => vec![],
+            StaticAbility::LandsAreAllBasicTypes => vec![],
+            StaticAbility::AllLandsAreForests => vec![],
+            StaticAbility::EnsnaringBridge => vec![],
+            // These are checked directly in specific game logic:
+            StaticAbility::WonderInGraveyard => vec![],
+            StaticAbility::AbundanceReplacement => vec![],
+            StaticAbility::PhialDrawDoubler => vec![],
+            StaticAbility::RenfieldDrawReplacement => vec![],
+            StaticAbility::GrantLandsTapMill => vec![],
+            StaticAbility::PlayLandsFromExileBySource => vec![],
         }
     }
 }

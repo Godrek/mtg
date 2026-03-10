@@ -179,6 +179,28 @@ fn ashcoat_config() -> DeckConfig {
     }
 }
 
+fn flubs_config() -> DeckConfig {
+    let (deck, commander) = sample::flubs_commander_deck();
+    DeckConfig {
+        deck,
+        commander,
+        tutor_targets: vec![],
+        dead_cards: [
+            // Counterspells and opponent-interaction cards useless in goldfish
+            ids::SAW_IT_COMING,
+            ids::NULL_BROOCH,
+            ids::BRIDGE_OF_KHAZAD_DUM,
+        ]
+        .into_iter()
+        .collect(),
+        fetch_lands: HashSet::new(),
+        tutor_worthy: HashSet::new(),
+        filtered_abilities: HashSet::new(),
+        register_ballista: false,
+        skip_combat: false, // Combat deck — need attack phases
+    }
+}
+
 /// Check if any action is an instant-win combo macro.
 fn find_instant_win(state: &GameState, actions: &[Action]) -> Option<Action> {
     let registry = state.combo_registry.as_ref()?;
@@ -400,6 +422,7 @@ fn prune_actions(
                 | Action::Equip { .. }
                 | Action::ActivateLoyalty { .. }
                 | Action::CastFromGraveyard { .. }
+                | Action::PlayLandFromGraveyard { .. }
         )
     });
     if !has_castable {
@@ -780,8 +803,9 @@ fn main() {
     let config = match deck_name.as_str() {
         "kinnan" => kinnan_config(),
         "ashcoat" => ashcoat_config(),
+        "flubs" => flubs_config(),
         other => {
-            eprintln!("Unknown deck: {}. Available: kinnan, ashcoat", other);
+            eprintln!("Unknown deck: {}. Available: kinnan, ashcoat, flubs", other);
             std::process::exit(1);
         }
     };

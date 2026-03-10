@@ -140,6 +140,9 @@ pub enum Action {
     /// This collapses O(phases) PassPriority actions into a single action,
     /// dramatically reducing search depth when the optimal play is "do nothing."
     EndTurn,
+
+    /// Play a land from the graveyard (Crucible of Worlds, Conduit of Worlds, etc.).
+    PlayLandFromGraveyard { object_id: ObjectId },
 }
 
 impl fmt::Display for Action {
@@ -193,6 +196,9 @@ impl fmt::Display for Action {
                 write!(f, "Activate combo #{}", combo_id)
             }
             Action::EndTurn => write!(f, "End turn"),
+            Action::PlayLandFromGraveyard { object_id } => {
+                write!(f, "Play land from graveyard (obj {})", object_id)
+            }
         }
     }
 }
@@ -561,6 +567,34 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                 }
             }
 
+            // Play lands from graveyard (Crucible of Worlds, Conduit of Worlds, etc.)
+            if is_main && state.players[player].land_plays_remaining > 0 {
+                let has_gy_land_play = state.battlefield.iter().any(|&bid| {
+                    let binst = &state.objects[&bid];
+                    if binst.controller != player { return false; }
+                    if let Some(bdef) = db.get(binst.card_def_id) {
+                        bdef.static_abilities.iter().any(|sa| {
+                            matches!(sa, crate::layers::StaticAbility::PlayLandsFromGraveyard)
+                        })
+                    } else {
+                        false
+                    }
+                });
+                if has_gy_land_play {
+                    let graveyard = state.players[player].graveyard.clone();
+                    for &obj_id in &graveyard {
+                        let inst = &state.objects[&obj_id];
+                        let def = match db.get(inst.card_def_id) {
+                            Some(d) => d,
+                            None => continue,
+                        };
+                        if def.is_land() {
+                            actions.push(Action::PlayLandFromGraveyard { object_id: obj_id });
+                        }
+                    }
+                }
+            }
+
             // Commander: cast commander(s) from command zone
             if state.is_commander_format() && is_main {
                 let cmd_zone = &state.players[player].command_zone;
@@ -623,11 +657,37 @@ fn legal_actions_with(state: &GameState, abstraction: CombatAbstraction) -> Vec<
                         continue;
                     }
                     if can_potentially_pay(state, player, &ability.cost) {
-                        actions.push(Action::ActivateAbility {
-                            object_id: obj_id,
-                            ability_index: i,
-                            targets: vec![], // simplified
-                        });
+                        match &ability.effect {
+                            Effect::ExileFromHandLinked => {
+                                // Generate one action per card in hand
+                                for &hand_id in &state.players[player].hand {
+                                    actions.push(Action::ActivateAbility {
+                                        object_id: obj_id,
+                                        ability_index: i,
+                                        targets: vec![Target::Object(hand_id)],
+                                    });
+                                }
+                            }
+                            Effect::ReturnLinkedExileToHand => {
+                                // Generate one action per card exiled by this permanent
+                                for &eid in &state.players[player].exile {
+                                    if state.objects[&eid].exiled_by == Some(obj_id) {
+                                        actions.push(Action::ActivateAbility {
+                                            object_id: obj_id,
+                                            ability_index: i,
+                                            targets: vec![Target::Object(eid)],
+                                        });
+                                    }
+                                }
+                            }
+                            _ => {
+                                actions.push(Action::ActivateAbility {
+                                    object_id: obj_id,
+                                    ability_index: i,
+                                    targets: vec![], // simplified
+                                });
+                            }
+                        }
                     }
                 }
 
@@ -933,6 +993,15 @@ fn enumerate_targets_for_spell(
                 // EachCreature is untargeted (auto-resolves at effect time).
                 // No targets are generated here for casting/activation; the
                 // resolve_effect handler auto-targets all creatures.
+            }
+            TargetSpec::CardInHand => {
+                for &id in &state.players[caster].hand {
+                    targets.push(Target::Object(id));
+                }
+            }
+            TargetSpec::CardInExileBySource => {
+                // Targets are enumerated at activation time with source context,
+                // not here. See legal_actions for ActivateAbility handling.
             }
             TargetSpec::AnyPermanent => {
                 for &id in &state.battlefield {

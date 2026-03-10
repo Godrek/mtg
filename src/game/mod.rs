@@ -952,6 +952,33 @@ impl GameState {
             inst.zone_change_count += 1;
         }
 
+        // When a permanent leaves the battlefield, move all cards exiled by it
+        // to their owner's graveyard (e.g., Gustha's Scepter, Tidehollow Sculler).
+        if from == ZoneType::Battlefield {
+            let linked_exiles: Vec<(ObjectId, usize)> = self.players.iter().enumerate()
+                .flat_map(|(pi, p)| {
+                    p.exile.iter()
+                        .filter(|&&eid| self.objects.get(&eid).and_then(|i| i.exiled_by) == Some(obj_id))
+                        .map(move |&eid| (eid, pi))
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            for (eid, player_idx) in linked_exiles {
+                if let Some(inst) = self.objects.get_mut(&eid) {
+                    inst.exiled_by = None;
+                    inst.zone_change_count += 1;
+                }
+                self.emit_event(GameEvent::ZoneChange {
+                    object: eid,
+                    from: crate::events::Zone::Exile,
+                    to: crate::events::Zone::Graveyard,
+                });
+                self.players[player_idx].exile.retain(|&id| id != eid);
+                let owner_idx = self.objects[&eid].owner;
+                self.players[owner_idx].graveyard.push(eid);
+            }
+        }
+
         // Remove from all zones (brute force but correct)
         let owner = self.objects[&obj_id].owner;
         let controller = self.objects[&obj_id].controller;
@@ -1141,12 +1168,18 @@ impl GameState {
     pub fn refresh_continuous_effects(&mut self) {
         self.invalidate_characteristics_cache();
 
-        // Remove effects whose source has left the battlefield
+        // Remove effects whose source has left the relevant zone
         let bf: HashSet<ObjectId> = self.battlefield.iter().copied().collect();
+        let gy: HashSet<ObjectId> = self.players.iter()
+            .flat_map(|p| p.graveyard.iter().copied())
+            .collect();
         self.continuous_effects.retain(|e| {
             match e.duration {
                 crate::layers::Duration::WhileSourceOnBattlefield => {
                     bf.contains(&e.source_id)
+                }
+                crate::layers::Duration::WhileSourceInGraveyard => {
+                    gy.contains(&e.source_id)
                 }
                 _ => true, // UntilEndOfTurn and Permanent effects persist
             }
@@ -1180,6 +1213,51 @@ impl GameState {
                     let generated = sa.to_continuous_effects(obj_id, inst.controller, ts);
                     ts += 1;
                     new_effects.extend(generated);
+                }
+            }
+        }
+
+        // Phase 1b: Check graveyards for WonderInGraveyard static abilities.
+        // These generate flying grants while the source is in a graveyard.
+        let existing_gy_sources: std::collections::HashSet<ObjectId> = self
+            .continuous_effects
+            .iter()
+            .filter(|e| e.duration == crate::layers::Duration::WhileSourceInGraveyard)
+            .map(|e| e.source_id)
+            .collect();
+        {
+            let db = self.card_db();
+            for (pi, player) in self.players.iter().enumerate() {
+                for &obj_id in &player.graveyard {
+                    if existing_gy_sources.contains(&obj_id) {
+                        continue;
+                    }
+                    let inst = match self.objects.get(&obj_id) {
+                        Some(i) => i,
+                        None => continue,
+                    };
+                    let def = match db.get(inst.card_def_id) {
+                        Some(d) => d,
+                        None => continue,
+                    };
+                    for sa in &def.static_abilities {
+                        if matches!(sa, crate::layers::StaticAbility::WonderInGraveyard) {
+                            // Check if controller has an Island (or all lands are Islands
+                            // via Prismatic Omen / Dryad). Simplified: always grant flying
+                            // in this deck since Prismatic Omen makes all lands Islands.
+                            new_effects.push(crate::layers::ContinuousEffect {
+                                source_id: obj_id,
+                                controller: pi,
+                                timestamp: ts,
+                                duration: crate::layers::Duration::WhileSourceInGraveyard,
+                                affected: crate::layers::AffectedObjects::CreaturesControlledBy(pi),
+                                modification: crate::layers::LayerModification::AddKeyword(
+                                    crate::card::KeywordAbility::Flying,
+                                ),
+                            });
+                            ts += 1;
+                        }
+                    }
                 }
             }
         }

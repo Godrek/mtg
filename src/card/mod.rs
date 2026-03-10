@@ -139,6 +139,12 @@ pub enum TriggerCondition {
     OpponentCastsSpell,
     /// Whenever an opponent draws a card (e.g., Consecrated Sphinx).
     OpponentDrawsCard,
+    /// Landfall — "Whenever a land enters the battlefield under your control".
+    ALandYouControlEnters,
+    /// "Whenever you play a land" (e.g., Flubs, the Fool).
+    YouPlayALand,
+    /// "Whenever you discard a card" (e.g., Monument to Endurance).
+    YouDiscardACard,
 }
 
 /// What spells a cost reduction applies to.
@@ -449,6 +455,9 @@ pub struct CardInstance {
 
     /// Zone-change counter — incremented each time this object changes zones.
     pub zone_change_count: u32,
+
+    /// Tracks which permanent exiled this card (for "exiled with" associations).
+    pub exiled_by: Option<ObjectId>,
 }
 
 impl CardInstance {
@@ -472,6 +481,7 @@ impl CardInstance {
             attachments: Vec::new(),
             is_token: false,
             zone_change_count: 0,
+            exiled_by: None,
         }
     }
 

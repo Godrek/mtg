@@ -146,6 +146,11 @@ fn load_preset_deck(name: &str) -> (CardDatabase, Vec<CardId>, CardId, Vec<CardI
             let (d, c, t) = sample::kinnan_commander_deck();
             return (db, d, c, t, name.to_string());
         }
+        "flubs" => {
+            let db = sample::build_sample_db();
+            let (d, c) = sample::flubs_commander_deck();
+            return (db, d, c, Vec::new(), name.to_string());
+        }
         _ => {}
     }
 

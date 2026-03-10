@@ -139,9 +139,9 @@ impl Strategy for GreedyStrategy {
             }
         }
 
-        // Priority 1: Play a land if we can
+        // Priority 1: Play a land if we can (from hand or graveyard)
         for action in &actions {
-            if let Action::PlayLand { .. } = action {
+            if matches!(action, Action::PlayLand { .. } | Action::PlayLandFromGraveyard { .. }) {
                 return action.clone();
             }
         }
