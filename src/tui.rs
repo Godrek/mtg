@@ -56,6 +56,71 @@ pub enum UiMode {
     GameOver,
 }
 
+// ---------------------------------------------------------------------------
+// Startup menu state
+// ---------------------------------------------------------------------------
+
+/// A selectable deck entry for the startup menu.
+#[derive(Debug, Clone)]
+pub struct DeckOption {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+}
+
+pub const DECK_OPTIONS: &[DeckOption] = &[
+    DeckOption {
+        key: "kinnan",
+        label: "Kinnan, Bonder Prodigy",
+        description: "Simic infinite mana combo",
+    },
+    DeckOption {
+        key: "ashcoat",
+        label: "Ashcoat of the Shadow Swarm",
+        description: "Mono-black rats",
+    },
+    DeckOption {
+        key: "brimaz",
+        label: "Brimaz, King of Oreskos",
+        description: "Mono-white tokens",
+    },
+    DeckOption {
+        key: "flubs",
+        label: "Flubs, the Fool",
+        description: "Mono-red storm",
+    },
+    DeckOption {
+        key: "thrun",
+        label: "Thrun, Last Troll",
+        description: "Mono-green voltron",
+    },
+];
+
+/// Persistent state for the startup menu.
+pub struct MenuState {
+    pub cursor: usize,
+}
+
+impl MenuState {
+    pub fn new() -> Self {
+        MenuState { cursor: 0 }
+    }
+
+    pub fn move_up(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+
+    pub fn move_down(&mut self) {
+        if self.cursor + 1 < DECK_OPTIONS.len() {
+            self.cursor += 1;
+        }
+    }
+
+    pub fn selected_preset(&self) -> &'static str {
+        DECK_OPTIONS[self.cursor].key
+    }
+}
+
 /// TUI application state.
 pub struct App {
     pub state: GameState,
@@ -277,6 +342,77 @@ pub fn action_involves_object(action: &Action, oid: ObjectId) -> bool {
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
+
+/// Render the startup menu for selecting mode and deck.
+pub fn render_menu(f: &mut Frame, menu: &MenuState) {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),  // title
+            Constraint::Length(3),  // mode
+            Constraint::Length(1),  // spacer
+            Constraint::Length(2),  // deck label
+            Constraint::Min(5),    // deck list
+        ])
+        .margin(2)
+        .split(outer[0]);
+
+    // Title
+    let title = Paragraph::new("MTG Commander Goldfish Simulator")
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray)));
+    f.render_widget(title, inner[0]);
+
+    // Mode (only goldfish for now)
+    let mode = Paragraph::new("  Mode: Goldfish Pilot")
+        .style(Style::default().fg(Color::Green));
+    f.render_widget(mode, inner[1]);
+
+    // Deck label
+    let deck_label = Paragraph::new("  Select Commander Deck:")
+        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    f.render_widget(deck_label, inner[3]);
+
+    // Deck list
+    let items: Vec<ListItem> = DECK_OPTIONS
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let selected = i == menu.cursor;
+            let marker = if selected { "> " } else { "  " };
+            let label_style = if selected {
+                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let line = Line::from(vec![
+                Span::styled(marker, Style::default().fg(Color::Cyan)),
+                Span::styled(opt.label, label_style),
+                Span::styled(format!("  ({})", opt.description), Style::default().fg(Color::DarkGray)),
+            ]);
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().padding(Padding::new(2, 0, 0, 0)));
+    f.render_widget(list, inner[4]);
+
+    // Footer
+    let footer = Paragraph::new(" W/S: Navigate | Enter/Space: Select | Q: Quit")
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+    f.render_widget(footer, outer[1]);
+}
 
 pub fn ui(f: &mut Frame, app: &App) {
     let outer = Layout::default()
@@ -898,6 +1034,59 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
         .and_then(|i| args.get(i + 1).cloned())
 }
 
+/// Resolve a preset name to (deck, optional commander, is_commander).
+fn resolve_preset(preset: &str) -> (Vec<crate::card::CardId>, Option<crate::card::CardId>, bool) {
+    match preset {
+        "red" => (sample::red_aggro_deck(), None, false),
+        "green" => (sample::green_stompy_deck(), None, false),
+        "brimaz" => {
+            let (d, c) = sample::brimaz_commander_deck();
+            (d, Some(c), true)
+        }
+        "ashcoat" => {
+            let (d, c) = sample::ashcoat_commander_deck();
+            (d, Some(c), true)
+        }
+        "flubs" => {
+            let (d, c) = sample::flubs_commander_deck();
+            (d, Some(c), true)
+        }
+        "thrun" => {
+            let (d, c) = sample::thrun_commander_deck();
+            (d, Some(c), true)
+        }
+        _ => {
+            let (d, c, _) = sample::kinnan_commander_deck();
+            (d, Some(c), true)
+        }
+    }
+}
+
+/// Build a GameState + CardDatabase from resolved deck components.
+fn build_game(deck: Vec<crate::card::CardId>, commander: Option<crate::card::CardId>, is_commander: bool, db: CardDatabase) -> (GameState, CardDatabase) {
+    let db_arc = Arc::new(db.clone());
+    let state = if is_commander {
+        let mut s = GameState::new_commander(2);
+        s.card_db = Some(db_arc);
+        let cmd = commander.unwrap();
+        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
+        s
+    } else {
+        let mut s = GameState::new(2);
+        s.card_db = Some(db_arc);
+        rules::setup_game(&mut s, &deck, &deck);
+        s
+    };
+    (state, db)
+}
+
+/// Load a game from a preset name (used by the menu selection flow).
+pub fn load_preset(preset: &str) -> (GameState, CardDatabase) {
+    let db = sample::build_sample_db();
+    let (deck, commander, is_commander) = resolve_preset(preset);
+    build_game(deck, commander, is_commander, db)
+}
+
 pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
     let deck_path = get_arg(args, "--deck");
     let preset = get_arg(args, "--preset").unwrap_or_else(|| "kinnan".to_string());
@@ -922,39 +1111,10 @@ pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
             }
         }
     } else {
-        match preset.as_str() {
-            "red" => (sample::red_aggro_deck(), None, false),
-            "green" => (sample::green_stompy_deck(), None, false),
-            "brimaz" => {
-                let (d, c) = sample::brimaz_commander_deck();
-                (d, Some(c), true)
-            }
-            "ashcoat" => {
-                let (d, c) = sample::ashcoat_commander_deck();
-                (d, Some(c), true)
-            }
-            _ => {
-                let (d, c, _) = sample::kinnan_commander_deck();
-                (d, Some(c), true)
-            }
-        }
+        resolve_preset(&preset)
     };
 
-    let db_arc = Arc::new(db.clone());
-    let state = if is_commander {
-        let mut s = GameState::new_commander(2);
-        s.card_db = Some(db_arc);
-        let cmd = commander.unwrap();
-        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
-        s
-    } else {
-        let mut s = GameState::new(2);
-        s.card_db = Some(db_arc);
-        rules::setup_game(&mut s, &deck, &deck);
-        s
-    };
-
-    (state, db)
+    build_game(deck, commander, is_commander, db)
 }
 
 // ---------------------------------------------------------------------------

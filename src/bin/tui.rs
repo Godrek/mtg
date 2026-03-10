@@ -22,31 +22,81 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use mtg_gto::tui::{self, App, UiMode, Zone};
+use mtg_gto::tui::{self, App, MenuState, UiMode, Zone};
+
+/// Whether we are in the startup menu or playing a game.
+enum Phase {
+    Menu(MenuState),
+    Game(App),
+}
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    let (state, db) = tui::load_game(&args);
-    let mut app = App::new(state, db);
-    app.auto_advance();
+    // If --preset or --deck is given on CLI, skip the menu.
+    let has_preset = args.iter().any(|a| a == "--preset" || a == "--deck");
+
+    let mut phase = if has_preset {
+        let (state, db) = tui::load_game(&args);
+        let mut app = App::new(state, db);
+        app.auto_advance();
+        Phase::Game(app)
+    } else {
+        Phase::Menu(MenuState::new())
+    };
 
     // Setup terminal
     enable_raw_mode()?;
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    // Main loop
-    loop {
-        terminal.draw(|f| tui::ui(f, &app))?;
+    let mut should_quit = false;
 
-        if app.should_quit {
+    loop {
+        match &phase {
+            Phase::Menu(menu) => {
+                terminal.draw(|f| tui::render_menu(f, menu))?;
+            }
+            Phase::Game(app) => {
+                terminal.draw(|f| tui::ui(f, app))?;
+                if app.should_quit {
+                    should_quit = true;
+                }
+            }
+        }
+
+        if should_quit {
             break;
         }
 
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                handle_key(&mut app, key.code);
+                match &mut phase {
+                    Phase::Menu(menu) => {
+                        match key.code {
+                            KeyCode::Char('w') | KeyCode::Char('W') | KeyCode::Up => {
+                                menu.move_up();
+                            }
+                            KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Down => {
+                                menu.move_down();
+                            }
+                            KeyCode::Char(' ') | KeyCode::Enter => {
+                                let preset = menu.selected_preset();
+                                let (state, db) = tui::load_preset(preset);
+                                let mut app = App::new(state, db);
+                                app.auto_advance();
+                                phase = Phase::Game(app);
+                            }
+                            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                should_quit = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                    Phase::Game(app) => {
+                        handle_key(app, key.code);
+                    }
+                }
             }
         }
     }
@@ -56,23 +106,25 @@ fn main() -> io::Result<()> {
     stdout().execute(LeaveAlternateScreen)?;
 
     // Print action log on exit
-    if !app.action_log.is_empty() {
-        println!("\n=== Action Log ({} actions) ===", app.action_log.len());
-        for (i, entry) in app.action_log.iter().enumerate() {
-            println!("  {:>3}. {}", i + 1, entry);
+    if let Phase::Game(app) = &phase {
+        if !app.action_log.is_empty() {
+            println!("\n=== Action Log ({} actions) ===", app.action_log.len());
+            for (i, entry) in app.action_log.iter().enumerate() {
+                println!("  {:>3}. {}", i + 1, entry);
+            }
         }
-    }
 
-    if app.state.game_over {
-        match app.state.winner {
-            Some(0) => println!("\nYOU WIN on turn {}!", app.state.turn_number),
-            Some(_) => println!("\nYou lost on turn {}.", app.state.turn_number),
-            None => println!("\nDraw."),
+        if app.state.game_over {
+            match app.state.winner {
+                Some(0) => println!("\nYOU WIN on turn {}!", app.state.turn_number),
+                Some(_) => println!("\nYou lost on turn {}.", app.state.turn_number),
+                None => println!("\nDraw."),
+            }
+            println!(
+                "Final life: You={} Goldfish={}",
+                app.state.players[0].life, app.state.players[1].life
+            );
         }
-        println!(
-            "Final life: You={} Goldfish={}",
-            app.state.players[0].life, app.state.players[1].life
-        );
     }
 
     Ok(())
