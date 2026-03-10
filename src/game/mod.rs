@@ -966,7 +966,13 @@ impl GameState {
             for (eid, player_idx) in linked_exiles {
                 if let Some(inst) = self.objects.get_mut(&eid) {
                     inst.exiled_by = None;
+                    inst.zone_change_count += 1;
                 }
+                self.emit_event(GameEvent::ZoneChange {
+                    object: eid,
+                    from: crate::events::Zone::Exile,
+                    to: crate::events::Zone::Graveyard,
+                });
                 self.players[player_idx].exile.retain(|&id| id != eid);
                 let owner_idx = self.objects[&eid].owner;
                 self.players[owner_idx].graveyard.push(eid);

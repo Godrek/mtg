@@ -31,9 +31,16 @@ they require engine features that do not yet exist.
 - **Ability:** {1}{B}: Regenerate Ink-Eyes, Servant of Oni.
 - **Blocker:** Same as Swarmyard — requires the regenerate mechanic (CR 701.15). The combat damage trigger is fully implemented.
 
+## Living Death
+
+- **Deck:** Flubs
+- **Card type:** Sorcery ({3}{B}{B})
+- **Ability:** Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.
+- **Blocker:** Requires a multi-step exile-sacrifice-return sequence that differs from simple `DestroyAll`. Needs: (1) exile creatures from graveyards, (2) sacrifice all creatures on battlefield, (3) return the exiled cards to battlefield. This three-phase zone manipulation is not modeled.
+
 ---
 
 *Note:* The Scryfall auto-importer (`src/scryfall.rs`) also falls back to
-`Effect::Unimplemented` for cards it cannot parse automatically. The five
+`Effect::Unimplemented` for cards it cannot parse automatically. The six
 cards listed above are the only hand-authored definitions that remain
 unimplemented.

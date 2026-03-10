@@ -5568,7 +5568,7 @@ pub fn build_sample_db() -> CardDatabase {
         name: "Living Death".into(),
         mana_cost: Some(ManaCost::new(3, 0, 0, 2, 0, 0)),
         card_types: vec![CardType::Sorcery],
-        spell_effect: Some(Effect::DestroyAll),
+        spell_effect: Some(Effect::Unimplemented("Living Death: exile GY creatures, sacrifice all creatures, return exiled to battlefield.".into())),
         oracle_text: "Each player exiles all creature cards from their graveyard, then sacrifices all creatures they control, then puts all cards they exiled this way onto the battlefield.".into(),
         ..Default::default()
     });

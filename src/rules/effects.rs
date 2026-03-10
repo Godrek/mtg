@@ -343,7 +343,8 @@ pub(super) fn resolve_effect(
             for target in targets {
                 if let Target::Player(p) = target {
                     for _ in 0..*count {
-                        if let Some(card_id) = state.players[*p].library.pop() {
+                        if !state.players[*p].library.is_empty() {
+                            let card_id = state.players[*p].library.remove(0);
                             state.move_object(card_id, ZoneType::Library, ZoneType::Graveyard);
                         }
                     }
@@ -913,7 +914,8 @@ pub(super) fn resolve_effect(
             // Full surveil would let you choose which go to GY vs stay on top.
             let n = (*count).min(state.players[controller].library.len() as u32);
             for _ in 0..n {
-                if let Some(card_id) = state.players[controller].library.pop() {
+                if !state.players[controller].library.is_empty() {
+                    let card_id = state.players[controller].library.remove(0);
                     state.players[controller].graveyard.push(card_id);
                 }
             }

@@ -411,7 +411,8 @@ fn apply_effect_recursive(
         }
         ComboEffect::DrawCards(count) => {
             for _ in 0..*count {
-                if let Some(card_id) = state.players[player].library.pop() {
+                if !state.players[player].library.is_empty() {
+                    let card_id = state.players[player].library.remove(0);
                     state.players[player].hand.push(card_id);
                 }
             }
