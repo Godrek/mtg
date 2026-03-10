@@ -403,6 +403,22 @@ pub fn auto_tap_lands(
     let bonus_count = super::triggers::mana_from_nonland_bonus_count(state, player);
 
     // Phase 2: Apply decisions (mutable borrow)
+    // First, collect which sources require sacrifice
+    let sacrifice_ids: Vec<crate::card::ObjectId> = {
+        let db = state.card_db();
+        decisions
+            .iter()
+            .filter_map(|d| {
+                let id = match d {
+                    TapDecision::Color(id, _) | TapDecision::Colorless(id, _) => *id,
+                };
+                let inst = state.objects.get(&id)?;
+                let def = db.get(inst.card_def_id)?;
+                if def.mana_ability_sacrifice { Some(id) } else { None }
+            })
+            .collect()
+    };
+
     for decision in &decisions {
         match decision {
             TapDecision::Color(source_id, color) => {
@@ -447,6 +463,12 @@ pub fn auto_tap_lands(
                 }
             }
         }
+    }
+
+    // Sacrifice sources that require it (e.g., Lotus Petal)
+    for id in sacrifice_ids {
+        use crate::card::ZoneType;
+        state.move_object(id, ZoneType::Battlefield, ZoneType::Graveyard);
     }
 }
 
