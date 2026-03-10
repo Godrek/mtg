@@ -1,6 +1,7 @@
 use crate::card::TriggerCondition;
 use crate::events::GameEvent;
-use crate::game::{GameState, Phase};
+use crate::game::{GameState, Phase, PlayerIndex};
+use crate::layers::StaticAbility;
 
 /// Handle when priority is passed (may resolve stack or advance phase).
 pub(super) fn handle_priority_pass(state: &mut GameState) {
@@ -78,8 +79,9 @@ pub(super) fn execute_phase_entry(state: &mut GameState) {
                     inst.summoning_sick = false;
                 }
             }
-            // Reset land plays
-            state.players[active].land_plays_remaining = 1;
+            // Reset land plays (base 1 + extra from static abilities)
+            let extra = count_extra_land_drops(state, active);
+            state.players[active].land_plays_remaining = 1 + extra;
             // Drain mana pools
             for p in &mut state.players {
                 p.mana_pool.drain();
@@ -217,4 +219,24 @@ fn next_turn(state: &mut GameState) {
     }
 
     execute_phase_entry(state);
+}
+
+/// Count extra land drops granted by permanents on the battlefield.
+fn count_extra_land_drops(state: &GameState, player: PlayerIndex) -> u32 {
+    let db = state.card_db();
+    let mut extra = 0u32;
+    for &obj_id in &state.battlefield {
+        let inst = &state.objects[&obj_id];
+        if inst.controller != player {
+            continue;
+        }
+        if let Some(def) = db.get(inst.card_def_id) {
+            for sa in &def.static_abilities {
+                if let StaticAbility::ExtraLandDrops { count } = sa {
+                    extra += count;
+                }
+            }
+        }
+    }
+    extra
 }

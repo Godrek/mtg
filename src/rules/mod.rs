@@ -65,21 +65,53 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             state.consecutive_passes = 0;
             state.priority_player = player;
 
+            // Fire discard triggers (e.g., Monument to Endurance)
+            triggers::check_triggers(state, TriggerCondition::YouDiscardACard, None);
+            let _ = triggers::flush_triggers(state);
+
             if state.players[player].hand.len() <= 7 {
                 phases::finalize_cleanup(state);
             }
-            // TODO: if discard triggers exist, start another cleanup step (CR 514.3a).
         }
 
         Action::PlayLand { object_id } => {
             let obj_id = *object_id;
-            state.players[state.priority_player].land_plays_remaining -= 1;
+            let player = state.priority_player;
+            state.players[player].land_plays_remaining -= 1;
             state.move_object(obj_id, ZoneType::Hand, ZoneType::Battlefield);
             // Lands enter untapped by default (we'd check for "enters tapped" later)
             if let Some(inst) = state.objects.get_mut(&obj_id) {
                 inst.tapped = false;
                 inst.summoning_sick = false; // lands don't have summoning sickness
             }
+            state.refresh_continuous_effects();
+            // Fire ETB triggers on the land itself (e.g., Mystic Sanctuary)
+            let _ = triggers::fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+            // Fire landfall triggers on all permanents
+            triggers::check_triggers(state, TriggerCondition::ALandYouControlEnters, None);
+            // Fire "whenever you play a land" triggers
+            triggers::check_triggers(state, TriggerCondition::YouPlayALand, None);
+            let _ = triggers::flush_triggers(state);
+            state.consecutive_passes = 0;
+        }
+
+        Action::PlayLandFromGraveyard { object_id } => {
+            let obj_id = *object_id;
+            let player = state.priority_player;
+            state.players[player].land_plays_remaining -= 1;
+            state.move_object(obj_id, ZoneType::Graveyard, ZoneType::Battlefield);
+            if let Some(inst) = state.objects.get_mut(&obj_id) {
+                inst.tapped = false;
+                inst.summoning_sick = false;
+            }
+            state.refresh_continuous_effects();
+            // Fire ETB triggers on the land itself
+            let _ = triggers::fire_triggers(state, TriggerCondition::EntersBattlefield, Some(obj_id));
+            // Fire landfall triggers on all permanents
+            triggers::check_triggers(state, TriggerCondition::ALandYouControlEnters, None);
+            // Fire "whenever you play a land" triggers
+            triggers::check_triggers(state, TriggerCondition::YouPlayALand, None);
+            let _ = triggers::flush_triggers(state);
             state.consecutive_passes = 0;
         }
 
@@ -670,28 +702,128 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
         Action::EndTurn => {
             fast_forward_end_of_turn(state);
         }
+
     }
 }
 
-/// Draw cards for a player.
+/// Check if a player controls a permanent with a given static ability.
+fn has_static_ability_on_battlefield(
+    state: &GameState,
+    player: PlayerIndex,
+    target_ability: &crate::layers::StaticAbility,
+) -> bool {
+    let db = state.card_db();
+    state.battlefield.iter().any(|&obj_id| {
+        state.objects.get(&obj_id).map_or(false, |inst| {
+            if inst.controller != player {
+                return false;
+            }
+            db.get(inst.card_def_id).map_or(false, |def| {
+                def.static_abilities.iter().any(|sa| {
+                    std::mem::discriminant(sa) == std::mem::discriminant(target_ability)
+                })
+            })
+        })
+    })
+}
+
+/// Draw cards for a player, applying draw replacement effects.
+///
+/// Replacement effect priority (only one applies per would-draw):
+/// 1. Renfield/Eruth: exile top 2 instead of drawing (simplified as put 2 in hand)
+/// 2. Abundance: reveal until land, put in hand, rest on bottom
+/// 3. Phial of Galadriel: draw 2 instead of 1 when hand is empty
+/// If none apply, normal draw.
 pub fn draw_cards(state: &mut GameState, player: PlayerIndex, count: usize) {
+    // Check for draw replacement effects on the battlefield
+    let has_renfield = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::RenfieldDrawReplacement,
+    );
+    let has_abundance = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::AbundanceReplacement,
+    );
+    let has_phial = has_static_ability_on_battlefield(
+        state, player, &crate::layers::StaticAbility::PhialDrawDoubler,
+    );
+
     for _ in 0..count {
         if state.players[player].library.is_empty() {
             // Player loses for drawing from empty library
             state.players[player].has_lost = true;
             return;
         }
-        let card_id = state.players[player].library.remove(0);
-        state.players[player].hand.push(card_id);
-        state.emit_event(GameEvent::CardDrawn {
-            player,
-            object: card_id,
-        });
-        state.emit_event(GameEvent::ZoneChange {
-            object: card_id,
-            from: Zone::Library,
-            to: Zone::Hand,
-        });
+
+        let hand_was_empty = state.players[player].hand.is_empty();
+
+        // Determine how many actual cards to put in hand for this single draw.
+        // Phial doubles the draw (draw 2 instead of 1) as a true replacement
+        // when hand was empty. It does NOT stack with other replacements --
+        // only one replacement effect applies per would-draw event.
+        if has_renfield {
+            // Renfield replacement: exile top 2 to hand instead of drawing 1.
+            // Simplified: put 2 cards in hand (in practice they'd be exiled and
+            // playable this turn). This is a replacement, so no CardDrawn event.
+            for _ in 0..2 {
+                if state.players[player].library.is_empty() {
+                    break;
+                }
+                let card_id = state.players[player].library.remove(0);
+                state.players[player].hand.push(card_id);
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            }
+        } else if has_abundance {
+            // Abundance replacement: reveal cards from the top until you find a land,
+            // put it in hand, then put the revealed non-land cards on the bottom
+            // in any order. This is a draw replacement, so no CardDrawn event.
+            let land_idx = {
+                let db = state.card_db();
+                state.players[player].library.iter().position(|&id| {
+                    state.objects.get(&id)
+                        .and_then(|inst| db.get(inst.card_def_id))
+                        .map_or(false, |def| def.is_land())
+                })
+            };
+            if let Some(idx) = land_idx {
+                // Remove revealed non-land cards (indices 0..idx) and put on bottom
+                let revealed: Vec<ObjectId> = state.players[player].library.drain(0..idx).collect();
+                // Now the land is at index 0; remove it and put in hand
+                let card_id = state.players[player].library.remove(0);
+                state.players[player].hand.push(card_id);
+                // Put revealed non-lands on the bottom of the library
+                state.players[player].library.extend(revealed);
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            } else {
+                // No lands left: reveal entire library, put all on bottom (no card drawn).
+                // Abundance still replaces the draw even if nothing is found.
+            }
+        } else {
+            // Normal draw, possibly doubled by Phial
+            let draws = if has_phial && hand_was_empty { 2 } else { 1 };
+            for _ in 0..draws {
+                if state.players[player].library.is_empty() {
+                    break;
+                }
+                let card_id = state.players[player].library.remove(0);
+                state.players[player].hand.push(card_id);
+                state.emit_event(GameEvent::CardDrawn {
+                    player,
+                    object: card_id,
+                });
+                state.emit_event(GameEvent::ZoneChange {
+                    object: card_id,
+                    from: Zone::Library,
+                    to: Zone::Hand,
+                });
+            }
+        }
 
         // Fire OpponentDrawsCard triggers (e.g. Consecrated Sphinx)
         triggers::fire_card_draw_triggers(state, player);
@@ -708,6 +840,9 @@ fn discard_random(state: &mut GameState, player: PlayerIndex, count: usize) {
         let idx = rng.gen_range(0..state.players[player].hand.len());
         let obj_id = state.players[player].hand.remove(idx);
         state.players[player].graveyard.push(obj_id);
+        // Fire discard triggers (e.g., Monument to Endurance)
+        triggers::check_triggers(state, TriggerCondition::YouDiscardACard, None);
+        let _ = triggers::flush_triggers(state);
     }
 }
 

@@ -70,6 +70,10 @@ fn main() {
             let (d, c) = sample::ashcoat_commander_deck();
             (d, c, Vec::new())
         }
+        "flubs" => {
+            let (d, c) = sample::flubs_commander_deck();
+            (d, c, Vec::new())
+        }
         _ => sample::kinnan_commander_deck(),
     };
 

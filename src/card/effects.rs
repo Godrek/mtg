@@ -30,6 +30,12 @@ pub enum DynamicValue {
     CreaturesWithSubtype(String),
     /// A fixed value (for testing / compatibility).
     Fixed(i32),
+    /// Number of lands the controller controls.
+    LandsControlled,
+    /// Number of charge counters on the source permanent.
+    ChargeCountersOnSource,
+    /// Number of tapped creatures the controller controls (e.g., Throne of the God-Pharaoh).
+    TappedCreaturesControlled,
 }
 
 /// Extra context from the game state for evaluating `DynamicValue` variants
@@ -150,6 +156,41 @@ impl DynamicValue {
                 })
                 .count() as i32,
             DynamicValue::Fixed(val) => *val,
+            DynamicValue::LandsControlled => {
+                battlefield
+                    .iter()
+                    .filter(|&&id| {
+                        if let Some(inst) = objects.get(&id) {
+                            if inst.controller != controller {
+                                return false;
+                            }
+                            if let Some(def) = card_db(inst.card_def_id) {
+                                return def.is_land();
+                            }
+                        }
+                        false
+                    })
+                    .count() as i32
+            }
+            DynamicValue::ChargeCountersOnSource => {
+                // This needs source_id context; return 0 as fallback.
+                // Actual evaluation happens in resolve_effect with source context.
+                0
+            }
+            DynamicValue::TappedCreaturesControlled => battlefield
+                .iter()
+                .filter(|&&id| {
+                    if let Some(inst) = objects.get(&id) {
+                        if inst.controller != controller || !inst.tapped {
+                            return false;
+                        }
+                        if let Some(def) = card_db(inst.card_def_id) {
+                            return def.is_creature();
+                        }
+                    }
+                    false
+                })
+                .count() as i32,
         }
     }
 }
@@ -274,6 +315,12 @@ pub enum Effect {
     ExileFromGraveyard {
         target: TargetSpec,
     },
+    /// Exile a card from controller's hand, linked to the source permanent
+    /// (e.g., Gustha's Scepter). The exiled card's `exiled_by` is set to the source.
+    ExileFromHandLinked,
+    /// Return a card exiled with the source permanent to its owner's hand
+    /// (e.g., Gustha's Scepter second ability).
+    ReturnLinkedExileToHand,
     /// Shuffle target(s) into their owner's library.
     ShuffleIntoLibrary {
         target: TargetSpec,
@@ -381,6 +428,40 @@ pub enum Effect {
         until_eot: bool,
     },
 
+    /// Grant an extra land play for this turn (e.g., Explore sorcery).
+    ExtraLandDrop,
+
+    /// Surveil N — look at top N cards, put any into graveyard, rest on top.
+    Surveil {
+        count: u32,
+    },
+
+    /// Add mana of any color (e.g., Lotus Cobra landfall).
+    AddManaOfAnyColor {
+        amount: u32,
+    },
+
+    /// Double the power of the source/attached creature until end of turn.
+    DoublePowerUntilEOT {
+        target: TargetSpec,
+    },
+
+    /// Deal dynamic damage (e.g., Valakut deals 3 per mountain).
+    DealDynamicDamage {
+        amount: DynamicValue,
+        target: TargetSpec,
+    },
+
+    /// Create a token that is a copy of the source permanent (e.g., Scute Swarm at 6+ lands).
+    /// The token inherits the source's card_def_id and all its abilities.
+    CreateTokenCopyOfSource,
+
+    /// Create a token from a specific CardDef in the database (e.g., Chocobo token with
+    /// landfall trigger). The CardDef must already be registered.
+    CreateTokenFromDef {
+        card_def_id: u64,
+    },
+
     /// For effects we haven't modeled yet — described textually.
     Unimplemented(String),
 }
@@ -405,6 +486,12 @@ pub enum Condition {
     },
     /// Always true (for testing / default).
     Always,
+    /// Controller has no cards in hand (hellbent).
+    HandIsEmpty,
+    /// Controller controls N or more total permanents (for ascend/city's blessing).
+    ControlNOrMorePermanents {
+        count: u32,
+    },
 }
 
 /// Predefined token types used across many cards.
@@ -555,6 +642,10 @@ pub enum TargetSpec {
     NoTarget,
     /// Each creature on the battlefield (no targeting — affects all).
     EachCreature,
+    /// A card in the controller's hand (for effects that choose a hand card).
+    CardInHand,
+    /// A card in exile that was exiled by the source permanent.
+    CardInExileBySource,
 }
 
 /// Token creature definition.

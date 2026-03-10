@@ -51,6 +51,10 @@ fn main() {
             let (d, c) = sample::ashcoat_commander_deck();
             (d, Some(c), true)
         }
+        "flubs" => {
+            let (d, c) = sample::flubs_commander_deck();
+            (d, Some(c), true)
+        }
         _ => (sample::red_aggro_deck(), None, false), // default: red
     };
 
@@ -534,6 +538,10 @@ fn format_action_rich(state: &GameState, action: &Action, db: &CardDatabase) -> 
             format!("Activate combo #{}", combo_id)
         }
         Action::EndTurn => "End turn (skip remaining phases)".into(),
+        Action::PlayLandFromGraveyard { object_id } => {
+            let name = card_name(state, *object_id, db);
+            format!("Play land from graveyard: {}", name)
+        }
     }
 }
 

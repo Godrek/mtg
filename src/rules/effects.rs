@@ -343,7 +343,8 @@ pub(super) fn resolve_effect(
             for target in targets {
                 if let Target::Player(p) = target {
                     for _ in 0..*count {
-                        if let Some(card_id) = state.players[*p].library.pop() {
+                        if !state.players[*p].library.is_empty() {
+                            let card_id = state.players[*p].library.remove(0);
                             state.move_object(card_id, ZoneType::Library, ZoneType::Graveyard);
                         }
                     }
@@ -560,6 +561,44 @@ pub(super) fn resolve_effect(
                 if let Target::Object(id) = target {
                     if state.players.iter().any(|p| p.graveyard.contains(id)) {
                         state.move_object(*id, ZoneType::Graveyard, ZoneType::Exile);
+                    }
+                }
+            }
+        }
+
+        Effect::ExileFromHandLinked => {
+            // Exile a card from controller's hand, linked to the source permanent.
+            if let Some(source) = source_id {
+                for target in targets {
+                    if let Target::Object(id) = target {
+                        let controller = state.objects.get(&source)
+                            .map(|i| i.controller)
+                            .unwrap_or(0);
+                        if state.players[controller].hand.contains(id) {
+                            state.move_object(*id, ZoneType::Hand, ZoneType::Exile);
+                            if let Some(inst) = state.objects.get_mut(id) {
+                                inst.exiled_by = Some(source);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Effect::ReturnLinkedExileToHand => {
+            // Return a card exiled by the source permanent to its owner's hand.
+            if let Some(source) = source_id {
+                for target in targets {
+                    if let Target::Object(id) = target {
+                        let owner = state.objects.get(id).map(|i| i.owner).unwrap_or(0);
+                        if state.players[owner].exile.contains(id)
+                            && state.objects.get(id).and_then(|i| i.exiled_by) == Some(source)
+                        {
+                            if let Some(inst) = state.objects.get_mut(id) {
+                                inst.exiled_by = None;
+                            }
+                            state.move_object(*id, ZoneType::Exile, ZoneType::Hand);
+                        }
                     }
                 }
             }
@@ -865,6 +904,93 @@ pub(super) fn resolve_effect(
         Effect::Unimplemented(_) => {
             // Can't resolve unimplemented effects
         }
+
+        Effect::ExtraLandDrop => {
+            state.players[controller].land_plays_remaining += 1;
+        }
+
+        Effect::Surveil { count } => {
+            // Simplified surveil: mill N cards (put top N into graveyard).
+            // Full surveil would let you choose which go to GY vs stay on top.
+            let n = (*count).min(state.players[controller].library.len() as u32);
+            for _ in 0..n {
+                if !state.players[controller].library.is_empty() {
+                    let card_id = state.players[controller].library.remove(0);
+                    state.players[controller].graveyard.push(card_id);
+                }
+            }
+        }
+
+        Effect::AddManaOfAnyColor { amount } => {
+            // In goldfish/solver context, add green mana as default for "any color"
+            state.players[controller].mana_pool.green += *amount;
+        }
+
+        Effect::DoublePowerUntilEOT { target: _ } => {
+            // Double the source creature's power until EOT
+            if let Some(sid) = source_id {
+                let card_def_id = state.objects.get(&sid).map(|i| i.card_def_id);
+                let base_power = card_def_id.and_then(|cid| {
+                    let db = state.card_db();
+                    db.get(cid).and_then(|d| d.power)
+                }).unwrap_or(0);
+                if let Some(inst) = state.objects.get_mut(&sid) {
+                    let current_power = base_power + inst.temp_power_mod;
+                    inst.temp_power_mod += current_power;
+                }
+            }
+        }
+
+        Effect::DealDynamicDamage { amount: _, target: _ } => {
+            // Evaluated with full context in the card-specific handlers
+            // For now, this is a no-op placeholder
+        }
+
+        Effect::CreateTokenCopyOfSource => {
+            // Create a token that is a copy of the source permanent (same card_def_id).
+            // The token inherits all abilities (e.g., Scute Swarm copies get landfall).
+            if let Some(sid) = source_id {
+                let card_def_id = state.objects.get(&sid).map(|i| i.card_def_id);
+                if let Some(cid) = card_def_id {
+                    let obj_id = state.create_card_in_zone(cid, controller, ZoneType::Battlefield);
+                    if let Some(inst) = state.objects.get_mut(&obj_id) {
+                        inst.controller = controller;
+                        inst.is_token = true;
+                        inst.summoning_sick = true;
+                    }
+                    state.refresh_continuous_effects();
+                    let _ = super::triggers::fire_triggers(
+                        state,
+                        TriggerCondition::EntersBattlefield,
+                        Some(obj_id),
+                    );
+                    super::triggers::check_triggers(
+                        state,
+                        TriggerCondition::ACreatureEnters,
+                        None,
+                    );
+                    let _ = super::triggers::flush_triggers(state);
+                }
+            }
+        }
+
+        Effect::CreateTokenFromDef { card_def_id } => {
+            // Create a token from a pre-registered CardDef in the database.
+            let obj_id = state.create_card_in_zone(*card_def_id, controller, ZoneType::Battlefield);
+            if let Some(inst) = state.objects.get_mut(&obj_id) {
+                inst.controller = controller;
+                inst.is_token = true;
+                inst.summoning_sick = true;
+            }
+            state.refresh_continuous_effects();
+            let _ = super::triggers::fire_triggers(
+                state,
+                TriggerCondition::EntersBattlefield,
+                Some(obj_id),
+            );
+            super::triggers::check_triggers(state, TriggerCondition::ACreatureEnters, None);
+            let _ = super::triggers::flush_triggers(state);
+        }
     }
 }
 
@@ -908,5 +1034,14 @@ fn evaluate_condition(
             matching >= *count as usize
         }
         Condition::Always => true,
+        Condition::HandIsEmpty => {
+            state.players[controller].hand.is_empty()
+        }
+        Condition::ControlNOrMorePermanents { count } => {
+            let matching = state.battlefield.iter().filter(|&&id| {
+                state.objects.get(&id).map_or(false, |inst| inst.controller == controller)
+            }).count();
+            matching >= *count as usize
+        }
     }
 }

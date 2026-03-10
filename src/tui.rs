@@ -863,6 +863,11 @@ pub fn format_action_short(state: &GameState, action: &Action, db: &CardDatabase
         Action::Concede => "Concede".into(),
         Action::ActivateMacro { combo_id } => format!("Combo #{}", combo_id),
         Action::EndTurn => "End turn".into(),
+        Action::PlayLandFromGraveyard { object_id } => {
+            let name = state.card_db().get(state.objects[object_id].card_def_id)
+                .map(|d| d.name.as_str()).unwrap_or("?");
+            format!("Play from GY: {}", name)
+        }
     }
 }
 
