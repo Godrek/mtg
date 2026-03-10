@@ -4136,7 +4136,7 @@ pub fn build_sample_db() -> CardDatabase {
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::EntersBattlefield,
-                effect: Effect::EachOpponentDiscards { count: 1 },
+                effect: Effect::ReturnToTopOfLibrary { target: TargetSpec::Opponent },
                 description: "When Chittering Rats enters the battlefield, target opponent puts a card from their hand on top of their library.".into(),
             },
         ],
@@ -4277,8 +4277,8 @@ pub fn build_sample_db() -> CardDatabase {
                 cost: ManaCost::new(1, 0, 0, 1, 0, 0),
                 requires_tap: false,
                 sacrifice_cost: None, life_cost: 0,
-                effect: Effect::GainLife { amount: 0 },
-                description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni. (Regenerate not fully modeled.)".into(),
+                effect: Effect::Unimplemented("Regenerate Ink-Eyes, Servant of Oni.".into()),
+                description: "{1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),
             },
         ],
         oracle_text: "Ninjutsu {3}{B}{B}. Whenever Ink-Eyes, Servant of Oni deals combat damage to a player, put target creature card from that player's graveyard onto the battlefield under your control. {1}{B}: Regenerate Ink-Eyes, Servant of Oni.".into(),

@@ -24,9 +24,16 @@ they require engine features that do not yet exist.
 - **Ability:** {T}: Regenerate target Insect, Rat, Spider, or Squirrel.
 - **Blocker:** Requires the regenerate mechanic (CR 701.15). Regeneration replaces the next destruction event on a permanent with: tap it, remove all damage, remove it from combat. This replacement-effect-based protection is not modeled in the engine.
 
+## Ink-Eyes, Servant of Oni (regenerate ability only)
+
+- **Deck:** Ashcoat / Skitter
+- **Card type:** Creature — Rat Ninja ({4}{B}{B})
+- **Ability:** {1}{B}: Regenerate Ink-Eyes, Servant of Oni.
+- **Blocker:** Same as Swarmyard — requires the regenerate mechanic (CR 701.15). The combat damage trigger is fully implemented.
+
 ---
 
 *Note:* The Scryfall auto-importer (`src/scryfall.rs`) also falls back to
-`Effect::Unimplemented` for cards it cannot parse automatically. The three
+`Effect::Unimplemented` for cards it cannot parse automatically. The five
 cards listed above are the only hand-authored definitions that remain
 unimplemented.
