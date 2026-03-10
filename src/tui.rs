@@ -48,8 +48,6 @@ pub const ZONE_ORDER: &[Zone] = &[
 /// The current UI interaction mode.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiMode {
-    /// Startup menu — pick mode and deck.
-    MenuSelect,
     /// Normal browsing — navigate zones and cards.
     Browse,
     /// Picking an action from the action list.
@@ -433,7 +431,6 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     );
 
     let mode_str = match &app.mode {
-        UiMode::MenuSelect => "[MENU]",
         UiMode::Browse => "[BROWSE]",
         UiMode::ActionSelect => "[SELECT ACTION]",
         UiMode::GameOver => "[GAME OVER]",
@@ -1023,37 +1020,8 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
 
 /// Load a game from a preset name (used by the menu selection flow).
 pub fn load_preset(preset: &str) -> (GameState, CardDatabase) {
-    let db = sample::build_sample_db();
-
-    let (deck, commander) = match preset {
-        "brimaz" => {
-            let (d, c) = sample::brimaz_commander_deck();
-            (d, c)
-        }
-        "ashcoat" => {
-            let (d, c) = sample::ashcoat_commander_deck();
-            (d, c)
-        }
-        "flubs" => {
-            let (d, c) = sample::flubs_commander_deck();
-            (d, c)
-        }
-        "thrun" => {
-            let (d, c) = sample::thrun_commander_deck();
-            (d, c)
-        }
-        _ => {
-            let (d, c, _) = sample::kinnan_commander_deck();
-            (d, c)
-        }
-    };
-
-    let db_arc = Arc::new(db.clone());
-    let mut s = GameState::new_commander(2);
-    s.card_db = Some(db_arc);
-    rules::setup_commander_game(&mut s, &deck, &deck, commander, commander);
-
-    (s, db)
+    let args = vec![String::new(), "--preset".into(), preset.into()];
+    load_game(&args)
 }
 
 pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
@@ -1089,6 +1057,14 @@ pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
             }
             "ashcoat" => {
                 let (d, c) = sample::ashcoat_commander_deck();
+                (d, Some(c), true)
+            }
+            "flubs" => {
+                let (d, c) = sample::flubs_commander_deck();
+                (d, Some(c), true)
+            }
+            "thrun" => {
+                let (d, c) = sample::thrun_commander_deck();
                 (d, Some(c), true)
             }
             _ => {

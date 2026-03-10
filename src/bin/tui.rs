@@ -136,9 +136,6 @@ fn main() -> io::Result<()> {
 
 fn handle_key(app: &mut App, code: KeyCode) {
     match app.mode {
-        UiMode::MenuSelect => {
-            // Should not happen in game phase, but handle gracefully.
-        }
         UiMode::GameOver => {
             if code == KeyCode::Char('q') || code == KeyCode::Char('Q') {
                 app.should_quit = true;
