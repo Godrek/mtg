@@ -1109,11 +1109,12 @@ impl GameState {
         self.opponents(player).into_iter().next().unwrap_or(0)
     }
 
-    /// Convert engine turn number to a Magic "game turn" for display.
+    /// Convert engine turn number to a turn cycle number for display.
     ///
-    /// The engine increments `turn_number` for each player's turn, but in
-    /// Magic a "turn" is a full round of all players.  In a 2-player game:
-    /// engine turns 1,2 = game turn 1; engine turns 3,4 = game turn 2; etc.
+    /// The engine increments `turn_number` for each player's turn, but for
+    /// goldfish display we want to count full turn cycles (one turn per
+    /// player).  In a 2-player game: engine turns 1,2 = cycle 1;
+    /// engine turns 3,4 = cycle 2; etc.
     pub fn game_turn(&self) -> u32 {
         let n = self.players.len() as u32;
         (self.turn_number + n - 1) / n
@@ -1574,5 +1575,56 @@ impl GameState {
         self.get_characteristics(obj_id)
             .map(|c| c.card_types.contains(&crate::card::CardType::Creature))
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_game_turn_two_players() {
+        let mut state = GameState::new(2);
+        // Engine turn 1 -> game turn 1
+        state.turn_number = 1;
+        assert_eq!(state.game_turn(), 1);
+        // Engine turn 2 (opponent) -> still game turn 1
+        state.turn_number = 2;
+        assert_eq!(state.game_turn(), 1);
+        // Engine turn 3 -> game turn 2
+        state.turn_number = 3;
+        assert_eq!(state.game_turn(), 2);
+        // Engine turn 4 -> still game turn 2
+        state.turn_number = 4;
+        assert_eq!(state.game_turn(), 2);
+        // Engine turn 20 -> game turn 10
+        state.turn_number = 20;
+        assert_eq!(state.game_turn(), 10);
+    }
+
+    #[test]
+    fn test_game_turn_four_players() {
+        let mut state = GameState::new(4);
+        // Engine turns 1-4 -> game turn 1
+        for t in 1..=4 {
+            state.turn_number = t;
+            assert_eq!(state.game_turn(), 1, "engine turn {t} should be game turn 1");
+        }
+        // Engine turn 5 -> game turn 2
+        state.turn_number = 5;
+        assert_eq!(state.game_turn(), 2);
+        // Engine turn 8 -> still game turn 2
+        state.turn_number = 8;
+        assert_eq!(state.game_turn(), 2);
+    }
+
+    #[test]
+    fn test_game_turn_single_player() {
+        let mut state = GameState::new(1);
+        // With 1 player, game turn == engine turn
+        state.turn_number = 1;
+        assert_eq!(state.game_turn(), 1);
+        state.turn_number = 5;
+        assert_eq!(state.game_turn(), 5);
     }
 }
