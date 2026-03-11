@@ -535,6 +535,9 @@ pub enum StaticAbility {
     /// additional mana of any type that permanent produced.
     /// (e.g., Kinnan, Bonder Prodigy)
     ManaFromNonlandBonus,
+    /// Whenever the controller taps a Swamp for mana, add an additional {B}.
+    /// (e.g., Nirkana Revenant, Crypt Ghast)
+    ManaFromSwampBonus,
     /// "You may play an additional land on each of your turns"
     /// (e.g., Exploration, Dryad of the Ilysian Grove, Azusa)
     ExtraLandDrops {
@@ -649,6 +652,7 @@ impl StaticAbility {
             // it's checked directly during mana ability activation in
             // rules::apply_action (ActivateManaAbility handler).
             StaticAbility::ManaFromNonlandBonus => vec![],
+            StaticAbility::ManaFromSwampBonus => vec![],
             // These are checked directly in game logic, not via continuous effects:
             StaticAbility::ExtraLandDrops { .. } => vec![],
             StaticAbility::PlayLandsFromGraveyard => vec![],

@@ -4196,6 +4196,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Spirit".into())],
         power: Some(2),
         toughness: Some(2),
+        static_abilities: vec![StaticAbility::ManaFromSwampBonus],
         triggered_abilities: vec![
             TriggeredAbility {
                 trigger: TriggerCondition::YouCastSpell,
@@ -4546,6 +4547,7 @@ pub fn build_sample_db() -> CardDatabase {
         subtypes: vec![Subtype("Vampire".into()), Subtype("Shade".into())],
         power: Some(4),
         toughness: Some(4),
+        static_abilities: vec![StaticAbility::ManaFromSwampBonus],
         activated_abilities: vec![
             ActivatedAbility {
                 cost: ManaCost::new(0, 0, 0, 1, 0, 0),

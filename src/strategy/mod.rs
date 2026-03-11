@@ -245,7 +245,8 @@ impl Strategy for GreedyStrategy {
                 if binst.controller != _player { return false; }
                 if let Some(bdef) = db.get(binst.card_def_id) {
                     bdef.static_abilities.iter().any(|sa| {
-                        matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus)
+                        matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus
+                            | crate::layers::StaticAbility::ManaFromSwampBonus)
                     })
                 } else {
                     false

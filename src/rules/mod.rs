@@ -14,6 +14,7 @@ use crate::action::Action;
 use crate::card::{CardType, KeywordAbility, ManaAbility, ObjectId, SacrificeCost, TriggerCondition, ZoneType};
 use crate::events::{GameEvent, Zone};
 use crate::game::{GameState, Phase, PlayerIndex, StackEntry, StackSource};
+use crate::mana::Color;
 
 // Public API re-exports
 pub use mana::{total_cost_reduction, apply_cost_reduction, auto_tap_lands, spell_cost_reduction, total_cost_increase};
@@ -176,12 +177,17 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             let idx = *ability_index;
             let player = state.priority_player;
 
-            // Clone the mana ability and check sacrifice flag to avoid borrow conflict
-            let (ma, requires_sacrifice) = {
+            // Read mana ability and source properties in one borrow scope
+            let (ma, source_is_nonland, source_is_swamp, requires_sacrifice) = {
                 let db = state.card_db();
                 let inst = &state.objects[&obj_id];
                 let def = db.get(inst.card_def_id).unwrap();
-                (def.mana_abilities.get(idx).cloned(), def.mana_ability_sacrifice)
+                (
+                    def.mana_abilities.get(idx).cloned(),
+                    !def.card_types.contains(&CardType::Land),
+                    def.subtypes.iter().any(|s| s.0 == "Swamp"),
+                    def.mana_ability_sacrifice,
+                )
             };
 
             if let Some(ma) = ma {
@@ -215,16 +221,18 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 }
 
                 // Check for ManaFromNonlandBonus (e.g., Kinnan, Bonder Prodigy)
-                let source_is_nonland = {
-                    let db = state.card_db();
-                    let inst = &state.objects[&obj_id];
-                    let def = db.get(inst.card_def_id).unwrap();
-                    !def.card_types.contains(&CardType::Land)
-                };
                 if source_is_nonland {
                     let bonus = triggers::mana_from_nonland_bonus_count(state, player);
                     if bonus > 0 {
                         state.players[player].mana_pool.colorless += bonus;
+                    }
+                }
+
+                // Check for ManaFromSwampBonus (e.g., Nirkana Revenant, Crypt Ghast)
+                if source_is_swamp {
+                    let bonus = triggers::mana_from_swamp_bonus_count(state, player);
+                    if bonus > 0 {
+                        state.players[player].mana_pool.add_color(Color::Black, bonus);
                     }
                 }
             }
