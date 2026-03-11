@@ -101,9 +101,15 @@ pub struct MenuState {
     pub cursor: usize,
 }
 
+impl Default for MenuState {
+    fn default() -> Self {
+        MenuState { cursor: 0 }
+    }
+}
+
 impl MenuState {
     pub fn new() -> Self {
-        MenuState { cursor: 0 }
+        Self::default()
     }
 
     pub fn move_up(&mut self) {
@@ -1034,57 +1040,56 @@ fn get_arg(args: &[String], flag: &str) -> Option<String> {
         .and_then(|i| args.get(i + 1).cloned())
 }
 
-/// Resolve a preset name to (deck, optional commander, is_commander).
-fn resolve_preset(preset: &str) -> (Vec<crate::card::CardId>, Option<crate::card::CardId>, bool) {
+/// Resolve a preset name to (deck, optional commander). `None` commander = non-commander game.
+fn resolve_preset(preset: &str) -> (Vec<crate::card::CardId>, Option<crate::card::CardId>) {
     match preset {
-        "red" => (sample::red_aggro_deck(), None, false),
-        "green" => (sample::green_stompy_deck(), None, false),
+        "red" => (sample::red_aggro_deck(), None),
+        "green" => (sample::green_stompy_deck(), None),
         "brimaz" => {
             let (d, c) = sample::brimaz_commander_deck();
-            (d, Some(c), true)
+            (d, Some(c))
         }
         "ashcoat" => {
             let (d, c) = sample::ashcoat_commander_deck();
-            (d, Some(c), true)
+            (d, Some(c))
         }
         "flubs" => {
             let (d, c) = sample::flubs_commander_deck();
-            (d, Some(c), true)
+            (d, Some(c))
         }
         "thrun" => {
             let (d, c) = sample::thrun_commander_deck();
-            (d, Some(c), true)
+            (d, Some(c))
         }
-        _ => {
+        "kinnan" | _ => {
             let (d, c, _) = sample::kinnan_commander_deck();
-            (d, Some(c), true)
+            (d, Some(c))
         }
     }
 }
 
-/// Build a GameState + CardDatabase from resolved deck components.
-fn build_game(deck: Vec<crate::card::CardId>, commander: Option<crate::card::CardId>, is_commander: bool, db: CardDatabase) -> (GameState, CardDatabase) {
+/// Build a GameState + CardDatabase. `commander = Some(id)` → Commander game, `None` → regular.
+fn build_game(deck: Vec<crate::card::CardId>, commander: Option<crate::card::CardId>, db: CardDatabase) -> (GameState, CardDatabase) {
     let db_arc = Arc::new(db.clone());
-    let state = if is_commander {
-        let mut s = GameState::new_commander(2);
-        s.card_db = Some(db_arc);
-        let cmd = commander.unwrap();
-        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
-        s
+    let mut s = if commander.is_some() {
+        GameState::new_commander(2)
     } else {
-        let mut s = GameState::new(2);
-        s.card_db = Some(db_arc);
-        rules::setup_game(&mut s, &deck, &deck);
-        s
+        GameState::new(2)
     };
-    (state, db)
+    s.card_db = Some(db_arc);
+    if let Some(cmd) = commander {
+        rules::setup_commander_game(&mut s, &deck, &deck, cmd, cmd);
+    } else {
+        rules::setup_game(&mut s, &deck, &deck);
+    }
+    (s, db)
 }
 
 /// Load a game from a preset name (used by the menu selection flow).
 pub fn load_preset(preset: &str) -> (GameState, CardDatabase) {
     let db = sample::build_sample_db();
-    let (deck, commander, is_commander) = resolve_preset(preset);
-    build_game(deck, commander, is_commander, db)
+    let (deck, commander) = resolve_preset(preset);
+    build_game(deck, commander, db)
 }
 
 pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
@@ -1093,17 +1098,13 @@ pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
 
     let db = sample::build_sample_db();
 
-    let (deck, commander, is_commander) = if let Some(path) = deck_path {
+    let (deck, commander) = if let Some(path) = deck_path {
         let path = std::path::Path::new(&path);
         match crate::deck_import::import_deck_from_file(path, &db) {
             Ok(decklist) => {
-                let commander = if !decklist.commanders.is_empty() {
-                    Some(decklist.commanders[0].card_id)
-                } else {
-                    None
-                };
+                let commander = decklist.commanders.first().map(|e| e.card_id);
                 let deck = decklist.expand();
-                (deck, commander, commander.is_some())
+                (deck, commander)
             }
             Err(e) => {
                 eprintln!("Error loading deck: {}", e);
@@ -1114,7 +1115,7 @@ pub fn load_game(args: &[String]) -> (GameState, CardDatabase) {
         resolve_preset(&preset)
     };
 
-    build_game(deck, commander, is_commander, db)
+    build_game(deck, commander, db)
 }
 
 // ---------------------------------------------------------------------------

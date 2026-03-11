@@ -50,9 +50,7 @@ fn main() -> io::Result<()> {
     stdout().execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
 
-    let mut should_quit = false;
-
-    loop {
+    'main: loop {
         match &phase {
             Phase::Menu(menu) => {
                 terminal.draw(|f| tui::render_menu(f, menu))?;
@@ -60,13 +58,9 @@ fn main() -> io::Result<()> {
             Phase::Game(app) => {
                 terminal.draw(|f| tui::ui(f, app))?;
                 if app.should_quit {
-                    should_quit = true;
+                    break;
                 }
             }
-        }
-
-        if should_quit {
-            break;
         }
 
         if let Event::Key(key) = event::read()? {
@@ -88,7 +82,7 @@ fn main() -> io::Result<()> {
                                 phase = Phase::Game(app);
                             }
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                should_quit = true;
+                                break 'main;
                             }
                             _ => {}
                         }
