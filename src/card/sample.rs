@@ -3036,6 +3036,7 @@ pub fn build_sample_db() -> CardDatabase {
         mana_cost: Some(ManaCost::zero()),
         card_types: vec![CardType::Artifact],
         mana_abilities: vec![ManaAbility::TapForAny],
+        mana_ability_sacrifice: true,
         oracle_text: "{T}, Sacrifice Lotus Petal: Add one mana of any color.".into(),
         ..Default::default()
     });

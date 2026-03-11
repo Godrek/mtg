@@ -292,6 +292,11 @@ pub struct CardDef {
     /// For DFC back faces: the CardId of the front face.
     #[serde(default)]
     pub front_face_id: Option<CardId>,
+
+    /// Whether activating a mana ability requires sacrificing this permanent
+    /// (e.g., Lotus Petal: "{T}, Sacrifice: Add one mana of any color.").
+    #[serde(default)]
+    pub mana_ability_sacrifice: bool,
 }
 
 impl CardDef {
@@ -407,6 +412,7 @@ impl Default for CardDef {
             annihilator_count: None,
             back_face_id: None,
             front_face_id: None,
+            mana_ability_sacrifice: false,
         }
     }
 }

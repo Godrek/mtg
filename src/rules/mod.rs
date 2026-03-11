@@ -189,6 +189,14 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
                 )
             };
 
+            // Check if this mana ability requires sacrificing the source (e.g., Lotus Petal)
+            let requires_sacrifice = {
+                let db = state.card_db();
+                let inst = &state.objects[&obj_id];
+                let def = db.get(inst.card_def_id).unwrap();
+                def.mana_ability_sacrifice
+            };
+
             if let Some(ma) = ma {
                 match &ma {
                     ManaAbility::TapForColor(color) => {
@@ -239,6 +247,11 @@ pub fn apply_action(state: &mut GameState, action: &Action) {
             // Tap the permanent
             if let Some(inst) = state.objects.get_mut(&obj_id) {
                 inst.tapped = true;
+            }
+
+            // Sacrifice the permanent if the mana ability requires it (e.g., Lotus Petal)
+            if requires_sacrifice {
+                state.move_object(obj_id, ZoneType::Battlefield, ZoneType::Graveyard);
             }
         }
 
