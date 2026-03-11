@@ -173,16 +173,11 @@ pub fn fire_triggers(state: &mut GameState, condition: TriggerCondition, source_
     flush_triggers(state)
 }
 
-/// Count how many permanents a player controls that have a specific
-/// `StaticAbility` variant. Used for mana bonus abilities like
-/// `ManaFromNonlandBonus` (Kinnan) and `ManaFromSwampBonus` (Nirkana Revenant).
-pub(super) fn count_static_ability(
-    state: &GameState,
-    player: PlayerIndex,
-    target: &crate::layers::StaticAbility,
-) -> u32 {
+/// Count how many permanents a player controls that have the
+/// `ManaFromNonlandBonus` static ability (e.g., Kinnan, Bonder Prodigy).
+/// Returns the total bonus amount (typically 1 per source).
+pub(super) fn mana_from_nonland_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
     let db = state.card_db();
-    let target_disc = std::mem::discriminant(target);
     let mut count = 0u32;
     for &obj_id in &state.battlefield {
         let inst = match state.objects.get(&obj_id) {
@@ -197,22 +192,12 @@ pub(super) fn count_static_ability(
             None => continue,
         };
         for sa in &def.static_abilities {
-            if std::mem::discriminant(sa) == target_disc {
+            if matches!(sa, crate::layers::StaticAbility::ManaFromNonlandBonus) {
                 count += 1;
             }
         }
     }
     count
-}
-
-/// Convenience wrapper: count `ManaFromNonlandBonus` sources (e.g., Kinnan).
-pub(super) fn mana_from_nonland_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
-    count_static_ability(state, player, &crate::layers::StaticAbility::ManaFromNonlandBonus)
-}
-
-/// Convenience wrapper: count `ManaFromSwampBonus` sources (e.g., Nirkana Revenant, Crypt Ghast).
-pub(super) fn mana_from_swamp_bonus_count(state: &GameState, player: PlayerIndex) -> u32 {
-    count_static_ability(state, player, &crate::layers::StaticAbility::ManaFromSwampBonus)
 }
 
 /// Fire spell-cast triggers for a spell that was just cast.

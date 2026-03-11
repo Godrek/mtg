@@ -4593,6 +4593,58 @@ fn test_kinnan_mana_bonus_not_on_lands() {
 }
 
 #[test]
+fn test_lotus_petal_sacrificed_on_mana_ability() {
+    let db = sample::build_sample_db();
+    let mut state = GameState::new(2);
+    state.card_db = Some(Arc::new(db.clone()));
+
+    // Give libraries so no one decks
+    for _ in 0..20 {
+        state.create_card_in_zone(sample::ids::ISLAND, 0, ZoneType::Library);
+        state.create_card_in_zone(sample::ids::ISLAND, 1, ZoneType::Library);
+    }
+
+    // Put Lotus Petal on the battlefield for player 0
+    let lotus_petal_obj = state.create_card_in_zone(sample::ids::LOTUS_PETAL, 0, ZoneType::Battlefield);
+
+    state.active_player = 0;
+    state.priority_player = 0;
+    state.phase = Phase::PreCombatMain;
+    state.turn_number = 2;
+
+    // Lotus Petal should be on the battlefield
+    assert!(
+        state.battlefield.contains(&lotus_petal_obj),
+        "Lotus Petal should be on the battlefield before activation"
+    );
+
+    // Activate Lotus Petal's mana ability
+    let action = Action::ActivateManaAbility {
+        object_id: lotus_petal_obj,
+        ability_index: 0,
+    };
+    rules::apply_action(&mut state, &action);
+
+    // Should produce mana
+    assert!(
+        state.players[0].mana_pool.total() >= 1,
+        "Lotus Petal should produce at least 1 mana"
+    );
+
+    // Lotus Petal should no longer be on the battlefield (sacrificed)
+    assert!(
+        !state.battlefield.contains(&lotus_petal_obj),
+        "Lotus Petal should be sacrificed (removed from battlefield) after activation"
+    );
+
+    // Lotus Petal should be in the graveyard
+    assert!(
+        state.players[0].graveyard.contains(&lotus_petal_obj),
+        "Lotus Petal should be in the graveyard after sacrifice"
+    );
+}
+
+#[test]
 fn test_new_kinnan_deck_cards_in_db() {
     let db = sample::build_sample_db();
 
@@ -5226,134 +5278,4 @@ fn test_mcts_parallel_goldfish_produces_valid_results() {
     );
     // Sanity: parallel path should still find wins with a reasonable deck
     assert!(results.wins > 0, "Parallel MCTS should win at least one goldfish game");
-}
-
-#[test]
-fn test_lotus_petal_sacrificed_on_mana_ability() {
-    let db = sample::build_sample_db();
-    let mut state = GameState::new(2);
-    state.card_db = Some(Arc::new(db.clone()));
-
-    // Give libraries so no one decks
-    for _ in 0..20 {
-        state.create_card_in_zone(sample::ids::ISLAND, 0, ZoneType::Library);
-        state.create_card_in_zone(sample::ids::ISLAND, 1, ZoneType::Library);
-    }
-
-    // Put Lotus Petal on the battlefield for player 0
-    let lotus_petal_obj = state.create_card_in_zone(sample::ids::LOTUS_PETAL, 0, ZoneType::Battlefield);
-
-    state.active_player = 0;
-    state.priority_player = 0;
-    state.phase = Phase::PreCombatMain;
-    state.turn_number = 2;
-
-    // Lotus Petal should be on the battlefield
-    assert!(
-        state.battlefield.contains(&lotus_petal_obj),
-        "Lotus Petal should be on the battlefield before activation"
-    );
-
-    // Activate Lotus Petal's mana ability
-    let action = Action::ActivateManaAbility {
-        object_id: lotus_petal_obj,
-        ability_index: 0,
-    };
-    rules::apply_action(&mut state, &action);
-
-    // Should produce mana
-    assert!(
-        state.players[0].mana_pool.total() >= 1,
-        "Lotus Petal should produce at least 1 mana"
-    );
-
-    // Lotus Petal should no longer be on the battlefield (sacrificed)
-    assert!(
-        !state.battlefield.contains(&lotus_petal_obj),
-        "Lotus Petal should be sacrificed (removed from battlefield) after activation"
-    );
-
-    // Lotus Petal should be in the graveyard
-    assert!(
-        state.players[0].graveyard.contains(&lotus_petal_obj),
-        "Lotus Petal should be in the graveyard after sacrifice"
-    );
-}
-
-#[test]
-fn test_nirkana_revenant_swamp_mana_bonus() {
-    // Nirkana Revenant: "Whenever you tap a Swamp for mana, add an additional {B}."
-    let db = sample::build_sample_db();
-    let mut state = GameState::new(2);
-    state.card_db = Some(Arc::new(db.clone()));
-
-    for _ in 0..20 {
-        state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Library);
-        state.create_card_in_zone(sample::ids::SWAMP, 1, ZoneType::Library);
-    }
-
-    // Put Nirkana Revenant on the battlefield
-    state.create_card_in_zone(sample::ids::NIRKANA_REVENANT, 0, ZoneType::Battlefield);
-    let swamp = state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Battlefield);
-
-    state.active_player = 0;
-    state.priority_player = 0;
-    state.phase = Phase::PreCombatMain;
-    state.turn_number = 2;
-
-    // Tap swamp for mana
-    rules::apply_action(
-        &mut state,
-        &Action::ActivateManaAbility {
-            object_id: swamp,
-            ability_index: 0,
-        },
-    );
-
-    // Should produce 1 (base) + 1 (Nirkana bonus) = 2 black mana
-    assert_eq!(
-        state.players[0].mana_pool.black, 2,
-        "Swamp should produce 2 black mana with Nirkana Revenant (1 base + 1 bonus)"
-    );
-}
-
-#[test]
-fn test_nirkana_revenant_no_bonus_on_non_swamp() {
-    // Nirkana Revenant's bonus should NOT apply to non-Swamp lands.
-    let db = sample::build_sample_db();
-    let mut state = GameState::new(2);
-    state.card_db = Some(Arc::new(db.clone()));
-
-    for _ in 0..20 {
-        state.create_card_in_zone(sample::ids::SWAMP, 0, ZoneType::Library);
-        state.create_card_in_zone(sample::ids::SWAMP, 1, ZoneType::Library);
-    }
-
-    // Nirkana Revenant on battlefield
-    state.create_card_in_zone(sample::ids::NIRKANA_REVENANT, 0, ZoneType::Battlefield);
-    let island = state.create_card_in_zone(sample::ids::ISLAND, 0, ZoneType::Battlefield);
-
-    state.active_player = 0;
-    state.priority_player = 0;
-    state.phase = Phase::PreCombatMain;
-    state.turn_number = 2;
-
-    // Tap Island for mana
-    rules::apply_action(
-        &mut state,
-        &Action::ActivateManaAbility {
-            object_id: island,
-            ability_index: 0,
-        },
-    );
-
-    // Should produce only 1 blue mana, no bonus
-    assert_eq!(
-        state.players[0].mana_pool.blue, 1,
-        "Island should produce only 1 blue mana (no Nirkana bonus on non-Swamps)"
-    );
-    assert_eq!(
-        state.players[0].mana_pool.black, 0,
-        "No black mana bonus should be added for non-Swamp lands"
-    );
 }
